@@ -1,0 +1,22 @@
+STATUS ATUAL DO SAAS
+
+OK:
+- Dashboard SaaS
+- Clinicas SaaS
+- Usuarios SaaS
+- Financeiro SaaS
+- Criacao de clinica + admin
+- Firebase Auth real
+- Senha temporaria
+- Primeiro login base
+- Firestore SaaS
+- Logs SaaS
+
+PENDENTE:
+- Bloqueio de acesso
+- Pausa de clinica
+- Exclusao logica
+- Regras multi-tenant
+- Regras Firestore
+- Reset de senha
+- Admin criar equipe

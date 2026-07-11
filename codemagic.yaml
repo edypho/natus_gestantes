@@ -1,0 +1,63 @@
+# Pipeline de build iOS — Natus Gestantes
+# Instruções completas no GUIA_PUBLICACAO_IOS.md
+
+workflows:
+  ios-release:
+    name: iOS Release (TestFlight / App Store)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: NatusAppleKey
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.natusgestantes.app
+      vars:
+        APP_STORE_APPLE_ID: 0000000000 # Apple ID numérico do app (App Store Connect > App Information)
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Dependências
+        script: flutter pub get
+      - name: Testes
+        script: flutter test
+      - name: Configurar assinatura
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "com.natusgestantes.app" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          flutter build ipa --release \
+            --build-name=1.0.0 \
+            --build-number=$(($(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID") + 1))
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false
+
+  ios-check:
+    name: iOS Check (sem assinatura, não precisa de conta Apple)
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Dependências
+        script: flutter pub get
+      - name: Análise estática
+        script: flutter analyze --no-fatal-infos
+      - name: Testes
+        script: flutter test
+      - name: Build sem assinatura
+        script: flutter build ios --release --no-codesign
+    artifacts:
+      - /tmp/xcodebuild_logs/*.log
