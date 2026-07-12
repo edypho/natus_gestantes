@@ -8,8 +8,8 @@ import GoogleMaps
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // TODO: cole sua chave da API do Google Maps para iOS (Google Cloud Console)
-    GMSServices.provideAPIKey("COLE_SUA_CHAVE_DO_GOOGLE_MAPS_IOS_AQUI")
+    
+    GMSServices.provideAPIKey("AIzaSyDByLyeMhclxRPtHte05j8iuWrFRq-ENNc")
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
