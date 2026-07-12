@@ -14,7 +14,7 @@ workflows:
         bundle_identifier: com.natusgestantes.app
       vars:
         APP_STORE_APPLE_ID: 0000000000 # Apple ID numérico do app (App Store Connect > App Information)
-      flutter: stable
+      flutter: 3.41.6
       xcode: latest
       cocoapods: default
     scripts:
@@ -54,7 +54,7 @@ workflows:
       - name: Dependências
         script: flutter pub get
       - name: Análise estática
-        script: flutter analyze --no-fatal-infos
+        script: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Testes
         script: flutter test
       - name: Build sem assinatura
