@@ -24,6 +24,7 @@ import 'agenda/agenda_page.dart';
 import 'core/firebase_globals.dart';
 import 'financeiro/financeiro_calculos.dart' as fincalc;
 import 'gestantes/gestantes_regras.dart' as gregras;
+import 'gestantes/maternidades_regras.dart' as mregras;
 import 'kpis/kpis_calculos.dart' as kpis;
 import 'dashboard/dashboard_cards_natus.dart';
 import 'dados/natus_data_source.dart' as dados;
@@ -14260,7 +14261,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final dgDados = contarDiabetesGestacional();
 
     List<MapEntry<String, int>> top5Maternidades() {
-      final dados = contarCampoGestantes('hospitalGestante');
+      final dados = mregras.contarPacientesPorMaternidade(gestantes);
 
       final lista = dados.entries.toList();
 
