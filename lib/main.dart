@@ -2805,6 +2805,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   kpis.CrescimentoNascimentosKpis calcularCrescimentoNascimentos() =>
       kpis.calcularCrescimentoNascimentos(gestantes);
 
+  kpis.ObstetraMetricasCompletas metricasDoObstetraLogado() =>
+      kpis.calcularMetricasObstetra(gestantes, nomeEoLogada());
+
+  List<kpis.ObstetraMetricasCompletas> metricasDeTodosObstetras() =>
+      kpis.calcularMetricasTodosObstetras(gestantes, obstetras);
+
   int contarBebesNoPeriodoSelecionado() => kpis.contarBebesNoPeriodoSelecionado(
     gestantes,
     mesSelecionado,
@@ -3235,6 +3241,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required List<MapEntry<String, int>> dados,
     required IconData icone,
     required Color cor,
+    String rotulo = 'atendimentos',
   }) {
     if (dados.isEmpty) {
       return const Text('Nenhum dado encontrado.');
@@ -3263,6 +3270,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 total: segundo.value,
                 icone: icone,
                 isMobile: isMobile,
+                rotulo: rotulo,
               ),
               SizedBox(width: isMobile ? 8 : 14),
             ],
@@ -3273,6 +3281,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               total: primeiro.value,
               icone: icone,
               isMobile: isMobile,
+              rotulo: rotulo,
             ),
 
             if (terceiro != null) ...[
@@ -3283,6 +3292,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 total: terceiro.value,
                 icone: icone,
                 isMobile: isMobile,
+                rotulo: rotulo,
               ),
             ],
           ],
@@ -3327,6 +3337,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required int total,
     required IconData icone,
     required bool isMobile,
+    String rotulo = 'atendimentos',
   }) {
     final ouro = posicao == 1;
 
@@ -3419,7 +3430,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
 
                 Text(
-                  'atendimentos',
+                  rotulo,
                   style: TextStyle(fontSize: 10.5, color: NatusApp.textoSuave),
                 ),
               ],
@@ -14547,6 +14558,27 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ],
             ),
           ]),
+
+          if (widget.tipoUsuario == 'obstetra')
+            NatusBlocoMetricasObstetra(metricasDoObstetraLogado())
+          else
+            blocoDashboard('Top 5 obstetras — base total de pacientes', [
+              podiumTop5(
+                dados: () {
+                  final lista = metricasDeTodosObstetras()
+                      .map((m) => MapEntry(m.nomeObstetra, m.totalCarteira))
+                      .where((e) => e.value > 0)
+                      .toList();
+
+                  lista.sort((a, b) => b.value.compareTo(a.value));
+
+                  return lista.take(5).toList();
+                }(),
+                icone: Icons.medical_services,
+                cor: NatusApp.vinho,
+                rotulo: 'pacientes',
+              ),
+            ]),
 
           blocoDashboard('Top 5 maternidades mais atendidas', [
             podiumTop5(
