@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../shared/natus_app.dart';
+import '../shared/natus_logo.dart';
 import '../shared/natus_premium_visual.dart';
 
 class TelaLogin extends StatefulWidget {
@@ -75,16 +76,7 @@ class _TelaLoginState extends State<TelaLogin> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Image.asset(
-                  'assets/teste.png',
-                  height: 200,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Text(
-                      'Logo2 não encontrada',
-                      style: TextStyle(color: Colors.red),
-                    );
-                  },
-                ),
+                const NatusLogo(height: 180),
 
                 const SizedBox(height: 24),
 
@@ -99,9 +91,10 @@ class _TelaLoginState extends State<TelaLogin> {
 
                 const SizedBox(height: 6),
 
-                const Text(
+                Text(
                   'Cuidado, gestão e acolhimento em um só lugar',
-                  style: TextStyle(color: Colors.black54),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: NatusApp.textoSuave),
                 ),
 
                 const SizedBox(height: 24),
@@ -143,19 +136,19 @@ class _TelaLoginState extends State<TelaLogin> {
                   child: ElevatedButton(
                     onPressed: carregando ? null : fazerLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: NatusApp.vinho,
-                      foregroundColor: Colors.white,
+                      backgroundColor: NatusApp.marsala,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
                     child: carregando
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 22,
                             height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.onPrimary,
                             ),
                           )
                         : const Text('Entrar'),
@@ -169,4 +162,3 @@ class _TelaLoginState extends State<TelaLogin> {
     );
   }
 }
-

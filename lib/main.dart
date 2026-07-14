@@ -24,34 +24,17 @@ import 'agenda/agenda_page.dart';
 import 'core/firebase_globals.dart';
 import 'financeiro/financeiro_calculos.dart' as fincalc;
 import 'gestantes/gestantes_regras.dart' as gregras;
-import 'gestantes/indicadores_gestacionais.dart' as gindicadores;
-import 'exames/exame_arquivo.dart';
 import 'kpis/kpis_calculos.dart' as kpis;
 import 'dashboard/dashboard_cards_natus.dart';
 import 'dados/natus_data_source.dart' as dados;
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
-import 'navigation/menu_inferior_coracao.dart';
 
 export 'core/firebase_globals.dart';
 export 'core/usuario_tipos.dart';
 export 'auth/tela_login.dart';
 import 'core/usuario_tipos.dart';
-
-/// Agrupa os itens do menu inferior (coração central + 2 de cada lado)
-/// pra um perfil de usuário. Ver `configMenuInferior()`.
-class _ConfigMenuInferior {
-  final ItemMenuInferior central;
-  final List<ItemMenuInferior> esquerda;
-  final List<ItemMenuInferior> direita;
-
-  const _ConfigMenuInferior({
-    required this.central,
-    required this.esquerda,
-    required this.direita,
-  });
-}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1747,114 +1730,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   bool gestanteAtivaParaContracoes(Map<String, String> g) =>
       gregras.gestanteAtivaParaContracoes(g);
 
-  // ── Menu inferior mobile: coração central + 2 itens de cada lado ──
-
-  /// Chave normalizada do perfil pra fins de navegação mobile (obstetra
-  /// compartilha o mesmo menu operacional da enfermeira).
-  String _chaveMenuAtual() => tipoEhProfissionalClinica(widget.tipoUsuario)
-      ? 'enfermeira'
-      : widget.tipoUsuario;
-
-  _ConfigMenuInferior configMenuInferior() {
-    switch (_chaveMenuAtual()) {
-      case 'superAdmin':
-        return const _ConfigMenuInferior(
-          central: ItemMenuInferior('Dashboard SaaS', Icons.dashboard_rounded),
-          esquerda: [
-            ItemMenuInferior(
-              'Clínicas cadastradas SaaS',
-              Icons.apartment_rounded,
-            ),
-            ItemMenuInferior(
-              'Usuários/clientes SaaS',
-              Icons.people_alt_rounded,
-            ),
-          ],
-          direita: [
-            ItemMenuInferior(
-              'Financeiro das assinaturas SaaS',
-              Icons.payments_rounded,
-            ),
-            ItemMenuInferior(
-              'Mensalidades atrasadas SaaS',
-              Icons.warning_amber_rounded,
-            ),
-          ],
-        );
-
-      case 'admin':
-        return const _ConfigMenuInferior(
-          central: ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-          esquerda: [
-            ItemMenuInferior('Gestantes', Icons.pregnant_woman_rounded),
-            ItemMenuInferior('Agenda', Icons.event_rounded),
-          ],
-          direita: [
-            ItemMenuInferior('Financeiro', Icons.payments_rounded),
-            ItemMenuInferior('Prontuário', Icons.assignment_rounded),
-          ],
-        );
-
-      case 'enfermeira':
-        return const _ConfigMenuInferior(
-          central: ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-          esquerda: [
-            ItemMenuInferior('Gestantes', Icons.pregnant_woman_rounded),
-            ItemMenuInferior('Agenda', Icons.event_rounded),
-          ],
-          direita: [
-            ItemMenuInferior('Prontuário', Icons.assignment_rounded),
-            ItemMenuInferior('Contrações', Icons.monitor_heart_rounded),
-          ],
-        );
-
-      case 'gestante':
-        return const _ConfigMenuInferior(
-          central: ItemMenuInferior('Área da gestante', Icons.favorite_rounded),
-          esquerda: [
-            ItemMenuInferior('Agenda', Icons.event_rounded),
-            ItemMenuInferior('Exames', Icons.medical_information_rounded),
-          ],
-          direita: [
-            ItemMenuInferior('Contrações', Icons.monitor_heart_rounded),
-            ItemMenuInferior('Documentos', Icons.folder_copy_rounded),
-          ],
-        );
-
-      default:
-        return const _ConfigMenuInferior(
-          central: ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-          esquerda: [
-            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-          ],
-          direita: [
-            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
-          ],
-        );
-    }
-  }
-
-  void _irParaTela(String titulo) {
-    setState(() {
-      telaAtual = titulo;
-      gestanteSelecionada = null;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 700;
-    final configInferior = configMenuInferior();
-
-    // Gestante tem poucas telas: o coração leva direto pra "Área da
-    // gestante" e o hambúrguer flutuante continua ali pra Biblioteca
-    // (o único item que não coube nos 4 atalhos). Nos demais perfis, o
-    // menu é grande demais pra caber em 4 atalhos — então o coração
-    // abre o drawer completo, e o hambúrguer flutuante some (fica
-    // redundante).
-    final coracaoAbreMenu = _chaveMenuAtual() != 'gestante';
 
     return PremiumNatusBackground(
       child: Scaffold(
@@ -1866,63 +1744,41 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 child: menuLateral(),
               )
             : null,
-        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-        floatingActionButton: isMobile
-            ? Builder(
-                builder: (context) => NatusFabCoracao(
-                  ativo:
-                      !coracaoAbreMenu &&
-                      telaAtual == configInferior.central.titulo,
-                  onTap: coracaoAbreMenu
-                      ? () => Scaffold.of(context).openDrawer()
-                      : () => _irParaTela(configInferior.central.titulo),
-                ),
-              )
-            : null,
-        bottomNavigationBar: isMobile
-            ? NatusMenuInferiorCoracao(
-                itensEsquerda: configInferior.esquerda,
-                itensDireita: configInferior.direita,
-                telaAtual: telaAtual,
-                onSelecionarTela: _irParaTela,
-              )
-            : null,
         body: isMobile
             ? Builder(
                 builder: (context) {
                   return Stack(
                     children: [
                       telaConteudo(),
-                      if (!coracaoAbreMenu)
-                        SafeArea(
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 12, top: 8),
-                            child: Material(
-                              color: NatusApp.offWhite.withValues(alpha: 0.92),
+                      SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 12, top: 8),
+                          child: Material(
+                            color: NatusApp.offWhite.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(18),
+                            child: InkWell(
                               borderRadius: BorderRadius.circular(18),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(18),
-                                onTap: () => Scaffold.of(context).openDrawer(),
-                                child: Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(
-                                      color: NatusApp.offWhite.withValues(
-                                        alpha: 0.84,
-                                      ),
+                              onTap: () => Scaffold.of(context).openDrawer(),
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: NatusApp.offWhite.withValues(
+                                      alpha: 0.84,
                                     ),
                                   ),
-                                  child: Icon(
-                                    Icons.menu_rounded,
-                                    color: NatusApp.vinho,
-                                  ),
+                                ),
+                                child: Icon(
+                                  Icons.menu_rounded,
+                                  color: NatusApp.vinho,
                                 ),
                               ),
                             ),
                           ),
                         ),
+                      ),
                     ],
                   );
                 },
@@ -2161,6 +2017,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         itemMenu(Icons.pregnant_woman, 'Gestantes'),
       if (menusDoUsuario.contains('Calculadora de IG'))
         itemMenu(Icons.calculate, 'Calculadora de IG'),
+      if (menusDoUsuario.contains('Atendimentos'))
+        itemMenu(Icons.medical_services, 'Atendimentos'),
       if (menusDoUsuario.contains('Contrações'))
         itemMenu(Icons.timer, 'Contrações'),
       if (menusDoUsuario.contains('Financeiro'))
@@ -2700,7 +2558,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   ),
 
                   ElevatedButton.icon(
-                    onPressed: () => selecionarArquivoExame(gestante),
+                    onPressed: () => selecionarArquivoExame(idGestante),
                     icon: const Icon(Icons.add),
                     label: const Text('Enviar'),
                     style: ElevatedButton.styleFrom(
@@ -2725,51 +2583,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 : firestore.collection('exames').snapshots(),
 
             builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return blocoFicha(
-                  usuarioGestante ? 'Meus exames' : 'Exames das gestantes',
-                  [
-                    Text(
-                      'Não foi possível carregar os exames. Tente novamente '
-                      'ou verifique as permissões de acesso.',
-                      style: const TextStyle(color: Colors.red),
-                    ),
-                  ],
-                );
-              }
-
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              final examesDaColecao = snapshot.data!.docs.map((doc) {
-                return ExameArquivo.fromExame(
-                  doc.id,
-                  doc.data() as Map<String, dynamic>,
-                );
-              });
-              final examesDosDocumentos = documentos
-                  .where(ExameArquivo.documentoEhExame)
-                  .map(ExameArquivo.fromDocumento);
-
-              var exames = removerExamesDuplicados([
-                ...examesDaColecao,
-                ...examesDosDocumentos,
-              ]);
-
-              if (usuarioGestante) {
-                exames = exames.where((exame) {
-                  return exame.pertenceA(gestante);
-                }).toList();
-              } else if (widget.tipoUsuario == 'obstetra') {
-                exames = exames.where((exame) {
-                  return gestantes.any(exame.pertenceA);
-                }).toList();
-              }
-
-              exames.sort((a, b) {
-                return b.dataOrdenacao.compareTo(a.dataOrdenacao);
-              });
+              final exames = snapshot.data!.docs;
 
               if (exames.isEmpty) {
                 return blocoFicha(
@@ -2778,10 +2596,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 );
               }
 
-              final examesAgrupados = <String, List<ExameArquivo>>{};
+              Map<String, List<QueryDocumentSnapshot>> examesAgrupados = {};
 
               for (var exame in exames) {
-                final nomeGestante = exame.nomeGestanteResolvido(gestantes);
+                final dados = exame.data() as Map<String, dynamic>;
+
+                final nomeGestante =
+                    dados['nomeGestante'] ?? 'Gestante não identificada';
 
                 examesAgrupados.putIfAbsent(nomeGestante, () => []);
 
@@ -2810,7 +2631,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             ),
                           ),
 
-                        ...grupo.value.map((exame) {
+                        ...grupo.value.map((doc) {
+                          final dados = doc.data() as Map<String, dynamic>;
+
+                          final nomeArquivo = dados['nomeArquivo'] ?? 'Exame';
+
+                          final url = dados['url'] ?? '';
+
+                          final criadoEm = dados['criadoEm'] ?? '';
+
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(14),
@@ -2839,7 +2668,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        exame.nomeArquivo,
+                                        nomeArquivo,
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
@@ -2848,13 +2677,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                         ),
                                       ),
 
-                                      Text(
-                                        'Enviado em: ${exame.dataExibicao}',
-                                        style: TextStyle(
-                                          color: NatusApp.textoSuave,
-                                          fontSize: 12,
+                                      if (criadoEm.toString().isNotEmpty)
+                                        Text(
+                                          'Enviado em: ${criadoEm.toString().substring(0, 10)}',
+                                          style: TextStyle(
+                                            color: NatusApp.textoSuave,
+                                            fontSize: 12,
+                                          ),
                                         ),
-                                      ),
                                     ],
                                   ),
                                 ),
@@ -2865,9 +2695,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                     Icons.open_in_new,
                                     color: NatusApp.vinho,
                                   ),
-                                  onPressed: exame.url.isEmpty
-                                      ? null
-                                      : () => abrirArquivo(exame.url),
+                                  onPressed: () => abrirArquivo(url),
                                 ),
 
                                 if (!usuarioGestante)
@@ -2878,7 +2706,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                       color: Colors.red,
                                     ),
                                     onPressed: () async {
-                                      await excluirExame(exame);
+                                      await excluirExame(doc.id, url);
                                     },
                                   ),
                               ],
@@ -2897,25 +2725,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Future<void> excluirExame(ExameArquivo exame) async {
+  Future<void> excluirExame(String idExame, String urlArquivo) async {
     try {
-      if (exame.url.isNotEmpty) {
-        final ref = storage.refFromURL(exame.url);
+      if (urlArquivo.isNotEmpty) {
+        final ref = storage.refFromURL(urlArquivo);
         await ref.delete();
       }
 
-      final colecao = exame.origem == OrigemExameArquivo.exames
-          ? 'exames'
-          : 'documentos';
-      if (exame.id.isNotEmpty) {
-        await firestore.collection(colecao).doc(exame.id).delete();
-      }
+      await firestore.collection('exames').doc(idExame).delete();
 
-      setState(() {
-        if (exame.origem == OrigemExameArquivo.documentos) {
-          documentos.removeWhere((documento) => documento['id'] == exame.id);
-        }
-      });
+      setState(() {});
 
       mostrarMensagem('Exame excluído com sucesso.');
     } catch (e) {
@@ -2923,9 +2742,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
-    final idGestante = (gestante['id'] ?? '').trim();
-    if (idGestante.isEmpty) {
+  Future<void> selecionarArquivoExame(String? idGestante) async {
+    if (idGestante == null) {
       mostrarMensagem('Erro: gestante não identificada.');
       return;
     }
@@ -2955,12 +2773,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       await firestore.collection('exames').add({
         'idGestante': idGestante,
-        'uidGestante': gestante['uidGestante'] ?? '',
-        'nomeGestante': gestante['nomeGestante'] ?? '',
         'nomeArquivo': nomeArquivo,
         'url': url,
         'criadoEm': DateTime.now().toIso8601String(),
-        'enviadoPorUid': FirebaseAuth.instance.currentUser?.uid ?? '',
       });
 
       mostrarMensagem('Exame enviado com sucesso!');
@@ -2989,12 +2804,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   kpis.CrescimentoNascimentosKpis calcularCrescimentoNascimentos() =>
       kpis.calcularCrescimentoNascimentos(gestantes);
-
-  kpis.ObstetraMetricasCompletas metricasDoObstetraLogado() =>
-      kpis.calcularMetricasObstetra(gestantes, nomeEoLogada());
-
-  List<kpis.ObstetraMetricasCompletas> metricasDeTodosObstetras() =>
-      kpis.calcularMetricasTodosObstetras(gestantes, obstetras);
 
   int contarBebesNoPeriodoSelecionado() => kpis.contarBebesNoPeriodoSelecionado(
     gestantes,
@@ -3211,11 +3020,37 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Map<String, int> contarRiscoGestacional() {
-    return gindicadores.contarRiscosGestacionais(gestantes);
+    final dados = {'Habitual': 0, 'Intermediário': 0, 'Alto Risco': 0};
+
+    for (var g in gregras.gestantesAtivas(gestantes)) {
+      final risco = (g['riscoGestacional'] ?? '').trim().toLowerCase();
+
+      if (risco.contains('alto')) {
+        dados['Alto Risco'] = dados['Alto Risco']! + 1;
+      } else if (risco.contains('inter')) {
+        dados['Intermediário'] = dados['Intermediário']! + 1;
+      } else if (risco.contains('habit')) {
+        dados['Habitual'] = dados['Habitual']! + 1;
+      }
+    }
+
+    return dados;
   }
 
   Map<String, int> contarDiabetesGestacional() {
-    return gindicadores.contarDiabetesGestacionais(gestantes);
+    final dados = {'Sim': 0, 'Não': 0};
+
+    for (var g in gregras.gestantesAtivas(gestantes)) {
+      final dg = (g['diabetesGestacional'] ?? '').trim().toLowerCase();
+
+      if (dg.startsWith('sim')) {
+        dados['Sim'] = dados['Sim']! + 1;
+      } else if (dg.startsWith('não') || dg.startsWith('nao')) {
+        dados['Não'] = dados['Não']! + 1;
+      }
+    }
+
+    return dados;
   }
 
   List<Map<String, String>> materiaisComEstoqueBaixo() {
@@ -3400,7 +3235,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required List<MapEntry<String, int>> dados,
     required IconData icone,
     required Color cor,
-    String rotulo = 'atendimentos',
   }) {
     if (dados.isEmpty) {
       return const Text('Nenhum dado encontrado.');
@@ -3429,7 +3263,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 total: segundo.value,
                 icone: icone,
                 isMobile: isMobile,
-                rotulo: rotulo,
               ),
               SizedBox(width: isMobile ? 8 : 14),
             ],
@@ -3440,7 +3273,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               total: primeiro.value,
               icone: icone,
               isMobile: isMobile,
-              rotulo: rotulo,
             ),
 
             if (terceiro != null) ...[
@@ -3451,7 +3283,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 total: terceiro.value,
                 icone: icone,
                 isMobile: isMobile,
-                rotulo: rotulo,
               ),
             ],
           ],
@@ -3496,7 +3327,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required int total,
     required IconData icone,
     required bool isMobile,
-    String rotulo = 'atendimentos',
   }) {
     final ouro = posicao == 1;
 
@@ -3589,7 +3419,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
 
                 Text(
-                  rotulo,
+                  'atendimentos',
                   style: TextStyle(fontSize: 10.5, color: NatusApp.textoSuave),
                 ),
               ],
@@ -6022,6 +5852,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             linhaInfo('Hospital', g['hospitalGestante']),
             linhaInfo('Obstetra', g['obstetraGestante']),
             linhaInfo('Convênio', g['convenioGestante']),
+            linhaInfo('Risco gestacional', g['riscoGestacional']),
+            linhaInfo('Diabetes gestacional', g['diabetesGestacional']),
           ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Gestante')),
 
           blocoFicha('Pai', [
@@ -6140,17 +5972,23 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           blocoFicha('Documentos da gestante', [
             ...documentos
-                .where(
-                  (d) =>
-                      d['gestante'] == (g['nomeGestante'] ?? '') &&
-                      !ExameArquivo.documentoEhExame(d),
-                )
+                .where((d) => d['gestante'] == (g['nomeGestante'] ?? ''))
                 .map((d) {
                   return linhaInfo(d['tipo'] ?? 'Documento', d['nome'] ?? '');
                 }),
           ]),
 
-          blocoExamesFichaGestante(g),
+          blocoFicha('Exames', [
+            ...documentos
+                .where(
+                  (d) =>
+                      d['gestante'] == (g['nomeGestante'] ?? '') &&
+                      d['tipo'] == 'Exame',
+                )
+                .map((d) {
+                  return cardDocumentoProntuario(d);
+                }),
+          ]),
 
           if (podeVerFinanceiroGestante)
             blocoFicha('Contratos', [
@@ -6734,70 +6572,68 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  String chaveFrutaDaSemana(int semanas) {
-    final semana = semanas.clamp(4, 42).toInt();
-
-    const frutasPorSemana = <int, String>{
-      4: 'mirtilo',
-      5: 'framboesa',
-      6: 'framboesa',
-      7: 'uva',
-      8: 'uva',
-      9: 'morango',
-      10: 'morango',
-      11: 'limao',
-      12: 'limao',
-      13: 'pessego',
-      14: 'pessego',
-      15: 'abacate',
-      16: 'abacate',
-      17: 'pera',
-      18: 'manga',
-      19: 'manga',
-      20: 'manga',
-      21: 'milho',
-      22: 'milho',
-      23: 'berinjela',
-      24: 'berinjela',
-      25: 'couve flor',
-      26: 'couve flor',
-      27: 'repolho',
-      28: 'repolho',
-      29: 'abobora',
-      30: 'abobora',
-      31: 'coco',
-      32: 'coco',
-      33: 'abacaxi',
-      34: 'abacaxi',
-      35: 'melao',
-      36: 'melao',
-      37: 'melancia',
-      38: 'melancia',
-      39: 'melancia',
-      40: 'melancia',
-      41: 'melancia',
-      42: 'melancia',
-    };
-
-    return frutasPorSemana[semana] ?? 'morango';
-  }
-
   String frutaDaSemana(int semanas) {
-    const nomesExibicao = <String, String>{
-      'limao': 'limão',
-      'pessego': 'pêssego',
-      'couve flor': 'couve-flor',
-      'abobora': 'abóbora',
-      'melao': 'melão',
-    };
+    if (semanas <= 4) return 'grão de papoula';
+    if (semanas <= 6) return 'lentilha';
+    if (semanas <= 8) return 'uva';
+    if (semanas <= 10) return 'morango';
+    if (semanas <= 12) return 'limão';
+    if (semanas <= 16) return 'abacate';
+    if (semanas <= 20) return 'manga';
+    if (semanas <= 24) return 'milho';
+    if (semanas <= 28) return 'berinjela';
+    if (semanas <= 32) return 'coco';
+    if (semanas <= 36) return 'melão';
 
-    final chave = chaveFrutaDaSemana(semanas);
-    return nomesExibicao[chave] ?? chave;
+    return 'melancia';
   }
 
   String imagemFrutaDaSemana(int semanas) {
-    final chave = chaveFrutaDaSemana(semanas);
-    return 'assets/frutas/$chave.png';
+    final int semana = semanas.clamp(4, 42).toInt();
+
+    final imagens = <int, String>{
+      4: 'assets/frutas/mirtilo.png',
+      5: 'assets/frutas/framboesa.png',
+      6: 'assets/frutas/framboesa.png',
+      7: 'assets/frutas/uva.png',
+      8: 'assets/frutas/uva.png',
+      9: 'assets/frutas/morango.png',
+      10: 'assets/frutas/morango.png',
+      11: 'assets/frutas/limao.png',
+      12: 'assets/frutas/limao.png',
+      13: 'assets/frutas/pessego.png',
+      14: 'assets/frutas/pessego.png',
+      15: 'assets/frutas/abacate.png',
+      16: 'assets/frutas/abacate.png',
+      17: 'assets/frutas/pera.png',
+      18: 'assets/frutas/manga.png',
+      19: 'assets/frutas/manga.png',
+      20: 'assets/frutas/manga.png',
+      21: 'assets/frutas/milho.png',
+      22: 'assets/frutas/milho.png',
+      23: 'assets/frutas/berinjela.png',
+      24: 'assets/frutas/berinjela.png',
+      25: 'assets/frutas/couve flor.png',
+      26: 'assets/frutas/couve flor.png',
+      27: 'assets/frutas/repolho.png',
+      28: 'assets/frutas/repolho.png',
+      29: 'assets/frutas/abobora.png',
+      30: 'assets/frutas/abobora.png',
+      31: 'assets/frutas/coco.png',
+      32: 'assets/frutas/coco.png',
+      33: 'assets/frutas/abacaxi.png',
+      34: 'assets/frutas/abacaxi.png',
+      35: 'assets/frutas/melao.png',
+      36: 'assets/frutas/melao.png',
+      37: 'assets/frutas/melancia.png',
+      38: 'assets/frutas/melancia.png',
+      39: 'assets/frutas/melancia.png',
+      40: 'assets/frutas/melancia.png',
+      41: 'assets/frutas/melancia.png',
+      42: 'assets/frutas/melancia.png',
+    };
+
+    return imagens[semana] ?? 'assets/frutas/morango.png';
   }
 
   Widget imagemGestacional({required int semanas, double tamanho = 150}) {
@@ -6821,14 +6657,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   String artigoFruta(String fruta) {
     const femininas = {
+      'lentilha',
       'framboesa',
-      'uva',
-      'pera',
       'manga',
-      'berinjela',
-      'couve-flor',
-      'abóbora',
       'melancia',
+      'uva',
+      'berinjela',
     };
     return femininas.contains(fruta.toLowerCase().trim()) ? 'uma' : 'um';
   }
@@ -7680,7 +7514,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     String gestanteSelecionadaNome = '';
-    Map<String, String> gestanteSelecionadaDados = {};
 
     if (widget.tipoUsuario == 'gestante') {
       final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -7688,7 +7521,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         (g) => g['uidGestante'] == uidLogado,
         orElse: () => {},
       );
-      gestanteSelecionadaDados = gestanteLogada;
       gestanteSelecionadaNome = gestanteLogada['nomeGestante'] ?? '';
     } else {
       if (documentoGestanteSelecionada.isEmpty ||
@@ -7709,7 +7541,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
-      gestanteSelecionadaDados = gestanteSelecionada;
       gestanteSelecionadaNome = documentoGestanteSelecionada;
     }
 
@@ -7727,40 +7558,25 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
-    final agora = DateTime.now();
-    final novoDocumento = <String, String>{
+    final novoDocumento = {
       'nome': arquivoSelecionado!.name,
       'tipo': documentoTipoSelecionado,
       'gestante': gestanteSelecionadaNome,
-      'idGestante': gestanteSelecionadaDados['id'] ?? '',
-      'uidGestante': gestanteSelecionadaDados['uidGestante'] ?? '',
-      'nomeGestante': gestanteSelecionadaNome,
       'arquivoNome': arquivoSelecionado!.name,
       'arquivoUrl': urlArquivo,
-      'data': formatarDataHora(agora),
-      'criadoEm': agora.toIso8601String(),
-      'enviadoPorUid': FirebaseAuth.instance.currentUser?.uid ?? '',
+      'data': formatarDataHora(DateTime.now()),
     };
 
-    try {
-      final docRef = await firestore
-          .collection('documentos')
-          .add(novoDocumento);
-      novoDocumento['id'] = docRef.id;
-      if (!mounted) return;
+    setState(() {
+      documentos.add(novoDocumento);
+      documentoTipoSelecionado = 'Exame';
+      documentoGestanteSelecionada = 'Selecione';
+      arquivoSelecionado = null;
+    });
 
-      setState(() {
-        documentos.add(novoDocumento);
-        documentoTipoSelecionado = 'Exame';
-        documentoGestanteSelecionada = 'Selecione';
-        arquivoSelecionado = null;
-      });
+    await firestore.collection('documentos').add(novoDocumento);
 
-      mostrarMensagem('Documento salvo com arquivo!');
-    } catch (e) {
-      if (!mounted) return;
-      mostrarMensagem('Erro ao salvar os dados do documento: $e');
-    }
+    mostrarMensagem('Documento salvo com arquivo!');
   }
 
   Widget listaDocumentos() {
@@ -7904,78 +7720,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
         );
       }).toList(),
-    );
-  }
-
-  Widget blocoExamesFichaGestante(Map<String, String> gestante) {
-    final idGestante = (gestante['id'] ?? '').trim();
-    final stream = idGestante.isEmpty
-        ? firestore.collection('exames').snapshots()
-        : firestore
-              .collection('exames')
-              .where('idGestante', isEqualTo: idGestante)
-              .snapshots();
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: stream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return blocoFicha('Exames', [
-            const Text('Não foi possível carregar os exames desta gestante.'),
-          ]);
-        }
-
-        if (!snapshot.hasData) {
-          return blocoFicha('Exames', [
-            const Center(child: CircularProgressIndicator()),
-          ]);
-        }
-
-        final examesAtuais = snapshot.data!.docs.map((doc) {
-          return ExameArquivo.fromExame(
-            doc.id,
-            doc.data() as Map<String, dynamic>,
-          );
-        });
-        final examesLegados = documentos
-            .where(ExameArquivo.documentoEhExame)
-            .map(ExameArquivo.fromDocumento);
-        final exames =
-            removerExamesDuplicados([
-                ...examesAtuais,
-                ...examesLegados,
-              ]).where((exame) => exame.pertenceA(gestante)).toList()
-              ..sort((a, b) => b.dataOrdenacao.compareTo(a.dataOrdenacao));
-
-        return blocoFicha('Exames', [
-          if (exames.isEmpty)
-            const Text('Nenhum exame enviado para esta gestante.')
-          else
-            ...exames.map(cardExameProntuario),
-        ]);
-      },
-    );
-  }
-
-  Widget cardExameProntuario(ExameArquivo exame) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: NatusApp.rose,
-          child: Icon(Icons.biotech_rounded, color: NatusApp.vinho),
-        ),
-        title: Text(
-          exame.nomeArquivo,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text('Enviado em: ${exame.dataExibicao}'),
-        trailing: IconButton(
-          tooltip: 'Abrir exame',
-          icon: Icon(Icons.open_in_new, color: NatusApp.vinho),
-          onPressed: exame.url.isEmpty ? null : () => abrirDocumento(exame.url),
-        ),
-      ),
     );
   }
 
@@ -8801,10 +8545,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         Icons.medical_information,
                         'Plano de cuidado',
                       ),
-                      cardSessaoProntuario(
-                        Icons.warning_amber_rounded,
-                        'Risco gestacional',
-                      ),
                     ],
                   ),
 
@@ -8821,11 +8561,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                   if (secaoProntuarioSelecionada == 'Plano de cuidado')
                     blocoPlanoCuidadoProntuario(gestanteProntuarioSelecionada!),
-
-                  if (secaoProntuarioSelecionada == 'Risco gestacional')
-                    blocoRiscoGestacionalProntuario(
-                      gestanteProntuarioSelecionada!,
-                    ),
                   const SizedBox(height: 24),
 
                   timelineProntuario(gestanteProntuarioSelecionada!),
@@ -8914,213 +8649,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ),
       ),
     );
-  }
-
-  Widget blocoRiscoGestacionalProntuario(Map<String, String> gestante) {
-    final risco = gindicadores.normalizarRiscoGestacional(
-      gestante['riscoGestacional'],
-    );
-    final diabetes = gindicadores.normalizarDiabetesGestacional(
-      gestante['diabetesGestacional'],
-    );
-    final podeEditar =
-        usuarioEhAdmin() || tipoEhProfissionalClinica(widget.tipoUsuario);
-
-    return blocoFicha('Classificação de risco gestacional', [
-      Text(
-        'Registre a classificação vigente no pré-natal. Cada atualização '
-        'fica salva no histórico clínico da gestante.',
-        style: TextStyle(color: NatusApp.textoSuave, height: 1.4),
-      ),
-      const SizedBox(height: 16),
-      infoCompactaProntuario('Risco gestacional atual', risco),
-      infoCompactaProntuario('Diabetes gestacional', diabetes),
-      if (podeEditar) ...[
-        const SizedBox(height: 8),
-        ElevatedButton.icon(
-          onPressed: () => abrirClassificacaoRiscoProntuario(gestante),
-          icon: const Icon(Icons.edit_note_rounded),
-          label: const Text('Atualizar classificação'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: NatusApp.vinho,
-            foregroundColor: NatusApp.escuro
-                ? NatusApp.fundo
-                : NatusApp.offWhite,
-          ),
-        ),
-      ],
-    ]);
-  }
-
-  Future<void> abrirClassificacaoRiscoProntuario(
-    Map<String, String> gestante,
-  ) async {
-    final idGestante = (gestante['id'] ?? '').trim();
-    if (idGestante.isEmpty) {
-      mostrarMensagem('Erro: gestante sem ID.');
-      return;
-    }
-
-    var riscoSelecionado = gindicadores.normalizarRiscoGestacional(
-      gestante['riscoGestacional'],
-    );
-    var diabetesSelecionado = gindicadores.normalizarDiabetesGestacional(
-      gestante['diabetesGestacional'],
-    );
-    final observacoesController = TextEditingController();
-
-    final confirmou = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Atualizar classificação clínica'),
-              content: SizedBox(
-                width: 480,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      DropdownButtonFormField<String>(
-                        initialValue: riscoSelecionado,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Classificação de risco gestacional',
-                        ),
-                        items: gindicadores.opcoesRiscoGestacional
-                            .map(
-                              (opcao) => DropdownMenuItem(
-                                value: opcao,
-                                child: Text(opcao),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (valor) {
-                          if (valor != null) {
-                            setDialogState(() => riscoSelecionado = valor);
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        initialValue: diabetesSelecionado,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Diabetes gestacional',
-                        ),
-                        items: gindicadores.opcoesDiabetesGestacional
-                            .map(
-                              (opcao) => DropdownMenuItem(
-                                value: opcao,
-                                child: Text(opcao),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (valor) {
-                          if (valor != null) {
-                            setDialogState(() => diabetesSelecionado = valor);
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: observacoesController,
-                        minLines: 3,
-                        maxLines: 5,
-                        decoration: const InputDecoration(
-                          labelText: 'Observações clínicas',
-                          hintText:
-                              'Motivo da classificação, condutas ou alertas',
-                          alignLabelWithHint: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancelar'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  icon: const Icon(Icons.save_rounded),
-                  label: const Text('Salvar no prontuário'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    final observacoes = observacoesController.text.trim();
-    observacoesController.dispose();
-    if (confirmou != true) return;
-
-    final riscoAnterior = gindicadores.normalizarRiscoGestacional(
-      gestante['riscoGestacional'],
-    );
-    final diabetesAnterior = gindicadores.normalizarDiabetesGestacional(
-      gestante['diabetesGestacional'],
-    );
-
-    if (riscoSelecionado == riscoAnterior &&
-        diabetesSelecionado == diabetesAnterior &&
-        observacoes.isEmpty) {
-      mostrarMensagem('Nenhuma alteração clínica foi informada.');
-      return;
-    }
-
-    final agora = DateTime.now();
-    final profissional = usuarioEhAdmin()
-        ? eoResponsavelProntuario
-        : nomeEoLogada();
-
-    try {
-      final batch = firestore.batch();
-      final gestanteRef = firestore.collection('gestantes').doc(idGestante);
-      final historicoRef = firestore
-          .collection('prontuario_atendimentos')
-          .doc();
-
-      batch.update(gestanteRef, {
-        'riscoGestacional': riscoSelecionado,
-        'diabetesGestacional': diabetesSelecionado,
-        'classificacaoRiscoAtualizadaEm': agora.toIso8601String(),
-      });
-      batch.set(historicoRef, {
-        'idGestante': idGestante,
-        'nomeGestante': gestante['nomeGestante'] ?? '',
-        'tipo': 'Classificação de risco gestacional',
-        'riscoGestacionalAnterior': riscoAnterior,
-        'riscoGestacional': riscoSelecionado,
-        'diabetesGestacionalAnterior': diabetesAnterior,
-        'diabetesGestacional': diabetesSelecionado,
-        'observacoes': observacoes,
-        'eo': profissional,
-        'profissionalUid': FirebaseAuth.instance.currentUser?.uid ?? '',
-        'data': formatarDataHora(agora),
-        'criadoEm': agora.toIso8601String(),
-      });
-
-      await batch.commit();
-      if (!mounted) return;
-
-      setState(() {
-        gestante['riscoGestacional'] = riscoSelecionado;
-        gestante['diabetesGestacional'] = diabetesSelecionado;
-        gestante['classificacaoRiscoAtualizadaEm'] = agora.toIso8601String();
-        gestanteProntuarioSelecionada = gestante;
-      });
-
-      mostrarMensagem('Classificação clínica atualizada no prontuário.');
-    } catch (e) {
-      if (!mounted) return;
-      mostrarMensagem('Erro ao atualizar classificação clínica: $e');
-    }
   }
 
   Future<void> salvarAnamneseProntuario(Map<String, String> g) async {
@@ -9661,7 +9189,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           'eo',
                           'data',
                           'criadoEm',
-                          'profissionalUid',
                         ].contains(e.key);
                       })
                       .map((e) {
@@ -9679,7 +9206,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               ),
                               children: [
                                 TextSpan(
-                                  text: '${rotuloCampoProntuario(e.key)}: ',
+                                  text: '${e.key}: ',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: NatusApp.vinho,
@@ -9698,23 +9225,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ]);
       },
     );
-  }
-
-  String rotuloCampoProntuario(String campo) {
-    switch (campo) {
-      case 'riscoGestacionalAnterior':
-        return 'Risco anterior';
-      case 'riscoGestacional':
-        return 'Risco atualizado';
-      case 'diabetesGestacionalAnterior':
-        return 'Diabetes gestacional anterior';
-      case 'diabetesGestacional':
-        return 'Diabetes gestacional atual';
-      case 'observacoes':
-        return 'Observações clínicas';
-      default:
-        return campo;
-    }
   }
 
   Widget blocoEvolucaoProntuario(Map<String, String> g) {
@@ -12165,6 +11675,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       text: gestante['convenioGestante'] ?? '',
     );
 
+    const opcoesRisco = [
+      'Não informado',
+      'Habitual',
+      'Intermediário',
+      'Alto Risco',
+    ];
+    const opcoesDiabetes = ['Não informado', 'Sim', 'Não'];
+
+    String riscoTemp = (gestante['riscoGestacional'] ?? '').trim();
+    if (!opcoesRisco.contains(riscoTemp)) riscoTemp = 'Não informado';
+
+    String diabetesTemp = (gestante['diabetesGestacional'] ?? '').trim();
+    if (!opcoesDiabetes.contains(diabetesTemp)) diabetesTemp = 'Não informado';
+
     Widget campoPopup(
       TextEditingController controller,
       String label, {
@@ -12248,6 +11772,46 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   const SizedBox(height: 16),
 
                   campoPopup(convenioTemp, 'Convênio'),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: 360,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: riscoTemp,
+                      decoration: const InputDecoration(
+                        labelText: 'Risco gestacional (pré-natal)',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        border: OutlineInputBorder(),
+                      ),
+                      items: opcoesRisco
+                          .map(
+                            (o) => DropdownMenuItem(value: o, child: Text(o)),
+                          )
+                          .toList(),
+                      onChanged: (v) => riscoTemp = v ?? 'Não informado',
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: 360,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: diabetesTemp,
+                      decoration: const InputDecoration(
+                        labelText: 'Diabetes gestacional',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        border: OutlineInputBorder(),
+                      ),
+                      items: opcoesDiabetes
+                          .map(
+                            (o) => DropdownMenuItem(value: o, child: Text(o)),
+                          )
+                          .toList(),
+                      onChanged: (v) => diabetesTemp = v ?? 'Não informado',
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -12273,6 +11837,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   hospitalTemp.text.trim(),
                   obstetraTemp.text.trim(),
                   convenioTemp.text.trim(),
+                  riscoTemp,
+                  diabetesTemp,
                 );
 
                 Navigator.of(context).pop();
@@ -12305,6 +11871,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         {'campo': 'hospitalGestante', 'label': 'Maternidade / Hospital'},
         {'campo': 'obstetraGestante', 'label': 'Obstetra'},
         {'campo': 'convenioGestante', 'label': 'Convênio'},
+        {
+          'campo': 'riscoGestacional',
+          'label': 'Risco gestacional (Habitual/Intermediário/Alto Risco)',
+        },
+        {
+          'campo': 'diabetesGestacional',
+          'label': 'Diabetes gestacional (Sim/Não)',
+        },
       ],
       'Pai': [
         {'campo': 'nomePai', 'label': 'Nome do pai'},
@@ -12738,6 +12312,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String hospital,
     String obstetra,
     String convenio,
+    String riscoGestacional,
+    String diabetesGestacional,
   ) async {
     final id = gestante['id'];
 
@@ -12758,6 +12334,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'hospitalGestante': hospital,
         'obstetraGestante': obstetra,
         'convenioGestante': convenio,
+        'riscoGestacional': riscoGestacional,
+        'diabetesGestacional': diabetesGestacional,
       };
 
       await firestore.collection('gestantes').doc(id).update(dadosAtualizados);
@@ -14088,7 +13666,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final temCobrancaAsaas = pendentes.any(parcelaTemCobrancaAsaas);
 
     String descontoSelecionado = '0%';
-    DateTime dataQuitacaoSelecionada = DateTime.now();
 
     final confirmou = await showDialog<bool>(
       context: context,
@@ -14153,45 +13730,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           descontoSelecionado = v ?? '0%';
                         });
                       },
-                    ),
-                    const SizedBox(height: 16),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () async {
-                        final escolhida = await showDatePicker(
-                          context: context,
-                          initialDate: dataQuitacaoSelecionada,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime.now(),
-                          helpText: 'Data em que o pagamento foi recebido',
-                        );
-
-                        if (escolhida != null) {
-                          setDialogState(() {
-                            dataQuitacaoSelecionada = escolhida;
-                          });
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Data real do pagamento',
-                          suffixIcon: Icon(Icons.calendar_today, size: 18),
-                        ),
-                        child: Text(
-                          '${dataQuitacaoSelecionada.day.toString().padLeft(2, '0')}/'
-                          '${dataQuitacaoSelecionada.month.toString().padLeft(2, '0')}/'
-                          '${dataQuitacaoSelecionada.year}',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Isso define em qual mês o valor aparece como '
-                      'recebido nos relatórios financeiros.',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: NatusApp.textoSuave,
-                      ),
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -14267,7 +13805,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       nomeGestante,
       percentual,
       fincalc.valorQuitacaoComDesconto(total, percentual),
-      dataQuitacaoSelecionada,
     );
   }
 
@@ -14276,9 +13813,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String nomeGestante,
     double percentualDesconto,
     double valorFinal,
-    DateTime dataQuitacao,
   ) async {
-    final agora = formatarDataHora(dataQuitacao);
+    final agora = formatarDataHora(DateTime.now());
     final descontoTexto = '${percentualDesconto.toStringAsFixed(0)}%';
 
     final batch = firestore.batch();
@@ -14901,9 +14437,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             children: [
               blocoDashboard('Crescimento anual', [
                 Text(
-                  'Comparação automática por ano. O app usa os anos '
-                  'disponíveis no banco e atualiza sozinho quando virar '
-                  'o ano.',
+                  ' ',
                   style: TextStyle(fontSize: 12.5, color: NatusApp.textoSuave),
                 ),
 
@@ -15021,27 +14555,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               cor: NatusApp.marsalaSuave,
             ),
           ]),
-
-          if (widget.tipoUsuario == 'obstetra')
-            NatusBlocoMetricasObstetra(metricasDoObstetraLogado())
-          else
-            blocoDashboard('Top 5 obstetras — partos atendidos', [
-              podiumTop5(
-                dados: () {
-                  final lista = metricasDeTodosObstetras()
-                      .map((m) => MapEntry(m.nomeObstetra, m.jaPariu))
-                      .where((e) => e.value > 0)
-                      .toList();
-
-                  lista.sort((a, b) => b.value.compareTo(a.value));
-
-                  return lista.take(5).toList();
-                }(),
-                icone: Icons.medical_services,
-                cor: NatusApp.vinho,
-                rotulo: 'partos',
-              ),
-            ]),
 
           if (usuarioEhAdmin())
             blocoDashboard(

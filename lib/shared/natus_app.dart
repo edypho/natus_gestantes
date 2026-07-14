@@ -199,8 +199,9 @@ class NatusTema {
     NatusPaleta.modoEscuro,
   ];
 
-  static final ValueNotifier<NatusPaleta> atual =
-      ValueNotifier<NatusPaleta>(NatusPaleta.marsalaNatus);
+  static final ValueNotifier<NatusPaleta> atual = ValueNotifier<NatusPaleta>(
+    NatusPaleta.marsalaNatus,
+  );
 
   static NatusPaleta get paleta => atual.value;
 
@@ -223,6 +224,11 @@ class NatusApp extends StatelessWidget {
 
   final Widget home;
 
+  // Conteudo sobre as superficies profundas da marca. Estas cores sao
+  // estaveis entre paletas para preservar o contraste da logo e do menu.
+  static const Color sobreMarca = Color(0xFFFFF8F2);
+  static const Color sobreMarcaSuave = Color(0xFFEAD9B0);
+
   // ── Tokens dinâmicos (apontam para a paleta ativa) ───────────────
   static Color get marsala => NatusTema.paleta.marsala;
   static Color get marsalaSuave => NatusTema.paleta.marsalaSuave;
@@ -244,6 +250,16 @@ class NatusApp extends StatelessWidget {
   static Color get menuTopo => NatusTema.paleta.menuTopo;
   static Color get menuMeio => NatusTema.paleta.menuMeio;
   static Color get menuBase => NatusTema.paleta.menuBase;
+
+  // Estados possuem significado proprio e nao reutilizam cores decorativas.
+  static Color get sucesso =>
+      escuro ? const Color(0xFFA8BE99) : const Color(0xFF58734F);
+  static Color get alerta =>
+      escuro ? const Color(0xFFE7B86A) : const Color(0xFFA86724);
+  static Color get erro =>
+      escuro ? const Color(0xFFE08A84) : const Color(0xFFB3413B);
+  static Color get informacao =>
+      escuro ? const Color(0xFF8DB9CA) : const Color(0xFF35697A);
 
   /// Se o tema ativo é escuro. Útil em telas fora de [temaDe] que
   /// precisam inverter cor de texto/ícone sobre superfícies coloridas
@@ -280,19 +296,33 @@ class NatusApp extends StatelessWidget {
       // ── Tipografia: títulos com presença, corpo legível ────────
       textTheme: TextTheme(
         displaySmall: TextStyle(
-            fontWeight: FontWeight.w800, color: p.vinho, letterSpacing: -0.8),
+          fontWeight: FontWeight.w800,
+          color: p.vinho,
+          letterSpacing: -0.8,
+        ),
         headlineMedium: TextStyle(
-            fontWeight: FontWeight.w800, color: p.vinho, letterSpacing: -0.5),
+          fontWeight: FontWeight.w800,
+          color: p.vinho,
+          letterSpacing: -0.5,
+        ),
         headlineSmall: TextStyle(
-            fontWeight: FontWeight.w700, color: p.vinho, letterSpacing: -0.3),
+          fontWeight: FontWeight.w700,
+          color: p.vinho,
+          letterSpacing: -0.3,
+        ),
         titleLarge: TextStyle(
-            fontWeight: FontWeight.w700, color: p.texto, letterSpacing: -0.2),
+          fontWeight: FontWeight.w700,
+          color: p.texto,
+          letterSpacing: -0.2,
+        ),
         titleMedium: TextStyle(fontWeight: FontWeight.w600, color: p.texto),
         bodyLarge: TextStyle(color: p.texto, height: 1.45),
         bodyMedium: TextStyle(color: p.texto, height: 1.45),
         bodySmall: TextStyle(color: p.textoSuave, height: 1.4),
-        labelLarge:
-            const TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.1),
+        labelLarge: const TextStyle(
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.1,
+        ),
       ),
 
       appBarTheme: AppBarTheme(
@@ -326,8 +356,7 @@ class NatusApp extends StatelessWidget {
       dialogTheme: DialogThemeData(
         backgroundColor: p.offWhite,
         surfaceTintColor: Colors.transparent,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
         titleTextStyle: TextStyle(
           color: p.vinho,
           fontSize: 20,
@@ -352,14 +381,13 @@ class NatusApp extends StatelessWidget {
       // ── Inputs: fundo claro, foco na cor primária ──────────────
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: p.escuro
-            ? p.creme
-            : Colors.white.withValues(alpha: 0.82),
+        fillColor: p.escuro ? p.creme : Colors.white.withValues(alpha: 0.82),
         hintStyle: TextStyle(color: p.textoSuave.withValues(alpha: 0.8)),
-        labelStyle:
-            TextStyle(color: p.textoSuave, fontWeight: FontWeight.w600),
-        floatingLabelStyle:
-            TextStyle(color: p.marsala, fontWeight: FontWeight.w700),
+        labelStyle: TextStyle(color: p.textoSuave, fontWeight: FontWeight.w600),
+        floatingLabelStyle: TextStyle(
+          color: p.marsala,
+          fontWeight: FontWeight.w700,
+        ),
         prefixIconColor: p.douradoEscuro,
         suffixIconColor: p.textoSuave,
         border: OutlineInputBorder(
@@ -377,11 +405,13 @@ class NatusApp extends StatelessWidget {
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(
-              color:
-                  p.escuro ? const Color(0xFFE08A84) : const Color(0xFFB3413B)),
+            color: p.escuro ? const Color(0xFFE08A84) : const Color(0xFFB3413B),
+          ),
         ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 15,
+        ),
       ),
 
       // ── Botões ─────────────────────────────────────────────────
@@ -392,10 +422,14 @@ class NatusApp extends StatelessWidget {
           disabledBackgroundColor: p.begeEscuro,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           textStyle: const TextStyle(
-              fontWeight: FontWeight.w700, fontSize: 15, letterSpacing: 0.2),
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+            letterSpacing: 0.2,
+          ),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -403,10 +437,10 @@ class NatusApp extends StatelessWidget {
           backgroundColor: p.marsala,
           foregroundColor: p.escuro ? p.fundo : p.offWhite,
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          textStyle:
-              const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -414,8 +448,9 @@ class NatusApp extends StatelessWidget {
           foregroundColor: p.marsala,
           side: BorderSide(color: p.marsala, width: 1.3),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
@@ -432,8 +467,7 @@ class NatusApp extends StatelessWidget {
         selectedColor: p.douradoClaro,
         labelStyle: TextStyle(color: p.texto, fontWeight: FontWeight.w600),
         side: BorderSide(color: p.begeEscuro.withValues(alpha: 0.6)),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: p.marsala,
@@ -443,11 +477,11 @@ class NatusApp extends StatelessWidget {
       snackBarTheme: SnackBarThemeData(
         backgroundColor: p.escuro ? p.bege : p.vinhoProfundo,
         contentTextStyle: TextStyle(
-            color: p.escuro ? p.texto : p.offWhite,
-            fontWeight: FontWeight.w600),
+          color: p.escuro ? p.texto : p.offWhite,
+          fontWeight: FontWeight.w600,
+        ),
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
       dividerTheme: DividerThemeData(
         color: p.begeEscuro.withValues(alpha: 0.5),
@@ -457,12 +491,16 @@ class NatusApp extends StatelessWidget {
       listTileTheme: ListTileThemeData(
         iconColor: p.douradoEscuro,
         titleTextStyle: TextStyle(
-            color: p.texto,
-            fontWeight: FontWeight.w600,
-            fontSize: 15,
-            fontFamily: 'Inter'),
+          color: p.texto,
+          fontWeight: FontWeight.w600,
+          fontSize: 15,
+          fontFamily: 'Inter',
+        ),
         subtitleTextStyle: TextStyle(
-            color: p.textoSuave, fontSize: 13, fontFamily: 'Inter'),
+          color: p.textoSuave,
+          fontSize: 13,
+          fontFamily: 'Inter',
+        ),
       ),
       tabBarTheme: TabBarThemeData(
         labelColor: p.marsala,
@@ -476,24 +514,25 @@ class NatusApp extends StatelessWidget {
         circularTrackColor: p.bege,
       ),
       checkboxTheme: CheckboxThemeData(
-        fillColor: WidgetStateProperty.resolveWith((states) =>
-            states.contains(WidgetState.selected) ? p.marsala : null),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+        fillColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? p.marsala : null,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.resolveWith((states) =>
-            states.contains(WidgetState.selected) ? p.marsala : null),
-        trackColor: WidgetStateProperty.resolveWith((states) =>
-            states.contains(WidgetState.selected)
-                ? p.marsala.withValues(alpha: 0.35)
-                : null),
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? p.marsala : null,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? p.marsala.withValues(alpha: 0.35)
+              : null,
+        ),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: p.offWhite,
         surfaceTintColor: Colors.transparent,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
@@ -501,7 +540,9 @@ class NatusApp extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         textStyle: TextStyle(
-            color: p.escuro ? p.texto : p.offWhite, fontSize: 12),
+          color: p.escuro ? p.texto : p.offWhite,
+          fontSize: 12,
+        ),
       ),
     );
   }
