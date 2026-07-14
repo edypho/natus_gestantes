@@ -97,6 +97,49 @@ bool parcelaEhDoMesSelecionado(
   }
 }
 
+/// Verifica se uma parcela foi efetivamente PAGA dentro do mês/ano
+/// selecionado, usando a data real do pagamento (`dataPagamento`) — e
+/// não o vencimento. É isso que diferencia "recebido" (regime de caixa:
+/// quando o dinheiro entrou de fato) de "previsto"/"atrasado" (regime
+/// de competência: quando a parcela deveria vencer).
+///
+/// Parcelas antigas sem `dataPagamento` registrado (ex.: importação
+/// histórica antes dessa mudança) caem de volta pro vencimento, pra não
+/// sumir de relatórios de meses já fechados.
+bool parcelaFoiPagaNoMesSelecionado(
+  Map<String, String> parcela,
+  int mesSelecionado,
+  int anoSelecionado,
+) {
+  if (parcela['status'] != 'Pago') return false;
+
+  final dataPagamento = (parcela['dataPagamento'] ?? '').trim();
+
+  if (dataPagamento.isEmpty) {
+    return parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado);
+  }
+
+  try {
+    final soData = dataPagamento.split(' ').first;
+    final partes = soData.split('/');
+
+    if (partes.length != 3) {
+      return parcelaEhDoMesSelecionado(
+        parcela,
+        mesSelecionado,
+        anoSelecionado,
+      );
+    }
+
+    final mes = int.parse(partes[1]);
+    final ano = int.parse(partes[2]);
+
+    return mes == mesSelecionado && ano == anoSelecionado;
+  } catch (e) {
+    return parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado);
+  }
+}
+
 bool parcelaEstaAtrasada(Map<String, String> parcela) {
   try {
     final vencimento = parcela['vencimento'] ?? '';
@@ -126,8 +169,7 @@ double calcularValorRecebidoMesAtual(
   double total = 0;
 
   for (var p in parcelas) {
-    if (parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
-        p['status'] == 'Pago') {
+    if (parcelaFoiPagaNoMesSelecionado(p, mesSelecionado, anoSelecionado)) {
       total += converterValor(p['valor'] ?? '0');
     }
   }

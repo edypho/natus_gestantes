@@ -178,10 +178,10 @@ Widget dashboardCardResumo(
     height: 110,
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
-      gradient: const LinearGradient(
+      gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFFFFFCF8), Color(0xFFFFF4EE)],
+        colors: [NatusApp.offWhite, NatusApp.creme],
       ),
       borderRadius: BorderRadius.circular(24),
       border: Border.all(color: Colors.white.withValues(alpha: 0.86), width: 1.1),
@@ -262,7 +262,7 @@ Widget dashboardBloco(
       children: [
         Text(
           titulo,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
             color: NatusApp.vinho,

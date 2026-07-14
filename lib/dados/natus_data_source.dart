@@ -46,6 +46,23 @@ Future<List<Map<String, String>>> buscarEnfermeiras() async {
   }).toList();
 }
 
+Future<List<Map<String, String>>> buscarObstetras() async {
+  final resultado = await firestore.collection('obstetras').get();
+
+  return resultado.docs.map((doc) {
+    final dados = doc.data();
+
+    final mapa = dados.map((chave, valor) {
+      return MapEntry(chave, valor.toString());
+    });
+
+    mapa['id'] = doc.id;
+    mapa['uidObstetra'] = dados['uidObstetra'] ?? '';
+
+    return mapa;
+  }).toList();
+}
+
 Future<List<Map<String, String>>> buscarBiblioteca() async {
   final resultado = await firestore.collection('biblioteca').get();
 

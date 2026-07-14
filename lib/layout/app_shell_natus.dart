@@ -54,7 +54,7 @@ class AppShellNatus extends StatelessWidget {
                                 color: Colors.white.withValues(alpha: 0.84),
                               ),
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.menu_rounded,
                               color: NatusApp.vinho,
                             ),

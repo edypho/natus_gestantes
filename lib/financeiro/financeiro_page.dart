@@ -53,7 +53,7 @@ Widget telaFinanceiroPage({
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Financeiro',
           style: TextStyle(
             fontSize: 30,
@@ -65,7 +65,7 @@ Widget telaFinanceiroPage({
 
         Row(
           children: [
-            const Text(
+            Text(
               'Período: ',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -161,7 +161,7 @@ Widget telaFinanceiroPage({
 
         const SizedBox(height: 20),
 
-        const Text(
+        Text(
           'Parcelas do mês atual',
           style: TextStyle(
             fontSize: 22,

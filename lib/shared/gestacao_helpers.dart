@@ -22,17 +22,51 @@ int calcularSemanas(String dpp) {
 }
 
 String frutaDaSemana(int semanas) {
-  if (semanas <= 8) return 'Uva 🍇';
-  if (semanas <= 10) return 'Morango 🍓';
-  if (semanas <= 12) return 'Limão 🍋';
-  if (semanas <= 16) return 'Abacate 🥑';
-  if (semanas <= 20) return 'Manga 🥭';
-  if (semanas <= 24) return 'Milho 🌽';
-  if (semanas <= 28) return 'Berinjela 🍆';
-  if (semanas <= 32) return 'Coco 🥥';
-  if (semanas <= 36) return 'Melão 🍈';
+  final semana = semanas.clamp(4, 42).toInt();
 
-  return 'Melancia 🍉';
+  const frutasPorSemana = <int, String>{
+    4: 'Mirtilo',
+    5: 'Framboesa',
+    6: 'Framboesa',
+    7: 'Uva',
+    8: 'Uva',
+    9: 'Morango',
+    10: 'Morango',
+    11: 'Limão',
+    12: 'Limão',
+    13: 'Pêssego',
+    14: 'Pêssego',
+    15: 'Abacate',
+    16: 'Abacate',
+    17: 'Pera',
+    18: 'Manga',
+    19: 'Manga',
+    20: 'Manga',
+    21: 'Milho',
+    22: 'Milho',
+    23: 'Berinjela',
+    24: 'Berinjela',
+    25: 'Couve-flor',
+    26: 'Couve-flor',
+    27: 'Repolho',
+    28: 'Repolho',
+    29: 'Abóbora',
+    30: 'Abóbora',
+    31: 'Coco',
+    32: 'Coco',
+    33: 'Abacaxi',
+    34: 'Abacaxi',
+    35: 'Melão',
+    36: 'Melão',
+    37: 'Melancia',
+    38: 'Melancia',
+    39: 'Melancia',
+    40: 'Melancia',
+    41: 'Melancia',
+    42: 'Melancia',
+  };
+
+  return frutasPorSemana[semana] ?? 'Morango';
 }
 
 String calcularIdadeGestacional(String dppTexto) {

@@ -16,30 +16,32 @@ class PremiumNatusBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = NatusTema.paleta;
+
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFFDFBF6), Color(0xFFF8F2E8), Color(0xFFF5EBDB)],
-          stops: [0.0, 0.58, 1.0],
+          colors: [p.offWhite, p.creme, p.bege],
+          stops: const [0.0, 0.58, 1.0],
         ),
       ),
       child: Stack(
         children: [
           // Direção "editorial sereno": fundo limpo, profundidade apenas
           // por dois brilhos de cor muito sutis — sem elementos figurativos.
-          const Positioned(
+          Positioned(
             top: -220,
             right: -180,
-            child: _SoftOrb(size: 560, color: Color(0xFFD9BC7E), opacity: 0.14),
+            child: _SoftOrb(size: 560, color: p.douradoSuave, opacity: 0.14),
           ),
-          const Positioned(
+          Positioned(
             bottom: -260,
             left: -200,
             child: _SoftOrb(
               size: 560,
-              color: Color(0xFF8A4247),
+              color: p.marsala,
               opacity: 0.045,
             ),
           ),
@@ -220,10 +222,14 @@ class PremiumHeaderNatus extends StatelessWidget {
       width: double.infinity,
       padding: EdgeInsets.all(mobile ? 22 : 30),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF6C1C34), Color(0xFF4B0B1C), Color(0xFF310611)],
+          colors: [
+            NatusApp.menuTopo,
+            NatusApp.menuMeio,
+            NatusApp.menuBase,
+          ],
         ),
         borderRadius: BorderRadius.circular(mobile ? 32 : 42),
         boxShadow: [
@@ -329,28 +335,29 @@ class PremiumMetricCardNatus extends StatelessWidget {
   final String titulo;
   final String valor;
   final IconData icone;
-  final Color cor;
+  final Color? cor;
 
-  const PremiumMetricCardNatus({
+  PremiumMetricCardNatus({
     super.key,
     required this.titulo,
     required this.valor,
     required this.icone,
-    this.cor = NatusApp.vinho,
+    this.cor,
   });
 
   @override
   Widget build(BuildContext context) {
     final mobile = MediaQuery.of(context).size.width < 720;
+    final cor = this.cor ?? NatusApp.vinho;
 
     return Container(
       constraints: BoxConstraints(minHeight: mobile ? 118 : 132),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFFFFFCF8), Color(0xFFFFF2EA)],
+          colors: [NatusApp.offWhite, NatusApp.creme],
         ),
         borderRadius: BorderRadius.circular(30),
         border: Border.all(color: Colors.white.withValues(alpha: 0.94), width: 1.2),
@@ -418,7 +425,7 @@ class PremiumMetricCardNatus extends StatelessWidget {
                 titulo,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: NatusApp.textoSuave,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,
@@ -467,7 +474,7 @@ class PremiumSectionTitle extends StatelessWidget {
             children: [
               Text(
                 titulo,
-                style: const TextStyle(
+                style: TextStyle(
                   color: NatusApp.vinho,
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
@@ -478,7 +485,7 @@ class PremiumSectionTitle extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   subtitulo!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: NatusApp.textoSuave,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,

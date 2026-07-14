@@ -54,7 +54,7 @@ class PageContainerNatus extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(color: NatusApp.marsala.withValues(alpha: 0.09)),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Natus • gestão obstétrica premium',
                     style: TextStyle(
                       color: NatusApp.marsala,

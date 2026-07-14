@@ -17,7 +17,7 @@ class FundoPremiumNatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -68,13 +68,13 @@ class FundoPremiumNatus extends StatelessWidget {
 class BolhaOrganicaNatus extends StatelessWidget {
   final double tamanho;
   final double opacity;
-  final Color color;
+  final Color? color;
 
-  const BolhaOrganicaNatus({
+  BolhaOrganicaNatus({
     super.key,
     this.tamanho = 220,
     this.opacity = 0.12,
-    this.color = NatusApp.rose,
+    this.color,
   });
 
   @override
@@ -86,7 +86,7 @@ class BolhaOrganicaNatus extends StatelessWidget {
           width: tamanho,
           height: tamanho,
           decoration: BoxDecoration(
-            color: color,
+            color: color ?? NatusApp.rose,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(tamanho * 0.58),
               topRight: Radius.circular(tamanho * 0.40),
@@ -104,14 +104,14 @@ class FolhasLinearesNatus extends StatelessWidget {
   final double tamanho;
   final double opacity;
   final double rotacao;
-  final Color color;
+  final Color? color;
 
-  const FolhasLinearesNatus({
+  FolhasLinearesNatus({
     super.key,
     this.tamanho = 120,
     this.opacity = 0.22,
     this.rotacao = 0,
-    this.color = NatusApp.douradoSuave,
+    this.color,
   });
 
   @override
@@ -123,7 +123,7 @@ class FolhasLinearesNatus extends StatelessWidget {
           angle: rotacao,
           child: CustomPaint(
             size: Size(tamanho, tamanho),
-            painter: _FolhasLinearesPainter(color),
+            painter: _FolhasLinearesPainter(color ?? NatusApp.douradoSuave),
           ),
         ),
       ),
@@ -193,7 +193,7 @@ class HeaderPremiumNatus extends StatelessWidget {
                 width: 54,
                 height: 54,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
@@ -212,7 +212,7 @@ class HeaderPremiumNatus extends StatelessWidget {
                   children: [
                     Text(
                       titulo,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: NatusApp.vinho,
                         fontSize: 23,
                         fontWeight: FontWeight.w900,
@@ -221,7 +221,7 @@ class HeaderPremiumNatus extends StatelessWidget {
                     const SizedBox(height: 5),
                     Text(
                       subtitulo,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: NatusApp.textoSuave,
                         fontSize: 13.5,
                         height: 1.35,

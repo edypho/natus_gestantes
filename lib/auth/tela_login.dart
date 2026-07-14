@@ -88,7 +88,7 @@ class _TelaLoginState extends State<TelaLogin> {
 
                 const SizedBox(height: 24),
 
-                const Text(
+                Text(
                   'Bem Vinda',
                   style: TextStyle(
                     fontSize: 24,

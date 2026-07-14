@@ -24,19 +24,34 @@ import 'agenda/agenda_page.dart';
 import 'core/firebase_globals.dart';
 import 'financeiro/financeiro_calculos.dart' as fincalc;
 import 'gestantes/gestantes_regras.dart' as gregras;
+import 'gestantes/indicadores_gestacionais.dart' as gindicadores;
+import 'exames/exame_arquivo.dart';
 import 'kpis/kpis_calculos.dart' as kpis;
 import 'dashboard/dashboard_cards_natus.dart';
 import 'dados/natus_data_source.dart' as dados;
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
+import 'navigation/menu_inferior_coracao.dart';
 
 export 'core/firebase_globals.dart';
 export 'core/usuario_tipos.dart';
 export 'auth/tela_login.dart';
 import 'core/usuario_tipos.dart';
 
+/// Agrupa os itens do menu inferior (coração central + 2 de cada lado)
+/// pra um perfil de usuário. Ver `configMenuInferior()`.
+class _ConfigMenuInferior {
+  final ItemMenuInferior central;
+  final List<ItemMenuInferior> esquerda;
+  final List<ItemMenuInferior> direita;
 
+  const _ConfigMenuInferior({
+    required this.central,
+    required this.esquerda,
+    required this.direita,
+  });
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -202,6 +217,37 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
+  Future<void> salvarObstetra() async {
+    if (obNomeController.text.trim().isEmpty) {
+      mostrarMensagem('Informe o nome do obstetra.');
+      return;
+    }
+
+    try {
+      await firestore.collection('obstetras').add({
+        'nome': obNomeController.text.trim(),
+        'telefone': obTelefoneController.text.trim(),
+        'email': obEmailController.text.trim(),
+        'crm': obCrmController.text.trim(),
+        'especialidade': obEspecialidadeController.text.trim(),
+        'uidObstetra': '',
+        'criadoEm': DateTime.now().toIso8601String(),
+      });
+
+      obNomeController.clear();
+      obTelefoneController.clear();
+      obEmailController.clear();
+      obCrmController.clear();
+      obEspecialidadeController.clear();
+
+      await carregarObstetrasFirestore();
+
+      mostrarMensagem('Obstetra cadastrado com sucesso!');
+    } catch (e) {
+      mostrarMensagem('Erro ao salvar obstetra: $e');
+    }
+  }
+
   Future<void> salvarNascimento(
     Map<String, String> gestante,
     String nomeBebe,
@@ -263,6 +309,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final nomeEo = eo['nome'] ?? '';
     if (nomeEo.isNotEmpty) return nomeEo;
 
+    final ob = obstetras.firstWhere(
+      (o) => o['uidObstetra'] == uidLogado,
+      orElse: () => {},
+    );
+
+    final nomeOb = ob['nome'] ?? '';
+    if (nomeOb.isNotEmpty) return nomeOb;
+
     if (widget.nomeUsuario.trim().isNotEmpty) {
       return widget.nomeUsuario;
     }
@@ -273,6 +327,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   @override
   void initState() {
     super.initState();
+
+    NatusTema.atual.addListener(aoMudarTema);
 
     if (widget.tipoUsuario == 'superAdmin') {
       telaAtual = 'Dashboard SaaS';
@@ -286,9 +342,21 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     carregarDocumentosFirestore();
     carregarParcelasFirestore();
     carregarEnfermeirasFirestore();
+    carregarObstetrasFirestore();
+    carregarTemaUsuario();
     carregarContracoesFirestore();
     carregarBibliotecaFirestore();
     carregarPlanosFirestore();
+  }
+
+  void aoMudarTema() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    NatusTema.atual.removeListener(aoMudarTema);
+    super.dispose();
   }
 
   double converterValorDinamico(dynamic valor) =>
@@ -465,7 +533,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               label: const Text('Salvar'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
               ),
             ),
           ],
@@ -540,6 +610,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       });
     } catch (e) {
       mostrarMensagem('Erro ao carregar enfermeiras.');
+    }
+  }
+
+  Future<void> carregarObstetrasFirestore() async {
+    try {
+      final listaFirebase = await dados.buscarObstetras();
+
+      setState(() {
+        obstetras.clear();
+        obstetras.addAll(listaFirebase);
+      });
+    } catch (e) {
+      mostrarMensagem('Erro ao carregar obstetras.');
     }
   }
 
@@ -1486,8 +1569,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   String novoTipoUsuario = 'gestante';
   String? gestanteSelecionadaLogin;
   String? enfermeiraSelecionadaLogin;
+  String? obstetraSelecionadoLogin;
 
   final List<Map<String, String>> enfermeiras = [];
+
+  final List<Map<String, String>> obstetras = [];
 
   String documentoGestanteSelecionada = '';
   String documentoTipoSelecionado = 'Exame';
@@ -1535,6 +1621,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final eoEmailController = TextEditingController();
   final eoCorenController = TextEditingController();
   final eoEspecialidadeController = TextEditingController();
+
+  final obNomeController = TextEditingController();
+  final obTelefoneController = TextEditingController();
+  final obEmailController = TextEditingController();
+  final obCrmController = TextEditingController();
+  final obEspecialidadeController = TextEditingController();
 
   final nomePai = TextEditingController();
   final cpfPai = TextEditingController();
@@ -1655,9 +1747,114 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   bool gestanteAtivaParaContracoes(Map<String, String> g) =>
       gregras.gestanteAtivaParaContracoes(g);
 
+  // ── Menu inferior mobile: coração central + 2 itens de cada lado ──
+
+  /// Chave normalizada do perfil pra fins de navegação mobile (obstetra
+  /// compartilha o mesmo menu operacional da enfermeira).
+  String _chaveMenuAtual() => tipoEhProfissionalClinica(widget.tipoUsuario)
+      ? 'enfermeira'
+      : widget.tipoUsuario;
+
+  _ConfigMenuInferior configMenuInferior() {
+    switch (_chaveMenuAtual()) {
+      case 'superAdmin':
+        return const _ConfigMenuInferior(
+          central: ItemMenuInferior('Dashboard SaaS', Icons.dashboard_rounded),
+          esquerda: [
+            ItemMenuInferior(
+              'Clínicas cadastradas SaaS',
+              Icons.apartment_rounded,
+            ),
+            ItemMenuInferior(
+              'Usuários/clientes SaaS',
+              Icons.people_alt_rounded,
+            ),
+          ],
+          direita: [
+            ItemMenuInferior(
+              'Financeiro das assinaturas SaaS',
+              Icons.payments_rounded,
+            ),
+            ItemMenuInferior(
+              'Mensalidades atrasadas SaaS',
+              Icons.warning_amber_rounded,
+            ),
+          ],
+        );
+
+      case 'admin':
+        return const _ConfigMenuInferior(
+          central: ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+          esquerda: [
+            ItemMenuInferior('Gestantes', Icons.pregnant_woman_rounded),
+            ItemMenuInferior('Agenda', Icons.event_rounded),
+          ],
+          direita: [
+            ItemMenuInferior('Financeiro', Icons.payments_rounded),
+            ItemMenuInferior('Prontuário', Icons.assignment_rounded),
+          ],
+        );
+
+      case 'enfermeira':
+        return const _ConfigMenuInferior(
+          central: ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+          esquerda: [
+            ItemMenuInferior('Gestantes', Icons.pregnant_woman_rounded),
+            ItemMenuInferior('Agenda', Icons.event_rounded),
+          ],
+          direita: [
+            ItemMenuInferior('Prontuário', Icons.assignment_rounded),
+            ItemMenuInferior('Contrações', Icons.monitor_heart_rounded),
+          ],
+        );
+
+      case 'gestante':
+        return const _ConfigMenuInferior(
+          central: ItemMenuInferior('Área da gestante', Icons.favorite_rounded),
+          esquerda: [
+            ItemMenuInferior('Agenda', Icons.event_rounded),
+            ItemMenuInferior('Exames', Icons.medical_information_rounded),
+          ],
+          direita: [
+            ItemMenuInferior('Contrações', Icons.monitor_heart_rounded),
+            ItemMenuInferior('Documentos', Icons.folder_copy_rounded),
+          ],
+        );
+
+      default:
+        return const _ConfigMenuInferior(
+          central: ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+          esquerda: [
+            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+          ],
+          direita: [
+            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+            ItemMenuInferior('Dashboard', Icons.dashboard_rounded),
+          ],
+        );
+    }
+  }
+
+  void _irParaTela(String titulo) {
+    setState(() {
+      telaAtual = titulo;
+      gestanteSelecionada = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 700;
+    final configInferior = configMenuInferior();
+
+    // Gestante tem poucas telas: o coração leva direto pra "Área da
+    // gestante" e o hambúrguer flutuante continua ali pra Biblioteca
+    // (o único item que não coube nos 4 atalhos). Nos demais perfis, o
+    // menu é grande demais pra caber em 4 atalhos — então o coração
+    // abre o drawer completo, e o hambúrguer flutuante some (fica
+    // redundante).
+    final coracaoAbreMenu = _chaveMenuAtual() != 'gestante';
 
     return PremiumNatusBackground(
       child: Scaffold(
@@ -1669,39 +1866,63 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 child: menuLateral(),
               )
             : null,
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+        floatingActionButton: isMobile
+            ? Builder(
+                builder: (context) => NatusFabCoracao(
+                  ativo:
+                      !coracaoAbreMenu &&
+                      telaAtual == configInferior.central.titulo,
+                  onTap: coracaoAbreMenu
+                      ? () => Scaffold.of(context).openDrawer()
+                      : () => _irParaTela(configInferior.central.titulo),
+                ),
+              )
+            : null,
+        bottomNavigationBar: isMobile
+            ? NatusMenuInferiorCoracao(
+                itensEsquerda: configInferior.esquerda,
+                itensDireita: configInferior.direita,
+                telaAtual: telaAtual,
+                onSelecionarTela: _irParaTela,
+              )
+            : null,
         body: isMobile
             ? Builder(
                 builder: (context) {
                   return Stack(
                     children: [
                       telaConteudo(),
-                      SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 12, top: 8),
-                          child: Material(
-                            color: NatusApp.offWhite.withValues(alpha: 0.92),
-                            borderRadius: BorderRadius.circular(18),
-                            child: InkWell(
+                      if (!coracaoAbreMenu)
+                        SafeArea(
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 12, top: 8),
+                            child: Material(
+                              color: NatusApp.offWhite.withValues(alpha: 0.92),
                               borderRadius: BorderRadius.circular(18),
-                              onTap: () => Scaffold.of(context).openDrawer(),
-                              child: Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.84),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(18),
+                                onTap: () => Scaffold.of(context).openDrawer(),
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: NatusApp.offWhite.withValues(
+                                        alpha: 0.84,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                child: const Icon(
-                                  Icons.menu_rounded,
-                                  color: NatusApp.vinho,
+                                  child: Icon(
+                                    Icons.menu_rounded,
+                                    color: NatusApp.vinho,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   );
                 },
@@ -1726,12 +1947,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1742,7 +1963,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         children: [
           Row(
             children: [
-              const CircleAvatar(
+              CircleAvatar(
                 backgroundColor: NatusApp.rose,
                 child: Icon(Icons.favorite, color: NatusApp.vinho),
               ),
@@ -1753,7 +1974,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Progresso da gestação',
                       style: TextStyle(
                         fontSize: 17,
@@ -1766,9 +1987,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       semanas > 0
                           ? '$semanas de 40 semanas completas'
                           : 'DPP ainda não informada',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
-                        color: Colors.black54,
+                        color: NatusApp.textoSuave,
                       ),
                     ),
                   ],
@@ -1777,7 +1998,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
               Text(
                 '$percentual%',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: NatusApp.vinho,
@@ -1794,7 +2015,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               value: progresso,
               minHeight: 18,
               backgroundColor: const Color(0xFFFFEFEA),
-              valueColor: const AlwaysStoppedAnimation<Color>(NatusApp.vinho),
+              valueColor: AlwaysStoppedAnimation<Color>(NatusApp.vinho),
             ),
           ),
         ],
@@ -1821,7 +2042,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Gestantes',
         'Prontuário',
         'Calculadora de IG',
-        'Atendimentos',
         'Contrações',
         'Financeiro',
         'Planos da Natus',
@@ -1834,6 +2054,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Exames',
         'Usuários',
         'Cadastrar EO',
+        'Cadastrar Obstetra',
         'Área da gestante',
         'Configurações',
       ],
@@ -1844,7 +2065,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Gestantes',
         'Prontuário',
         'Calculadora de IG',
-        'Atendimentos',
         'Contrações',
         'Biblioteca',
         'Exames',
@@ -1859,7 +2079,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       ],
     };
 
-    final menusDoUsuario = menusPermitidos[widget.tipoUsuario] ?? [];
+    // Obstetra compartilha o mesmo menu operacional da enfermeira.
+    final chaveMenus = tipoEhProfissionalClinica(widget.tipoUsuario)
+        ? 'enfermeira'
+        : widget.tipoUsuario;
+
+    final menusDoUsuario = menusPermitidos[chaveMenus] ?? [];
 
     Widget logoutFixo() {
       return Container(
@@ -1873,6 +2098,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: () async {
+            NatusTema.restaurarPadrao();
             await FirebaseAuth.instance.signOut();
           },
           child: Container(
@@ -1935,8 +2161,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         itemMenu(Icons.pregnant_woman, 'Gestantes'),
       if (menusDoUsuario.contains('Calculadora de IG'))
         itemMenu(Icons.calculate, 'Calculadora de IG'),
-      if (menusDoUsuario.contains('Atendimentos'))
-        itemMenu(Icons.medical_services, 'Atendimentos'),
       if (menusDoUsuario.contains('Contrações'))
         itemMenu(Icons.timer, 'Contrações'),
       if (menusDoUsuario.contains('Financeiro'))
@@ -1960,6 +2184,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (menusDoUsuario.contains('Exames')) itemMenu(Icons.biotech, 'Exames'),
       if (menusDoUsuario.contains('Cadastrar EO'))
         itemMenu(Icons.medical_information, 'Cadastrar EO'),
+      if (menusDoUsuario.contains('Cadastrar Obstetra'))
+        itemMenu(Icons.medical_services, 'Cadastrar Obstetra'),
       if (menusDoUsuario.contains('Usuários'))
         itemMenu(Icons.people, 'Usuários'),
       if (menusDoUsuario.contains('Área da gestante'))
@@ -1970,11 +2196,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     return Container(
       width: 292,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF6F2F48), Color(0xFF6B3136), Color(0xFF401A1E)],
+          colors: [NatusApp.menuTopo, NatusApp.menuMeio, NatusApp.menuBase],
           stops: [0.0, 0.48, 1.0],
         ),
       ),
@@ -2162,7 +2388,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Cadastrar EO',
             style: TextStyle(
               fontSize: 30,
@@ -2173,9 +2399,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 6),
 
-          const Text(
+          Text(
             'Cadastre enfermeiras obstétricas que fazem parte da equipe Natus.',
-            style: TextStyle(fontSize: 15, color: Colors.black54),
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 24),
@@ -2207,7 +2433,75 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               label: const Text('Salvar enfermeira'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 18,
+                ),
+              ),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget telaCadastrarObstetra() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Cadastrar Obstetra',
+            style: TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.bold,
+              color: NatusApp.vinho,
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          Text(
+            'Cadastre os obstetras que acompanham as gestantes da clínica.',
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
+          ),
+
+          const SizedBox(height: 24),
+
+          bloco('Dados do obstetra', [
+            campo(obNomeController, 'Nome'),
+
+            const SizedBox(height: 16),
+
+            campo(obTelefoneController, 'Telefone'),
+
+            const SizedBox(height: 16),
+
+            campo(obEmailController, 'E-mail'),
+
+            const SizedBox(height: 16),
+
+            campo(obCrmController, 'CRM'),
+
+            const SizedBox(height: 16),
+
+            campo(obEspecialidadeController, 'Especialidade'),
+
+            const SizedBox(height: 20),
+
+            ElevatedButton.icon(
+              onPressed: salvarObstetra,
+              icon: const Icon(Icons.save),
+              label: const Text('Salvar obstetra'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NatusApp.vinho,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
                   vertical: 18,
@@ -2299,6 +2593,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       case 'Cadastrar EO':
         return telaCadastrarEO();
 
+      case 'Cadastrar Obstetra':
+        return telaCadastrarObstetra();
+
       case 'Cadastro':
         return telaCadastroGestante();
 
@@ -2306,7 +2603,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return telaAreaGestante();
 
       case 'Configurações':
-        return telaSimples('Configurações do sistema');
+        return telaConfiguracoes();
 
       default:
         return telaSimples('Tela não encontrada');
@@ -2336,7 +2633,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         children: [
           Text(
             usuarioGestante ? 'Exames' : 'Central de exames',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.bold,
               color: NatusApp.vinho,
@@ -2349,7 +2646,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             usuarioGestante
                 ? 'Envie e acompanhe seus exames.'
                 : 'Visualize os exames enviados pelas gestantes.',
-            style: const TextStyle(color: Colors.black54),
+            style: TextStyle(color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 24),
@@ -2359,12 +2656,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               width: double.infinity,
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: NatusApp.offWhite,
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
+                border: Border.all(
+                  color: NatusApp.rose.withValues(alpha: 0.45),
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
+                    color: NatusApp.vinhoProfundo.withValues(alpha: 0.04),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -2372,14 +2671,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ),
               child: Row(
                 children: [
-                  const CircleAvatar(
+                  CircleAvatar(
                     backgroundColor: NatusApp.rose,
                     child: Icon(Icons.upload_file, color: NatusApp.vinho),
                   ),
 
                   const SizedBox(width: 14),
 
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -2394,19 +2693,21 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         SizedBox(height: 4),
                         Text(
                           'Arquivos armazenados com segurança.',
-                          style: TextStyle(color: Colors.black54),
+                          style: TextStyle(color: NatusApp.textoSuave),
                         ),
                       ],
                     ),
                   ),
 
                   ElevatedButton.icon(
-                    onPressed: () => selecionarArquivoExame(idGestante),
+                    onPressed: () => selecionarArquivoExame(gestante),
                     icon: const Icon(Icons.add),
                     label: const Text('Enviar'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: NatusApp.vinho,
-                      foregroundColor: Colors.white,
+                      foregroundColor: (NatusApp.escuro
+                          ? NatusApp.fundo
+                          : NatusApp.offWhite),
                     ),
                   ),
                 ],
@@ -2424,11 +2725,51 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 : firestore.collection('exames').snapshots(),
 
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return blocoFicha(
+                  usuarioGestante ? 'Meus exames' : 'Exames das gestantes',
+                  [
+                    Text(
+                      'Não foi possível carregar os exames. Tente novamente '
+                      'ou verifique as permissões de acesso.',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ],
+                );
+              }
+
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              final exames = snapshot.data!.docs;
+              final examesDaColecao = snapshot.data!.docs.map((doc) {
+                return ExameArquivo.fromExame(
+                  doc.id,
+                  doc.data() as Map<String, dynamic>,
+                );
+              });
+              final examesDosDocumentos = documentos
+                  .where(ExameArquivo.documentoEhExame)
+                  .map(ExameArquivo.fromDocumento);
+
+              var exames = removerExamesDuplicados([
+                ...examesDaColecao,
+                ...examesDosDocumentos,
+              ]);
+
+              if (usuarioGestante) {
+                exames = exames.where((exame) {
+                  return exame.pertenceA(gestante);
+                }).toList();
+              } else if (widget.tipoUsuario == 'obstetra') {
+                exames = exames.where((exame) {
+                  return gestantes.any(exame.pertenceA);
+                }).toList();
+              }
+
+              exames.sort((a, b) {
+                return b.dataOrdenacao.compareTo(a.dataOrdenacao);
+              });
 
               if (exames.isEmpty) {
                 return blocoFicha(
@@ -2437,13 +2778,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 );
               }
 
-              Map<String, List<QueryDocumentSnapshot>> examesAgrupados = {};
+              final examesAgrupados = <String, List<ExameArquivo>>{};
 
               for (var exame in exames) {
-                final dados = exame.data() as Map<String, dynamic>;
-
-                final nomeGestante =
-                    dados['nomeGestante'] ?? 'Gestante não identificada';
+                final nomeGestante = exame.nomeGestanteResolvido(gestantes);
 
                 examesAgrupados.putIfAbsent(nomeGestante, () => []);
 
@@ -2464,7 +2802,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             padding: const EdgeInsets.only(bottom: 10, top: 10),
                             child: Text(
                               grupo.key,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
                                 color: NatusApp.vinho,
@@ -2472,15 +2810,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             ),
                           ),
 
-                        ...grupo.value.map((doc) {
-                          final dados = doc.data() as Map<String, dynamic>;
-
-                          final nomeArquivo = dados['nomeArquivo'] ?? 'Exame';
-
-                          final url = dados['url'] ?? '';
-
-                          final criadoEm = dados['criadoEm'] ?? '';
-
+                        ...grupo.value.map((exame) {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(14),
@@ -2493,8 +2823,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             ),
                             child: Row(
                               children: [
-                                const CircleAvatar(
-                                  backgroundColor: Colors.white,
+                                CircleAvatar(
+                                  backgroundColor: NatusApp.offWhite,
                                   child: Icon(
                                     Icons.description,
                                     color: NatusApp.vinho,
@@ -2509,34 +2839,35 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        nomeArquivo,
+                                        exame.nomeArquivo,
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           color: NatusApp.vinho,
                                         ),
                                       ),
 
-                                      if (criadoEm.toString().isNotEmpty)
-                                        Text(
-                                          'Enviado em: ${criadoEm.toString().substring(0, 10)}',
-                                          style: const TextStyle(
-                                            color: Colors.black54,
-                                            fontSize: 12,
-                                          ),
+                                      Text(
+                                        'Enviado em: ${exame.dataExibicao}',
+                                        style: TextStyle(
+                                          color: NatusApp.textoSuave,
+                                          fontSize: 12,
                                         ),
+                                      ),
                                     ],
                                   ),
                                 ),
 
                                 IconButton(
                                   tooltip: 'Abrir exame',
-                                  icon: const Icon(
+                                  icon: Icon(
                                     Icons.open_in_new,
                                     color: NatusApp.vinho,
                                   ),
-                                  onPressed: () => abrirArquivo(url),
+                                  onPressed: exame.url.isEmpty
+                                      ? null
+                                      : () => abrirArquivo(exame.url),
                                 ),
 
                                 if (!usuarioGestante)
@@ -2547,7 +2878,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                       color: Colors.red,
                                     ),
                                     onPressed: () async {
-                                      await excluirExame(doc.id, url);
+                                      await excluirExame(exame);
                                     },
                                   ),
                               ],
@@ -2566,16 +2897,25 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Future<void> excluirExame(String idExame, String urlArquivo) async {
+  Future<void> excluirExame(ExameArquivo exame) async {
     try {
-      if (urlArquivo.isNotEmpty) {
-        final ref = storage.refFromURL(urlArquivo);
+      if (exame.url.isNotEmpty) {
+        final ref = storage.refFromURL(exame.url);
         await ref.delete();
       }
 
-      await firestore.collection('exames').doc(idExame).delete();
+      final colecao = exame.origem == OrigemExameArquivo.exames
+          ? 'exames'
+          : 'documentos';
+      if (exame.id.isNotEmpty) {
+        await firestore.collection(colecao).doc(exame.id).delete();
+      }
 
-      setState(() {});
+      setState(() {
+        if (exame.origem == OrigemExameArquivo.documentos) {
+          documentos.removeWhere((documento) => documento['id'] == exame.id);
+        }
+      });
 
       mostrarMensagem('Exame excluído com sucesso.');
     } catch (e) {
@@ -2583,8 +2923,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<void> selecionarArquivoExame(String? idGestante) async {
-    if (idGestante == null) {
+  Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
+    final idGestante = (gestante['id'] ?? '').trim();
+    if (idGestante.isEmpty) {
       mostrarMensagem('Erro: gestante não identificada.');
       return;
     }
@@ -2614,9 +2955,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       await firestore.collection('exames').add({
         'idGestante': idGestante,
+        'uidGestante': gestante['uidGestante'] ?? '',
+        'nomeGestante': gestante['nomeGestante'] ?? '',
         'nomeArquivo': nomeArquivo,
         'url': url,
         'criadoEm': DateTime.now().toIso8601String(),
+        'enviadoPorUid': FirebaseAuth.instance.currentUser?.uid ?? '',
       });
 
       mostrarMensagem('Exame enviado com sucesso!');
@@ -2634,20 +2978,36 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       gregras.converterDataDashboard(valor);
 
   String primeiraDataPreenchida(
-          Map<String, String> dados, List<String> campos) =>
-      gregras.primeiraDataPreenchida(dados, campos);
+    Map<String, String> dados,
+    List<String> campos,
+  ) => gregras.primeiraDataPreenchida(dados, campos);
 
   int contarBebesPorAno(String ano) => kpis.contarBebesPorAno(gestantes, ano);
 
   Map<int, int> contarBebesPorMes(String ano) =>
       kpis.contarBebesPorMes(gestantes, ano);
 
+  kpis.CrescimentoNascimentosKpis calcularCrescimentoNascimentos() =>
+      kpis.calcularCrescimentoNascimentos(gestantes);
+
+  kpis.ObstetraMetricasCompletas metricasDoObstetraLogado() =>
+      kpis.calcularMetricasObstetra(gestantes, nomeEoLogada());
+
+  List<kpis.ObstetraMetricasCompletas> metricasDeTodosObstetras() =>
+      kpis.calcularMetricasTodosObstetras(gestantes, obstetras);
+
   int contarBebesNoPeriodoSelecionado() => kpis.contarBebesNoPeriodoSelecionado(
-      gestantes, mesSelecionado, anoSelecionado);
+    gestantes,
+    mesSelecionado,
+    anoSelecionado,
+  );
 
   int contarEncerradasOuHistoricoNoPeriodoDpp() =>
       kpis.contarEncerradasOuHistoricoNoPeriodoDpp(
-          gestantes, mesSelecionado, anoSelecionado);
+        gestantes,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   Map<int, int> contarGestantesPorMes(String ano) =>
       kpis.contarGestantesPorMes(gestantes, ano);
@@ -2655,13 +3015,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   int contarGestantesPorStatus(String status) =>
       kpis.contarGestantesPorStatus(gestantes, status);
 
-  bool gestanteEhDoPeriodoSelecionadoPelaDpp(Map<String, String> g) =>
-      kpis.gestanteEhDoPeriodoSelecionadoPelaDpp(
-          g, mesSelecionado, anoSelecionado);
+  bool gestanteEhDoPeriodoSelecionadoPelaDpp(Map<String, String> g) => kpis
+      .gestanteEhDoPeriodoSelecionadoPelaDpp(g, mesSelecionado, anoSelecionado);
 
   int contarGestantesPorStatusNoPeriodoDpp(String status) =>
       kpis.contarGestantesPorStatusNoPeriodoDpp(
-          gestantes, status, mesSelecionado, anoSelecionado);
+        gestantes,
+        status,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   int contarGestantesProximasDpp() =>
       kpis.contarGestantesProximasDpp(gestantes);
@@ -2694,37 +3057,54 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   double calcularValorRecebido() => fincalc.calcularValorRecebido(gestantes);
 
   double calcularValorAReceberReal() => fincalc.calcularValorAReceberReal(
-      parcelasFinanceiras, mesSelecionado, anoSelecionado);
+    parcelasFinanceiras,
+    mesSelecionado,
+    anoSelecionado,
+  );
 
   bool parcelaEhDoMesAtual(Map<String, String> parcela) =>
       fincalc.parcelaEhDoMesAtual(parcela);
 
-  bool parcelaEhDoMesSelecionado(Map<String, String> parcela) =>
-      fincalc.parcelaEhDoMesSelecionado(
-          parcela, mesSelecionado, anoSelecionado);
+  bool parcelaEhDoMesSelecionado(Map<String, String> parcela) => fincalc
+      .parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado);
 
   bool parcelaEstaAtrasada(Map<String, String> parcela) =>
       fincalc.parcelaEstaAtrasada(parcela);
 
   double calcularValorRecebidoMesAtual() =>
       fincalc.calcularValorRecebidoMesAtual(
-          parcelasFinanceiras, mesSelecionado, anoSelecionado);
+        parcelasFinanceiras,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   double calcularValorAtrasadoMesAtual() =>
       fincalc.calcularValorAtrasadoMesAtual(
-          parcelasFinanceiras, mesSelecionado, anoSelecionado);
+        parcelasFinanceiras,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   int contarParcelasAtrasadasMesSelecionado() =>
       fincalc.contarParcelasAtrasadasMesSelecionado(
-          parcelasFinanceiras, mesSelecionado, anoSelecionado);
+        parcelasFinanceiras,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   double calcularTotalPrevistoMesSelecionado() =>
       fincalc.calcularTotalPrevistoMesSelecionado(
-          parcelasFinanceiras, mesSelecionado, anoSelecionado);
+        parcelasFinanceiras,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   double calcularPercentualInadimplencia() =>
       fincalc.calcularPercentualInadimplencia(
-          parcelasFinanceiras, mesSelecionado, anoSelecionado);
+        parcelasFinanceiras,
+        mesSelecionado,
+        anoSelecionado,
+      );
 
   Color corInadimplencia(double valor) => fincalc.corInadimplencia(valor);
 
@@ -2737,8 +3117,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       fincalc.gerarVencimentoParcela(numeroParcela);
 
   String gerarVencimentoParcelaHistorico(
-          int numeroParcela, int parcelasPagas) =>
-      fincalc.gerarVencimentoParcelaHistorico(numeroParcela, parcelasPagas);
+    int numeroParcela,
+    int parcelasPagas,
+  ) => fincalc.gerarVencimentoParcelaHistorico(numeroParcela, parcelasPagas);
 
   DateTime calcularQuintoDiaUtil(int ano, int mes) =>
       fincalc.calcularQuintoDiaUtil(ano, mes);
@@ -2801,14 +3182,40 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return dados;
   }
 
-  List<MapEntry<String, int>> top5Obstetras() {
-    final dados = contarCampoGestantes('obstetraGestante');
+  Map<String, int> contarViaNascimento() {
+    final dados = {'Normal': 0, 'Cesárea': 0, 'Domiciliar': 0};
 
-    final lista = dados.entries.toList();
+    for (var g in gestantes) {
+      final via = (g['viaNascimento'] ?? '').trim().toLowerCase();
 
-    lista.sort((a, b) => b.value.compareTo(a.value));
+      if (via.isEmpty ||
+          via.contains('não informado') ||
+          via.contains('nao informado')) {
+        continue;
+      }
 
-    return lista.take(5).toList();
+      if (via.contains('ces')) {
+        dados['Cesárea'] = dados['Cesárea']! + 1;
+      } else if (via.contains('casa') || via.contains('domicil')) {
+        dados['Domiciliar'] = dados['Domiciliar']! + 1;
+      } else if (via.contains('normal') ||
+          via.contains('vaginal') ||
+          via.contains('vagianl') ||
+          via.contains('vagina') ||
+          via.contains('parto')) {
+        dados['Normal'] = dados['Normal']! + 1;
+      }
+    }
+
+    return dados;
+  }
+
+  Map<String, int> contarRiscoGestacional() {
+    return gindicadores.contarRiscosGestacionais(gestantes);
+  }
+
+  Map<String, int> contarDiabetesGestacional() {
+    return gindicadores.contarDiabetesGestacionais(gestantes);
   }
 
   List<Map<String, String>> materiaisComEstoqueBaixo() {
@@ -2825,8 +3232,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String valor,
     IconData icone,
     Color cor,
-  ) =>
-      NatusCardAlertaDashboard(titulo, valor, icone, cor);
+  ) => NatusCardAlertaDashboard(titulo, valor, icone, cor);
 
   Widget cardFinanceiroResumo(
     String titulo,
@@ -2834,34 +3240,34 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     Color cor,
     IconData icone, {
     String sufixo = '',
-  }) =>
-      NatusCardFinanceiroResumo(titulo, valor, cor, icone, sufixo: sufixo);
+  }) => NatusCardFinanceiroResumo(titulo, valor, cor, icone, sufixo: sufixo);
 
   Widget cardContagemResumo(
     String titulo,
     int valor,
     Color cor,
     IconData icone,
-  ) =>
-      NatusCardContagemResumo(titulo, valor, cor, icone);
+  ) => NatusCardContagemResumo(titulo, valor, cor, icone);
 
-  Widget cardResumo(String titulo, String valor, IconData icone,
-          {Color? cor}) =>
-      NatusCardResumo(titulo, valor, icone, cor: cor);
+  Widget cardResumo(
+    String titulo,
+    String valor,
+    IconData icone, {
+    Color? cor,
+  }) => NatusCardResumo(titulo, valor, icone, cor: cor);
 
   Widget blocoDashboard(String titulo, List<Widget> filhos) =>
       NatusBlocoDashboard(titulo, filhos);
 
-  Widget alertaDashboardFinanceiro() => NatusAlertaDashboardFinanceiro(
-      contarParcelasAtrasadasMesSelecionado());
+  Widget alertaDashboardFinanceiro() =>
+      NatusAlertaDashboardFinanceiro(contarParcelasAtrasadasMesSelecionado());
 
   Widget cardIndicadorAmamentacao(
     String titulo,
     int valor,
     int total,
     Color cor,
-  ) =>
-      NatusCardIndicadorAmamentacao(titulo, valor, total, cor);
+  ) => NatusCardIndicadorAmamentacao(titulo, valor, total, cor);
 
   Widget cardMaternidadeRanking(String nome, int total) {
     final isMobile = MediaQuery.of(context).size.width < 700;
@@ -2901,7 +3307,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             Text(
               total.toString(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: NatusApp.vinho,
               ),
@@ -2922,7 +3328,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           if (total > 0)
             Text(
               total.toString(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: NatusApp.vinho,
@@ -2994,72 +3400,65 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required List<MapEntry<String, int>> dados,
     required IconData icone,
     required Color cor,
+    String rotulo = 'atendimentos',
   }) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
     if (dados.isEmpty) {
       return const Text('Nenhum dado encontrado.');
     }
 
-    MapEntry<String, int>? primeiro = dados.isNotEmpty ? dados[0] : null;
+    final isMobile = MediaQuery.of(context).size.width < 700;
 
-    MapEntry<String, int>? segundo = dados.length > 1 ? dados[1] : null;
+    final primeiro = dados[0];
+    final segundo = dados.length > 1 ? dados[1] : null;
+    final terceiro = dados.length > 2 ? dados[2] : null;
+    final quarto = dados.length > 3 ? dados[3] : null;
+    final quinto = dados.length > 4 ? dados[4] : null;
 
-    MapEntry<String, int>? terceiro = dados.length > 2 ? dados[2] : null;
-
-    MapEntry<String, int>? quarto = dados.length > 3 ? dados[3] : null;
-
-    MapEntry<String, int>? quinto = dados.length > 4 ? dados[4] : null;
+    final maximo = primeiro.value;
 
     return Column(
       children: [
-        // TOP 3
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 2º
-            if (segundo != null)
+            if (segundo != null) ...[
               podiumCard(
-                altura: 140,
-                posicao: '2º',
+                posicao: 2,
                 nome: segundo.key,
                 total: segundo.value,
-                cor: Colors.grey,
                 icone: icone,
+                isMobile: isMobile,
+                rotulo: rotulo,
               ),
+              SizedBox(width: isMobile ? 8 : 14),
+            ],
 
-            const SizedBox(width: 10),
+            podiumCard(
+              posicao: 1,
+              nome: primeiro.key,
+              total: primeiro.value,
+              icone: icone,
+              isMobile: isMobile,
+              rotulo: rotulo,
+            ),
 
-            // 1º
-            if (primeiro != null)
+            if (terceiro != null) ...[
+              SizedBox(width: isMobile ? 8 : 14),
               podiumCard(
-                altura: 190,
-                posicao: '1º',
-                nome: primeiro.key,
-                total: primeiro.value,
-                cor: Colors.amber,
-                icone: icone,
-                destaque: true,
-              ),
-
-            const SizedBox(width: 10),
-
-            // 3º
-            if (terceiro != null)
-              podiumCard(
-                altura: 150,
-                posicao: '3º',
+                posicao: 3,
                 nome: terceiro.key,
                 total: terceiro.value,
-                cor: Colors.brown,
                 icone: icone,
+                isMobile: isMobile,
+                rotulo: rotulo,
               ),
+            ],
           ],
         ),
 
         const SizedBox(height: 18),
 
-        // 4º e 5º
         Row(
           children: [
             if (quarto != null)
@@ -3068,11 +3467,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   posicao: '4º',
                   nome: quarto.key,
                   total: quarto.value,
+                  maximo: maximo,
                   cor: cor,
                 ),
               ),
 
-            const SizedBox(width: 12),
+            if (quarto != null && quinto != null) const SizedBox(width: 12),
 
             if (quinto != null)
               Expanded(
@@ -3080,6 +3480,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   posicao: '5º',
                   nome: quinto.key,
                   total: quinto.value,
+                  maximo: maximo,
                   cor: cor,
                 ),
               ),
@@ -3090,81 +3491,141 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget podiumCard({
-    required double altura,
-    required String posicao,
+    required int posicao,
     required String nome,
     required int total,
-    required Color cor,
     required IconData icone,
-    bool destaque = false,
+    required bool isMobile,
+    String rotulo = 'atendimentos',
   }) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
-    return Column(
-      children: [
-        if (destaque)
-          const Icon(Icons.workspace_premium, color: Colors.amber, size: 34),
+    final ouro = posicao == 1;
 
-        Text(
-          posicao,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: cor,
-            fontSize: destaque ? 20 : 16,
-          ),
-        ),
+    // Ouro, prata e bronze traduzidos para a paleta ativa.
+    final cor = switch (posicao) {
+      1 => NatusApp.douradoEscuro,
+      2 => NatusApp.textoSuave,
+      _ => NatusApp.rose,
+    };
 
-        const SizedBox(height: 6),
+    final alturaDegrau = switch (posicao) {
+      1 => isMobile ? 54.0 : 72.0,
+      2 => isMobile ? 36.0 : 48.0,
+      _ => isMobile ? 26.0 : 34.0,
+    };
 
-        Container(
-          width: destaque ? 140 : 110,
-          height: altura,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: cor.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: cor, width: destaque ? 4 : 3),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
+    final largura = ouro
+        ? (isMobile ? 116.0 : 150.0)
+        : (isMobile ? 100.0 : 126.0);
+
+    return SizedBox(
+      width: largura,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (ouro) ...[
+            Icon(Icons.workspace_premium, color: NatusApp.dourado, size: 30),
+            const SizedBox(height: 4),
+          ],
+
+          // Card de conteúdo: altura livre — nunca estoura.
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: isMobile ? 12 : 14,
+            ),
+            decoration: BoxDecoration(
+              color: NatusApp.offWhite,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(18),
               ),
-            ],
-          ),
-
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icone, color: cor, size: destaque ? 34 : 26),
-
-              const SizedBox(height: 10),
-
-              Text(
-                nome,
-                textAlign: TextAlign.center,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: destaque ? 15 : 13,
+              border: Border.all(
+                color: cor.withValues(alpha: ouro ? 0.9 : 0.45),
+                width: ouro ? 1.6 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: cor.withValues(alpha: 0.16),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
                 ),
-              ),
-
-              const SizedBox(height: 10),
-
-              Text(
-                '$total atendimentos',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: cor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: destaque ? 16 : 13,
+              ],
+            ),
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: ouro ? 20 : 16,
+                  backgroundColor: cor.withValues(alpha: 0.14),
+                  child: Icon(icone, color: cor, size: ouro ? 20 : 16),
                 ),
-              ),
-            ],
+
+                const SizedBox(height: 8),
+
+                Tooltip(
+                  message: nome,
+                  child: Text(
+                    nome,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: ouro ? 14 : 12.5,
+                      color: NatusApp.texto,
+                      height: 1.15,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                Text(
+                  '$total',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: ouro ? 22 : 17,
+                    color: cor,
+                  ),
+                ),
+
+                Text(
+                  rotulo,
+                  style: TextStyle(fontSize: 10.5, color: NatusApp.textoSuave),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+
+          // Degrau do pódio: a altura conta a história do ranking.
+          Container(
+            width: double.infinity,
+            height: alturaDegrau,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  cor.withValues(alpha: ouro ? 0.85 : 0.55),
+                  cor.withValues(alpha: ouro ? 0.6 : 0.35),
+                ],
+              ),
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(14),
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$posicaoº',
+              style: TextStyle(
+                color: NatusApp.offWhite,
+                fontWeight: FontWeight.w800,
+                fontSize: ouro ? 18 : 14,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3172,22 +3633,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required String posicao,
     required String nome,
     required int total,
+    required int maximo,
     required Color cor,
   }) {
+    final proporcao = maximo <= 0 ? 0.0 : (total / maximo).clamp(0.0, 1.0);
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.06),
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: cor.withValues(alpha: 0.22)),
       ),
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: cor.withValues(alpha: 0.15),
+            backgroundColor: cor.withValues(alpha: 0.12),
             child: Text(
               posicao,
-              style: TextStyle(color: cor, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: cor,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
             ),
           ),
 
@@ -3197,18 +3665,48 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  nome,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Tooltip(
+                        message: nome,
+                        child: Text(
+                          nome,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: NatusApp.texto,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    Text(
+                      '$total',
+                      style: TextStyle(
+                        color: cor,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
                 ),
 
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
 
-                Text(
-                  '$total atendimentos',
-                  style: TextStyle(color: cor, fontWeight: FontWeight.bold),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: proporcao,
+                    minHeight: 6,
+                    backgroundColor: NatusApp.bege,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      cor.withValues(alpha: 0.7),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -3329,10 +3827,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               title: isMobile ? '' : 'AME',
               radius: 54,
               color: Colors.green,
-              titleStyle: const TextStyle(
+              titleStyle: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: NatusApp.offWhite,
               ),
             ),
             PieChartSectionData(
@@ -3340,10 +3838,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               title: isMobile ? '' : 'Mista',
               radius: 54,
               color: Colors.orange,
-              titleStyle: const TextStyle(
+              titleStyle: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: NatusApp.offWhite,
               ),
             ),
             PieChartSectionData(
@@ -3351,10 +3849,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               title: isMobile ? '' : 'Fórmula',
               radius: 54,
               color: Colors.red,
-              titleStyle: const TextStyle(
+              titleStyle: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: NatusApp.offWhite,
               ),
             ),
           ],
@@ -3571,8 +4069,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       decoration: BoxDecoration(
         color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(20),
-        border:
-            Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.55)),
+        border: Border.all(
+          color: NatusApp.douradoClaro.withValues(alpha: 0.55),
+        ),
         boxShadow: [
           BoxShadow(
             color: NatusApp.vinhoProfundo.withValues(alpha: 0.04),
@@ -3584,7 +4083,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'ACONTECE ESTA SEMANA',
             style: TextStyle(
               fontSize: 11,
@@ -3598,7 +4097,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             semanas > 0
                 ? 'Semana $semanas • ${conteudoSemana['fase']}'
                 : 'Semana gestacional',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w800,
               color: NatusApp.vinho,
@@ -3653,7 +4152,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             children: [
               Text(
                 titulo,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
                   color: NatusApp.vinho,
@@ -3664,9 +4163,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
               Text(
                 texto,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
-                  color: Colors.black54,
+                  color: NatusApp.textoSuave,
                   height: 1.4,
                 ),
               ),
@@ -3691,7 +4190,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Calculadora de IG',
             style: TextStyle(
               fontSize: 30,
@@ -3702,9 +4201,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 6),
 
-          const Text(
+          Text(
             'Calcule a idade gestacional a partir da DPP e acompanhe a evolução do bebê.',
-            style: TextStyle(fontSize: 15, color: Colors.black54),
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 24),
@@ -3713,11 +4212,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             constraints: const BoxConstraints(maxWidth: 760),
             padding: const EdgeInsets.all(26),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: NatusApp.offWhite,
               borderRadius: BorderRadius.circular(28),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
+                  color: NatusApp.vinhoProfundo.withValues(alpha: 0.08),
                   blurRadius: 18,
                   offset: const Offset(0, 8),
                 ),
@@ -3726,7 +4225,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
                     CircleAvatar(
                       radius: 24,
@@ -3779,17 +4278,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFFFEFEA),
                     borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: NatusApp.rose.withValues(alpha: 0.8)),
+                    border: Border.all(
+                      color: NatusApp.rose.withValues(alpha: 0.8),
+                    ),
                   ),
                   child: temDppValida
                       ? Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
+                            Text(
                               'Resultado da idade gestacional',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.black54,
+                                color: NatusApp.textoSuave,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -3798,7 +4299,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                             Text(
                               resultadoIg,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 42,
                                 fontWeight: FontWeight.bold,
                                 color: NatusApp.vinho,
@@ -3824,7 +4325,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                 Expanded(
                                   child: Text(
                                     'Seu bebê está do tamanho de uma $fruta.\n\n${mensagemGestacional(semanas)}',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 17,
                                       fontWeight: FontWeight.w600,
                                       color: NatusApp.vinho,
@@ -3836,17 +4337,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                             const SizedBox(height: 18),
 
-                            const Text(
+                            Text(
                               'Cada semana representa uma nova etapa de desenvolvimento. A Natus acompanha essa jornada com cuidado, acolhimento e segurança.',
                               style: TextStyle(
                                 fontSize: 15,
-                                color: Colors.black54,
+                                color: NatusApp.textoSuave,
                                 height: 1.4,
                               ),
                             ),
                           ],
                         )
-                      : const Column(
+                      : Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
@@ -3862,7 +4363,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               'Digite a data provável do parto no formato dd/mm/aaaa para visualizar a idade gestacional e a fruta da semana.',
                               style: TextStyle(
                                 fontSize: 15,
-                                color: Colors.black54,
+                                color: NatusApp.textoSuave,
                                 height: 1.4,
                               ),
                             ),
@@ -3882,7 +4383,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       label: const Text('Atualizar cálculo'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: NatusApp.vinho,
-                        foregroundColor: Colors.white,
+                        foregroundColor: (NatusApp.escuro
+                            ? NatusApp.fundo
+                            : NatusApp.offWhite),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 20,
                           vertical: 17,
@@ -3943,7 +4446,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Cadastro de Gestantes',
                 style: TextStyle(
                   fontSize: 24,
@@ -3952,9 +4455,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Preencha as informações da gestante para iniciar o acompanhamento',
-                style: TextStyle(fontSize: 13, color: Colors.black54),
+                style: TextStyle(fontSize: 13, color: NatusApp.textoSuave),
               ),
               const SizedBox(height: 20),
             ],
@@ -4129,7 +4632,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             label: const Text('Salvar gestante'),
             style: ElevatedButton.styleFrom(
               backgroundColor: NatusApp.vinho,
-              foregroundColor: Colors.white,
+              foregroundColor: (NatusApp.escuro
+                  ? NatusApp.fundo
+                  : NatusApp.offWhite),
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
             ),
           ),
@@ -4159,7 +4664,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Gestantes',
             style: TextStyle(
               fontSize: 26,
@@ -4171,7 +4676,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 3),
 
-          const Text(
+          Text(
             'Acompanhamento das gestantes da sua clínica.',
             style: TextStyle(
               fontSize: 13,
@@ -4266,7 +4771,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 borderRadius: BorderRadius.circular(16),
               ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: NatusApp.offWhite,
             ),
           ),
 
@@ -4282,7 +4787,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final isMobile = MediaQuery.of(context).size.width < 700;
 
     if (biblioteca.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'Nenhum material disponível na biblioteca.',
           style: TextStyle(
@@ -4314,12 +4819,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         width: double.infinity,
         padding: EdgeInsets.all(isMobile ? 18 : 26),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: NatusApp.offWhite,
           borderRadius: BorderRadius.circular(30),
           border: Border.all(color: NatusApp.rose.withValues(alpha: 0.35)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -4339,7 +4844,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     color: const Color(0xFFFFEFEA),
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.menu_book_rounded,
                     color: NatusApp.vinho,
                     size: 34,
@@ -4363,12 +4868,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                       const SizedBox(height: 8),
 
-                      const Text(
+                      Text(
                         'Conteúdos escolhidos para acompanhar sua gestação com segurança, informação e acolhimento.',
                         style: TextStyle(
                           fontSize: 15,
                           height: 1.45,
-                          color: Colors.black54,
+                          color: NatusApp.textoSuave,
                         ),
                       ),
                     ],
@@ -4404,18 +4909,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         ),
                       ],
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
                         Icon(
                           Icons.grid_view_rounded,
-                          color: Colors.white,
+                          color: NatusApp.offWhite,
                           size: 18,
                         ),
                         SizedBox(width: 8),
                         Text(
                           'Todos',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: NatusApp.offWhite,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -4434,7 +4939,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           vertical: 13,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: NatusApp.offWhite,
                           borderRadius: BorderRadius.circular(22),
                           border: Border.all(
                             color: NatusApp.rose.withValues(alpha: 0.45),
@@ -4442,7 +4947,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         ),
                         child: Text(
                           nomeCategoria,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: NatusApp.vinho,
                             fontWeight: FontWeight.w800,
                           ),
@@ -4467,7 +4972,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   colors: [Color(0xFFFFF7F3), Color(0xFFFFEAE3)],
                 ),
                 borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
+                border: Border.all(
+                  color: NatusApp.rose.withValues(alpha: 0.45),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4478,10 +4985,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.75),
+                      color: NatusApp.offWhite.withValues(alpha: 0.75),
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
@@ -4529,11 +5036,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text(
+                                    Text(
                                       'Guia da semana',
                                       style: TextStyle(
                                         fontSize: 14,
-                                        color: Colors.black54,
+                                        color: NatusApp.textoSuave,
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
@@ -4543,7 +5050,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                     Text(
                                       materialDestaque['titulo'] ??
                                           'Material selecionado',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 24,
                                         fontWeight: FontWeight.w900,
                                         color: NatusApp.vinho,
@@ -4558,10 +5065,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                           'Conteúdo selecionado pela equipe Natus para apoiar sua jornada.',
                                       maxLines: 4,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 15,
                                         height: 1.45,
-                                        color: Colors.black54,
+                                        color: NatusApp.textoSuave,
                                       ),
                                     ),
 
@@ -4576,19 +5083,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                         color: NatusApp.vinho,
                                         borderRadius: BorderRadius.circular(18),
                                       ),
-                                      child: const Row(
+                                      child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Icon(
                                             Icons.auto_stories_rounded,
-                                            color: Colors.white,
+                                            color: NatusApp.offWhite,
                                             size: 20,
                                           ),
                                           SizedBox(width: 8),
                                           Text(
                                             'Acessar material abaixo',
                                             style: TextStyle(
-                                              color: Colors.white,
+                                              color: NatusApp.offWhite,
                                               fontWeight: FontWeight.w800,
                                             ),
                                           ),
@@ -4608,7 +5115,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const SizedBox(height: 30),
 
             // MAIS CONTEÚDOS
-            const Row(
+            Row(
               children: [
                 CircleAvatar(
                   radius: 18,
@@ -4680,9 +5187,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               decoration: BoxDecoration(
                 color: const Color(0xFFFFF7F3),
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: NatusApp.rose.withValues(alpha: 0.35)),
+                border: Border.all(
+                  color: NatusApp.rose.withValues(alpha: 0.35),
+                ),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   CircleAvatar(
                     backgroundColor: Color(0xFFFFEFEA),
@@ -4698,7 +5207,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       style: TextStyle(
                         fontSize: 14,
                         height: 1.35,
-                        color: Colors.black54,
+                        color: NatusApp.textoSuave,
                       ),
                     ),
                   ),
@@ -4758,12 +5267,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         child: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: NatusApp.offWhite,
             borderRadius: BorderRadius.circular(26),
             border: Border.all(color: NatusApp.rose.withValues(alpha: 0.30)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
+                color: NatusApp.vinhoProfundo.withValues(alpha: 0.06),
                 blurRadius: 16,
                 offset: const Offset(0, 7),
               ),
@@ -4778,7 +5287,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(22),
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [Color(0xFFFFEFEA), NatusApp.rose],
@@ -4798,7 +5307,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             return child;
                           }
 
-                          return const Center(
+                          return Center(
                             child: CircularProgressIndicator(
                               color: NatusApp.vinho,
                               strokeWidth: 2,
@@ -4830,10 +5339,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         ),
                         child: Text(
                           etiqueta.toUpperCase(),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w900,
-                            color: Colors.white,
+                            color: NatusApp.offWhite,
                             letterSpacing: 0.4,
                           ),
                         ),
@@ -4847,11 +5356,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         width: 38,
                         height: 38,
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.92),
+                          color: NatusApp.offWhite.withValues(alpha: 0.92),
                           borderRadius: BorderRadius.circular(15),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.10),
+                              color: NatusApp.vinhoProfundo.withValues(
+                                alpha: 0.10,
+                              ),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             ),
@@ -4878,7 +5389,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   titulo,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     height: 1.20,
                     fontWeight: FontWeight.w900,
@@ -4897,10 +5408,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       : descricao,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     height: 1.30,
-                    color: Colors.black54,
+                    color: NatusApp.textoSuave,
                   ),
                 ),
               ),
@@ -4970,7 +5481,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Atendimentos',
             style: TextStyle(
               fontSize: 30,
@@ -5048,14 +5559,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             label: const Text('Salvar atendimento'),
             style: ElevatedButton.styleFrom(
               backgroundColor: NatusApp.vinho,
-              foregroundColor: Colors.white,
+              foregroundColor: (NatusApp.escuro
+                  ? NatusApp.fundo
+                  : NatusApp.offWhite),
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
             ),
           ),
 
           const SizedBox(height: 30),
 
-          const Text(
+          Text(
             'Lista de Atendimentos',
             style: TextStyle(
               fontSize: 24,
@@ -5123,7 +5636,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Materiais usados neste atendimento',
           style: TextStyle(
             fontSize: 20,
@@ -5250,7 +5763,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: const CircleAvatar(
+            leading: CircleAvatar(
               backgroundColor: NatusApp.rose,
               child: Icon(Icons.medical_services, color: NatusApp.vinho),
             ),
@@ -5408,8 +5921,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   Widget telaFichaGestante(Map<String, String> g) {
     final igAtual = calcularIdadeGestacional(g['dpp'] ?? '');
 
-    final usuarioEnfermeira =
-        tipoEhProfissionalClinica(widget.tipoUsuario);
+    final usuarioEnfermeira = tipoEhProfissionalClinica(widget.tipoUsuario);
     final podeVerFinanceiroGestante = !usuarioEnfermeira;
 
     final atendimentosDaGestante = atendimentos
@@ -5431,7 +5943,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             label: const Text('Voltar para lista'),
             style: ElevatedButton.styleFrom(
               backgroundColor: NatusApp.vinho,
-              foregroundColor: Colors.white,
+              foregroundColor: (NatusApp.escuro
+                  ? NatusApp.fundo
+                  : NatusApp.offWhite),
             ),
           ),
           const SizedBox(height: 20),
@@ -5457,7 +5971,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             icon: const Icon(Icons.edit),
             label: const Text('Editar cadastro'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
+              backgroundColor: NatusApp.offWhite,
               foregroundColor: NatusApp.vinho,
             ),
           ),
@@ -5472,7 +5986,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             label: const Text('Reenviar acesso da gestante'),
             style: ElevatedButton.styleFrom(
               backgroundColor: NatusApp.vinho,
-              foregroundColor: Colors.white,
+              foregroundColor: (NatusApp.escuro
+                  ? NatusApp.fundo
+                  : NatusApp.offWhite),
             ),
           ),
 
@@ -5607,7 +6123,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 backgroundColor: inicioContracao == null
                     ? Colors.green
                     : Colors.red,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 22,
                   vertical: 18,
@@ -5622,23 +6140,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           blocoFicha('Documentos da gestante', [
             ...documentos
-                .where((d) => d['gestante'] == (g['nomeGestante'] ?? ''))
+                .where(
+                  (d) =>
+                      d['gestante'] == (g['nomeGestante'] ?? '') &&
+                      !ExameArquivo.documentoEhExame(d),
+                )
                 .map((d) {
                   return linhaInfo(d['tipo'] ?? 'Documento', d['nome'] ?? '');
                 }),
           ]),
 
-          blocoFicha('Exames', [
-            ...documentos
-                .where(
-                  (d) =>
-                      d['gestante'] == (g['nomeGestante'] ?? '') &&
-                      d['tipo'] == 'Exame',
-                )
-                .map((d) {
-                  return cardDocumentoProntuario(d);
-                }),
-          ]),
+          blocoExamesFichaGestante(g),
 
           if (podeVerFinanceiroGestante)
             blocoFicha('Contratos', [
@@ -5680,11 +6192,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       margin: const EdgeInsets.only(bottom: 20),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.06),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -5698,7 +6210,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               Expanded(
                 child: Text(
                   titulo,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                     color: NatusApp.vinho,
@@ -5717,7 +6229,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         color: NatusApp.rose.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(999),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.edit_rounded,
                         size: 19,
                         color: NatusApp.vinho,
@@ -5790,7 +6302,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selecionado ? NatusApp.marsala : Colors.white,
+          color: selecionado ? NatusApp.marsala : NatusApp.offWhite,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: selecionado
@@ -5820,9 +6332,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         });
       },
       style: ElevatedButton.styleFrom(
-        backgroundColor: selecionado ? NatusApp.vinho : Colors.white,
-        foregroundColor: selecionado ? Colors.white : NatusApp.vinho,
-        side: const BorderSide(color: NatusApp.vinho),
+        backgroundColor: selecionado ? NatusApp.vinho : NatusApp.offWhite,
+        foregroundColor: selecionado
+            ? (NatusApp.escuro ? NatusApp.fundo : NatusApp.offWhite)
+            : NatusApp.vinho,
+        side: BorderSide(color: NatusApp.vinho),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
       ),
       child: Text(filtro),
@@ -5861,7 +6375,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Almoxarifado',
             style: TextStyle(
               fontSize: 30,
@@ -5872,9 +6386,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 6),
 
-          const Text(
+          Text(
             'Controle de insumos, estoque mínimo e materiais disponíveis.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 20),
@@ -5923,7 +6437,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               label: const Text('Salvar insumo'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 22,
                   vertical: 16,
@@ -6043,9 +6559,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         });
       },
       style: ElevatedButton.styleFrom(
-        backgroundColor: selecionado ? NatusApp.vinho : Colors.white,
-        foregroundColor: selecionado ? Colors.white : NatusApp.vinho,
-        side: const BorderSide(color: NatusApp.vinho),
+        backgroundColor: selecionado ? NatusApp.vinho : NatusApp.offWhite,
+        foregroundColor: selecionado
+            ? (NatusApp.escuro ? NatusApp.fundo : NatusApp.offWhite)
+            : NatusApp.vinho,
+        side: BorderSide(color: NatusApp.vinho),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
       ),
       child: Text(filtro),
@@ -6057,8 +6575,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String valor,
     IconData icone,
     Color cor,
-  ) =>
-      NatusCardResumoAlmox(titulo, valor, icone, cor);
+  ) => NatusCardResumoAlmox(titulo, valor, icone, cor);
 
   Widget cardMaterialPremium(Map<String, String> m) {
     final nome = m['nome'] ?? '';
@@ -6073,12 +6590,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: corStatus.withValues(alpha: 0.22)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -6091,7 +6608,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             children: [
               CircleAvatar(
                 backgroundColor: NatusApp.rose.withValues(alpha: 0.25),
-                child: const Icon(Icons.inventory_2, color: NatusApp.vinho),
+                child: Icon(Icons.inventory_2, color: NatusApp.vinho),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -6099,7 +6616,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   nome,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: NatusApp.vinho,
@@ -6148,7 +6665,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Centro de custo',
             style: TextStyle(
               fontSize: 30,
@@ -6170,7 +6687,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               return Card(
                 margin: const EdgeInsets.only(bottom: 14),
                 child: ListTile(
-                  leading: const CircleAvatar(
+                  leading: CircleAvatar(
                     backgroundColor: NatusApp.rose,
                     child: Icon(
                       Icons.account_balance_wallet,
@@ -6217,68 +6734,70 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  String frutaDaSemana(int semanas) {
-    if (semanas <= 4) return 'grão de papoula';
-    if (semanas <= 6) return 'lentilha';
-    if (semanas <= 8) return 'uva';
-    if (semanas <= 10) return 'morango';
-    if (semanas <= 12) return 'limão';
-    if (semanas <= 16) return 'abacate';
-    if (semanas <= 20) return 'manga';
-    if (semanas <= 24) return 'milho';
-    if (semanas <= 28) return 'berinjela';
-    if (semanas <= 32) return 'coco';
-    if (semanas <= 36) return 'melão';
+  String chaveFrutaDaSemana(int semanas) {
+    final semana = semanas.clamp(4, 42).toInt();
 
-    return 'melancia';
+    const frutasPorSemana = <int, String>{
+      4: 'mirtilo',
+      5: 'framboesa',
+      6: 'framboesa',
+      7: 'uva',
+      8: 'uva',
+      9: 'morango',
+      10: 'morango',
+      11: 'limao',
+      12: 'limao',
+      13: 'pessego',
+      14: 'pessego',
+      15: 'abacate',
+      16: 'abacate',
+      17: 'pera',
+      18: 'manga',
+      19: 'manga',
+      20: 'manga',
+      21: 'milho',
+      22: 'milho',
+      23: 'berinjela',
+      24: 'berinjela',
+      25: 'couve flor',
+      26: 'couve flor',
+      27: 'repolho',
+      28: 'repolho',
+      29: 'abobora',
+      30: 'abobora',
+      31: 'coco',
+      32: 'coco',
+      33: 'abacaxi',
+      34: 'abacaxi',
+      35: 'melao',
+      36: 'melao',
+      37: 'melancia',
+      38: 'melancia',
+      39: 'melancia',
+      40: 'melancia',
+      41: 'melancia',
+      42: 'melancia',
+    };
+
+    return frutasPorSemana[semana] ?? 'morango';
+  }
+
+  String frutaDaSemana(int semanas) {
+    const nomesExibicao = <String, String>{
+      'limao': 'limão',
+      'pessego': 'pêssego',
+      'couve flor': 'couve-flor',
+      'abobora': 'abóbora',
+      'melao': 'melão',
+    };
+
+    final chave = chaveFrutaDaSemana(semanas);
+    return nomesExibicao[chave] ?? chave;
   }
 
   String imagemFrutaDaSemana(int semanas) {
-    final int semana = semanas.clamp(4, 42).toInt();
-
-    final imagens = <int, String>{
-      4: 'assets/frutas/mirtilo.png',
-      5: 'assets/frutas/framboesa.png',
-      6: 'assets/frutas/framboesa.png',
-      7: 'assets/frutas/uva.png',
-      8: 'assets/frutas/uva.png',
-      9: 'assets/frutas/morango.png',
-      10: 'assets/frutas/morango.png',
-      11: 'assets/frutas/limao.png',
-      12: 'assets/frutas/limao.png',
-      13: 'assets/frutas/pessego.png',
-      14: 'assets/frutas/pessego.png',
-      15: 'assets/frutas/abacate.png',
-      16: 'assets/frutas/abacate.png',
-      17: 'assets/frutas/pera.png',
-      18: 'assets/frutas/manga.png',
-      19: 'assets/frutas/manga.png',
-      20: 'assets/frutas/manga.png',
-      21: 'assets/frutas/milho.png',
-      22: 'assets/frutas/milho.png',
-      23: 'assets/frutas/berinjela.png',
-      24: 'assets/frutas/berinjela.png',
-      25: 'assets/frutas/couve flor.png',
-      26: 'assets/frutas/couve flor.png',
-      27: 'assets/frutas/repolho.png',
-      28: 'assets/frutas/repolho.png',
-      29: 'assets/frutas/abobora.png',
-      30: 'assets/frutas/abobora.png',
-      31: 'assets/frutas/coco.png',
-      32: 'assets/frutas/coco.png',
-      33: 'assets/frutas/abacaxi.png',
-      34: 'assets/frutas/abacaxi.png',
-      35: 'assets/frutas/melao.png',
-      36: 'assets/frutas/melao.png',
-      37: 'assets/frutas/melancia.png',
-      38: 'assets/frutas/melancia.png',
-      39: 'assets/frutas/melancia.png',
-      40: 'assets/frutas/melancia.png',
-      41: 'assets/frutas/melancia.png',
-      42: 'assets/frutas/melancia.png',
-    };
-
-    return imagens[semana] ?? 'assets/frutas/morango.png';
+    final chave = chaveFrutaDaSemana(semanas);
+    return 'assets/frutas/$chave.png';
   }
 
   Widget imagemGestacional({required int semanas, double tamanho = 150}) {
@@ -6302,7 +6821,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   String artigoFruta(String fruta) {
     const femininas = {
-      'lentilha', 'framboesa', 'manga', 'melancia', 'uva', 'berinjela',
+      'framboesa',
+      'uva',
+      'pera',
+      'manga',
+      'berinjela',
+      'couve-flor',
+      'abóbora',
+      'melancia',
     };
     return femininas.contains(fruta.toLowerCase().trim()) ? 'uma' : 'um';
   }
@@ -6315,10 +6841,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(14),
-        border:
-            Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.7)),
+        border: Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.7)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -6330,7 +6855,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             children: [
               Text(
                 titulo,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   color: NatusApp.textoSuave,
                   fontWeight: FontWeight.w600,
@@ -6339,7 +6864,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               const SizedBox(height: 2),
               Text(
                 valor,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   color: NatusApp.vinho,
                   fontWeight: FontWeight.w800,
@@ -6368,8 +6893,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final legendaProgresso = diasRestantes == 9999
         ? 'Informe a DPP para acompanhar o progresso da gestação.'
         : semanasRestantes <= 0
-            ? 'Reta final: o grande dia pode chegar a qualquer momento!'
-            : 'Faltam $semanasRestantes semanas para o grande dia!';
+        ? 'Reta final: o grande dia pode chegar a qualquer momento!'
+        : 'Faltam $semanasRestantes semanas para o grande dia!';
 
     return Container(
       width: double.infinity,
@@ -6377,8 +6902,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         color: NatusApp.offWhite,
-        border:
-            Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.6)),
+        border: Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.6)),
         boxShadow: [
           BoxShadow(
             color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
@@ -6424,7 +6948,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       ),
                       child: Text(
                         idadeGestacional,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
                           color: NatusApp.offWhite,
@@ -6440,7 +6964,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           TextSpan(text: '$nomeBebe está do tamanho\nde '),
                           TextSpan(
                             text: '${artigoFruta(fruta)} $fruta',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontStyle: FontStyle.italic,
                               fontFamily: 'Georgia',
                               color: NatusApp.marsala,
@@ -6461,7 +6985,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     Text(
                       'Uma fase importante da jornada, acompanhada com cuidado e acolhimento.',
                       textAlign: compacto ? TextAlign.center : TextAlign.start,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         height: 1.45,
                         color: NatusApp.textoSuave,
@@ -6502,15 +7026,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                   : 0.0,
                               minHeight: 7,
                               backgroundColor: NatusApp.bege,
-                              valueColor: const AlwaysStoppedAnimation(
-                                  NatusApp.marsala),
+                              valueColor: AlwaysStoppedAnimation(
+                                NatusApp.marsala,
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Text(
                           '$percentual%',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
                             color: NatusApp.marsala,
@@ -6522,7 +7047,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     Text(
                       legendaProgresso,
                       textAlign: compacto ? TextAlign.center : TextAlign.start,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: NatusApp.textoSuave,
@@ -6535,10 +7060,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   width: compacto ? 222 : 235,
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: NatusApp.offWhite,
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(
-                        color: NatusApp.douradoClaro.withValues(alpha: 0.7)),
+                      color: NatusApp.douradoClaro.withValues(alpha: 0.7),
+                    ),
                     boxShadow: [
                       BoxShadow(
                         color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
@@ -6555,7 +7081,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         tamanho: tamanhoImagem,
                       ),
                       const SizedBox(height: 12),
-                      const Text(
+                      Text(
                         'Referência da semana',
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -6603,10 +7129,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return bloco('Contador de contrações', [
       Text(
         'Gestante: ${gestante['nomeGestante'] ?? 'Não informado'}',
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          color: NatusApp.vinho,
-        ),
+        style: TextStyle(fontWeight: FontWeight.bold, color: NatusApp.vinho),
       ),
 
       const SizedBox(height: 12),
@@ -6617,7 +7140,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         label: Text(emContracao ? 'Parar contração' : 'Iniciar contração'),
         style: ElevatedButton.styleFrom(
           backgroundColor: emContracao ? Colors.red : Colors.green,
-          foregroundColor: Colors.white,
+          foregroundColor: (NatusApp.escuro
+              ? NatusApp.fundo
+              : NatusApp.offWhite),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
         ),
       ),
@@ -6641,9 +7166,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final isMobile = MediaQuery.of(context).size.width < 700;
 
     return blocoFicha('Biblioteca Natus', [
-      const Text(
+      Text(
         'Conteúdos selecionados para apoiar sua jornada.',
-        style: TextStyle(color: Colors.black54),
+        style: TextStyle(color: NatusApp.textoSuave),
       ),
 
       const SizedBox(height: 20),
@@ -6712,7 +7237,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }).toList();
 
     if (gestantesVinculadas.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'Nenhuma gestante vinculada a este login.',
           style: TextStyle(
@@ -6790,7 +7315,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     end: Alignment.bottomRight,
                     colors: parcelaAtrasada
                         ? [const Color(0xFFFFF5F5), const Color(0xFFFFE8E8)]
-                        : [Colors.white, const Color(0xFFFFF4F0)],
+                        : [NatusApp.offWhite, const Color(0xFFFFF4F0)],
                   ),
                   borderRadius: BorderRadius.circular(30),
                   border: Border.all(
@@ -6800,7 +7325,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
+                      color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
                       blurRadius: 18,
                       offset: const Offset(0, 8),
                     ),
@@ -6841,9 +7366,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                 parcelaAtrasada
                                     ? 'Atenção financeira'
                                     : 'Financeiro Natus',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
-                                  color: Colors.black54,
+                                  color: NatusApp.textoSuave,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -6899,7 +7424,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.78),
+                        color: NatusApp.offWhite.withValues(alpha: 0.78),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: parcelaAtrasada
@@ -6913,11 +7438,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Valor da parcela',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: Colors.black54,
+                                    color: NatusApp.textoSuave,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -6969,17 +7494,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           child: Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.72),
+                              color: NatusApp.offWhite.withValues(alpha: 0.72),
                               borderRadius: BorderRadius.circular(22),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Vencimento',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: Colors.black54,
+                                    color: NatusApp.textoSuave,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -7007,17 +7532,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           child: Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.72),
+                              color: NatusApp.offWhite.withValues(alpha: 0.72),
                               borderRadius: BorderRadius.circular(22),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'Status',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: Colors.black54,
+                                    color: NatusApp.textoSuave,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -7081,7 +7606,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Documentos',
             style: TextStyle(
               fontSize: 30,
@@ -7155,6 +7680,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     String gestanteSelecionadaNome = '';
+    Map<String, String> gestanteSelecionadaDados = {};
 
     if (widget.tipoUsuario == 'gestante') {
       final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -7162,6 +7688,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         (g) => g['uidGestante'] == uidLogado,
         orElse: () => {},
       );
+      gestanteSelecionadaDados = gestanteLogada;
       gestanteSelecionadaNome = gestanteLogada['nomeGestante'] ?? '';
     } else {
       if (documentoGestanteSelecionada.isEmpty ||
@@ -7182,6 +7709,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
+      gestanteSelecionadaDados = gestanteSelecionada;
       gestanteSelecionadaNome = documentoGestanteSelecionada;
     }
 
@@ -7199,25 +7727,40 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
-    final novoDocumento = {
+    final agora = DateTime.now();
+    final novoDocumento = <String, String>{
       'nome': arquivoSelecionado!.name,
       'tipo': documentoTipoSelecionado,
       'gestante': gestanteSelecionadaNome,
+      'idGestante': gestanteSelecionadaDados['id'] ?? '',
+      'uidGestante': gestanteSelecionadaDados['uidGestante'] ?? '',
+      'nomeGestante': gestanteSelecionadaNome,
       'arquivoNome': arquivoSelecionado!.name,
       'arquivoUrl': urlArquivo,
-      'data': formatarDataHora(DateTime.now()),
+      'data': formatarDataHora(agora),
+      'criadoEm': agora.toIso8601String(),
+      'enviadoPorUid': FirebaseAuth.instance.currentUser?.uid ?? '',
     };
 
-    setState(() {
-      documentos.add(novoDocumento);
-      documentoTipoSelecionado = 'Exame';
-      documentoGestanteSelecionada = 'Selecione';
-      arquivoSelecionado = null;
-    });
+    try {
+      final docRef = await firestore
+          .collection('documentos')
+          .add(novoDocumento);
+      novoDocumento['id'] = docRef.id;
+      if (!mounted) return;
 
-    await firestore.collection('documentos').add(novoDocumento);
+      setState(() {
+        documentos.add(novoDocumento);
+        documentoTipoSelecionado = 'Exame';
+        documentoGestanteSelecionada = 'Selecione';
+        arquivoSelecionado = null;
+      });
 
-    mostrarMensagem('Documento salvo com arquivo!');
+      mostrarMensagem('Documento salvo com arquivo!');
+    } catch (e) {
+      if (!mounted) return;
+      mostrarMensagem('Erro ao salvar os dados do documento: $e');
+    }
   }
 
   Widget listaDocumentos() {
@@ -7291,7 +7834,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             children: [
               Text(
                 tipo,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: NatusApp.vinho,
@@ -7312,13 +7855,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       horizontal: 18,
                       vertical: 12,
                     ),
-                    leading: const CircleAvatar(
+                    leading: CircleAvatar(
                       backgroundColor: NatusApp.rose,
                       child: Icon(Icons.description, color: NatusApp.vinho),
                     ),
                     title: Text(
                       d['arquivoNome'] ?? d['nome'] ?? 'Documento',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: NatusApp.vinho,
                       ),
@@ -7333,10 +7876,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       children: [
                         IconButton(
                           tooltip: 'Abrir documento',
-                          icon: const Icon(
-                            Icons.open_in_new,
-                            color: NatusApp.vinho,
-                          ),
+                          icon: Icon(Icons.open_in_new, color: NatusApp.vinho),
                           onPressed: () async {
                             final url = d['arquivoUrl'];
 
@@ -7367,11 +7907,83 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  Widget blocoExamesFichaGestante(Map<String, String> gestante) {
+    final idGestante = (gestante['id'] ?? '').trim();
+    final stream = idGestante.isEmpty
+        ? firestore.collection('exames').snapshots()
+        : firestore
+              .collection('exames')
+              .where('idGestante', isEqualTo: idGestante)
+              .snapshots();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: stream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return blocoFicha('Exames', [
+            const Text('Não foi possível carregar os exames desta gestante.'),
+          ]);
+        }
+
+        if (!snapshot.hasData) {
+          return blocoFicha('Exames', [
+            const Center(child: CircularProgressIndicator()),
+          ]);
+        }
+
+        final examesAtuais = snapshot.data!.docs.map((doc) {
+          return ExameArquivo.fromExame(
+            doc.id,
+            doc.data() as Map<String, dynamic>,
+          );
+        });
+        final examesLegados = documentos
+            .where(ExameArquivo.documentoEhExame)
+            .map(ExameArquivo.fromDocumento);
+        final exames =
+            removerExamesDuplicados([
+                ...examesAtuais,
+                ...examesLegados,
+              ]).where((exame) => exame.pertenceA(gestante)).toList()
+              ..sort((a, b) => b.dataOrdenacao.compareTo(a.dataOrdenacao));
+
+        return blocoFicha('Exames', [
+          if (exames.isEmpty)
+            const Text('Nenhum exame enviado para esta gestante.')
+          else
+            ...exames.map(cardExameProntuario),
+        ]);
+      },
+    );
+  }
+
+  Widget cardExameProntuario(ExameArquivo exame) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: NatusApp.rose,
+          child: Icon(Icons.biotech_rounded, color: NatusApp.vinho),
+        ),
+        title: Text(
+          exame.nomeArquivo,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text('Enviado em: ${exame.dataExibicao}'),
+        trailing: IconButton(
+          tooltip: 'Abrir exame',
+          icon: Icon(Icons.open_in_new, color: NatusApp.vinho),
+          onPressed: exame.url.isEmpty ? null : () => abrirDocumento(exame.url),
+        ),
+      ),
+    );
+  }
+
   Widget cardDocumentoProntuario(Map<String, String> d) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
-        leading: const CircleAvatar(
+        leading: CircleAvatar(
           backgroundColor: NatusApp.rose,
           child: Icon(Icons.description, color: NatusApp.vinho),
         ),
@@ -7385,7 +7997,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ),
         trailing: IconButton(
           tooltip: 'Abrir documento',
-          icon: const Icon(Icons.open_in_new, color: NatusApp.vinho),
+          icon: Icon(Icons.open_in_new, color: NatusApp.vinho),
           onPressed: () async {
             final url = d['arquivoUrl'];
 
@@ -7441,7 +8053,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Contador de Contrações',
             style: TextStyle(
               fontSize: 30,
@@ -7452,9 +8064,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 6),
 
-          const Text(
+          Text(
             'Registre início, fim, intensidade e observações de cada contração.',
-            style: TextStyle(fontSize: 15, color: Colors.black54),
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 24),
@@ -7489,9 +8101,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   decoration: BoxDecoration(
                     color: NatusApp.rose.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
+                    border: Border.all(
+                      color: NatusApp.rose.withValues(alpha: 0.45),
+                    ),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Nenhuma gestante ativa encontrada para registrar contrações.',
                     style: TextStyle(
                       color: NatusApp.vinho,
@@ -7556,7 +8170,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 backgroundColor: inicioContracao == null
                     ? Colors.green
                     : Colors.red,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 22,
                   vertical: 18,
@@ -7800,7 +8416,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
-          color: isUltima ? const Color(0xFFFFEFEA) : Colors.white,
+          color: isUltima ? const Color(0xFFFFEFEA) : NatusApp.offWhite,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -7809,14 +8425,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               backgroundColor: isUltima ? NatusApp.vinho : NatusApp.rose,
               child: Icon(
                 Icons.timer,
-                color: isUltima ? Colors.white : NatusApp.vinho,
+                color: isUltima ? NatusApp.offWhite : NatusApp.vinho,
               ),
             ),
             title: Text(
               'Duração: ${c['duracao'] ?? 'Não informada'}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: isUltima ? NatusApp.vinho : Colors.black87,
+                color: isUltima ? NatusApp.vinho : NatusApp.texto,
               ),
             ),
             subtitle: Column(
@@ -7841,7 +8457,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   ),
                   child: Text(
                     'Intervalo: ${c['intervalo'] ?? 'Não informado'}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: NatusApp.vinho,
                     ),
@@ -7876,7 +8492,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Controle de Usuários',
                 style: TextStyle(
                   fontSize: 30,
@@ -7887,9 +8503,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
               const SizedBox(height: 6),
 
-              const Text(
+              Text(
                 'Gerencie os perfis de acesso do sistema Natus.',
-                style: TextStyle(fontSize: 15, color: Colors.black54),
+                style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
               ),
 
               const SizedBox(height: 20),
@@ -7900,7 +8516,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 label: const Text('Criar usuário'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: NatusApp.vinho,
-                  foregroundColor: Colors.white,
+                  foregroundColor: (NatusApp.escuro
+                      ? NatusApp.fundo
+                      : NatusApp.offWhite),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 22,
                     vertical: 16,
@@ -7932,7 +8550,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 label: const Text('Importar XLS/CSV 2026'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: NatusApp.vinho,
-                  foregroundColor: Colors.white,
+                  foregroundColor: (NatusApp.escuro
+                      ? NatusApp.fundo
+                      : NatusApp.offWhite),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 22,
                     vertical: 16,
@@ -7952,7 +8572,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   margin: const EdgeInsets.only(bottom: 12),
                   child: ListTile(
                     onTap: () => alterarTipoUsuario(doc.id, tipo),
-                    leading: const CircleAvatar(
+                    leading: CircleAvatar(
                       backgroundColor: NatusApp.rose,
                       child: Icon(Icons.person, color: NatusApp.vinho),
                     ),
@@ -7983,7 +8603,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                   onPressed: () => Navigator.pop(context, true),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
+                                    foregroundColor: (NatusApp.escuro
+                                        ? NatusApp.fundo
+                                        : NatusApp.offWhite),
                                   ),
                                   child: const Text('Excluir'),
                                 ),
@@ -8020,7 +8642,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Prontuário Obstétrico',
             style: TextStyle(
               fontSize: 30,
@@ -8031,9 +8653,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 8),
 
-          const Text(
+          Text(
             'Área clínica da gestante com anamnese e evolução.',
-            style: TextStyle(fontSize: 15, color: Colors.black54),
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 24),
@@ -8042,11 +8664,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: NatusApp.offWhite,
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -8091,11 +8713,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               width: double.infinity,
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: NatusApp.offWhite,
                 borderRadius: BorderRadius.circular(22),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
+                    color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -8106,7 +8728,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 children: [
                   Text(
                     gestanteProntuarioSelecionada!['nomeGestante'] ?? '',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                       color: NatusApp.vinho,
@@ -8150,7 +8772,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                   const SizedBox(height: 28),
 
-                  const Text(
+                  Text(
                     'Seções do prontuário',
                     style: TextStyle(
                       fontSize: 20,
@@ -8179,6 +8801,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         Icons.medical_information,
                         'Plano de cuidado',
                       ),
+                      cardSessaoProntuario(
+                        Icons.warning_amber_rounded,
+                        'Risco gestacional',
+                      ),
                     ],
                   ),
 
@@ -8195,6 +8821,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                   if (secaoProntuarioSelecionada == 'Plano de cuidado')
                     blocoPlanoCuidadoProntuario(gestanteProntuarioSelecionada!),
+
+                  if (secaoProntuarioSelecionada == 'Risco gestacional')
+                    blocoRiscoGestacionalProntuario(
+                      gestanteProntuarioSelecionada!,
+                    ),
                   const SizedBox(height: 24),
 
                   timelineProntuario(gestanteProntuarioSelecionada!),
@@ -8223,7 +8854,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           Text(
             '$titulo: ',
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.bold,
               color: NatusApp.vinho,
             ),
@@ -8248,7 +8879,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: selecionado ? NatusApp.vinho : Colors.white,
+          color: selecionado ? NatusApp.vinho : NatusApp.offWhite,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: selecionado
@@ -8262,11 +8893,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             CircleAvatar(
               radius: 26,
               backgroundColor: selecionado
-                  ? Colors.white.withValues(alpha: 0.18)
+                  ? NatusApp.offWhite.withValues(alpha: 0.18)
                   : NatusApp.rose.withValues(alpha: 0.18),
               child: Icon(
                 icone,
-                color: selecionado ? Colors.white : NatusApp.vinho,
+                color: selecionado ? NatusApp.offWhite : NatusApp.vinho,
                 size: 28,
               ),
             ),
@@ -8276,13 +8907,220 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: selecionado ? Colors.white : NatusApp.vinho,
+                color: selecionado ? NatusApp.offWhite : NatusApp.vinho,
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Widget blocoRiscoGestacionalProntuario(Map<String, String> gestante) {
+    final risco = gindicadores.normalizarRiscoGestacional(
+      gestante['riscoGestacional'],
+    );
+    final diabetes = gindicadores.normalizarDiabetesGestacional(
+      gestante['diabetesGestacional'],
+    );
+    final podeEditar =
+        usuarioEhAdmin() || tipoEhProfissionalClinica(widget.tipoUsuario);
+
+    return blocoFicha('Classificação de risco gestacional', [
+      Text(
+        'Registre a classificação vigente no pré-natal. Cada atualização '
+        'fica salva no histórico clínico da gestante.',
+        style: TextStyle(color: NatusApp.textoSuave, height: 1.4),
+      ),
+      const SizedBox(height: 16),
+      infoCompactaProntuario('Risco gestacional atual', risco),
+      infoCompactaProntuario('Diabetes gestacional', diabetes),
+      if (podeEditar) ...[
+        const SizedBox(height: 8),
+        ElevatedButton.icon(
+          onPressed: () => abrirClassificacaoRiscoProntuario(gestante),
+          icon: const Icon(Icons.edit_note_rounded),
+          label: const Text('Atualizar classificação'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: NatusApp.vinho,
+            foregroundColor: NatusApp.escuro
+                ? NatusApp.fundo
+                : NatusApp.offWhite,
+          ),
+        ),
+      ],
+    ]);
+  }
+
+  Future<void> abrirClassificacaoRiscoProntuario(
+    Map<String, String> gestante,
+  ) async {
+    final idGestante = (gestante['id'] ?? '').trim();
+    if (idGestante.isEmpty) {
+      mostrarMensagem('Erro: gestante sem ID.');
+      return;
+    }
+
+    var riscoSelecionado = gindicadores.normalizarRiscoGestacional(
+      gestante['riscoGestacional'],
+    );
+    var diabetesSelecionado = gindicadores.normalizarDiabetesGestacional(
+      gestante['diabetesGestacional'],
+    );
+    final observacoesController = TextEditingController();
+
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Atualizar classificação clínica'),
+              content: SizedBox(
+                width: 480,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        initialValue: riscoSelecionado,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Classificação de risco gestacional',
+                        ),
+                        items: gindicadores.opcoesRiscoGestacional
+                            .map(
+                              (opcao) => DropdownMenuItem(
+                                value: opcao,
+                                child: Text(opcao),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (valor) {
+                          if (valor != null) {
+                            setDialogState(() => riscoSelecionado = valor);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        initialValue: diabetesSelecionado,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Diabetes gestacional',
+                        ),
+                        items: gindicadores.opcoesDiabetesGestacional
+                            .map(
+                              (opcao) => DropdownMenuItem(
+                                value: opcao,
+                                child: Text(opcao),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (valor) {
+                          if (valor != null) {
+                            setDialogState(() => diabetesSelecionado = valor);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: observacoesController,
+                        minLines: 3,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          labelText: 'Observações clínicas',
+                          hintText:
+                              'Motivo da classificação, condutas ou alertas',
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  icon: const Icon(Icons.save_rounded),
+                  label: const Text('Salvar no prontuário'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    final observacoes = observacoesController.text.trim();
+    observacoesController.dispose();
+    if (confirmou != true) return;
+
+    final riscoAnterior = gindicadores.normalizarRiscoGestacional(
+      gestante['riscoGestacional'],
+    );
+    final diabetesAnterior = gindicadores.normalizarDiabetesGestacional(
+      gestante['diabetesGestacional'],
+    );
+
+    if (riscoSelecionado == riscoAnterior &&
+        diabetesSelecionado == diabetesAnterior &&
+        observacoes.isEmpty) {
+      mostrarMensagem('Nenhuma alteração clínica foi informada.');
+      return;
+    }
+
+    final agora = DateTime.now();
+    final profissional = usuarioEhAdmin()
+        ? eoResponsavelProntuario
+        : nomeEoLogada();
+
+    try {
+      final batch = firestore.batch();
+      final gestanteRef = firestore.collection('gestantes').doc(idGestante);
+      final historicoRef = firestore
+          .collection('prontuario_atendimentos')
+          .doc();
+
+      batch.update(gestanteRef, {
+        'riscoGestacional': riscoSelecionado,
+        'diabetesGestacional': diabetesSelecionado,
+        'classificacaoRiscoAtualizadaEm': agora.toIso8601String(),
+      });
+      batch.set(historicoRef, {
+        'idGestante': idGestante,
+        'nomeGestante': gestante['nomeGestante'] ?? '',
+        'tipo': 'Classificação de risco gestacional',
+        'riscoGestacionalAnterior': riscoAnterior,
+        'riscoGestacional': riscoSelecionado,
+        'diabetesGestacionalAnterior': diabetesAnterior,
+        'diabetesGestacional': diabetesSelecionado,
+        'observacoes': observacoes,
+        'eo': profissional,
+        'profissionalUid': FirebaseAuth.instance.currentUser?.uid ?? '',
+        'data': formatarDataHora(agora),
+        'criadoEm': agora.toIso8601String(),
+      });
+
+      await batch.commit();
+      if (!mounted) return;
+
+      setState(() {
+        gestante['riscoGestacional'] = riscoSelecionado;
+        gestante['diabetesGestacional'] = diabetesSelecionado;
+        gestante['classificacaoRiscoAtualizadaEm'] = agora.toIso8601String();
+        gestanteProntuarioSelecionada = gestante;
+      });
+
+      mostrarMensagem('Classificação clínica atualizada no prontuário.');
+    } catch (e) {
+      if (!mounted) return;
+      mostrarMensagem('Erro ao atualizar classificação clínica: $e');
+    }
   }
 
   Future<void> salvarAnamneseProntuario(Map<String, String> g) async {
@@ -8474,9 +9312,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         children: [
           Text(
             titulo,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.black54,
+              color: NatusApp.textoSuave,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -8485,7 +9323,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             texto,
             softWrap: true,
             overflow: TextOverflow.visible,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               color: NatusApp.vinho,
               fontWeight: FontWeight.w600,
@@ -8575,7 +9413,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         label: const Text('Salvar anamnese'),
         style: ElevatedButton.styleFrom(
           backgroundColor: NatusApp.vinho,
-          foregroundColor: Colors.white,
+          foregroundColor: (NatusApp.escuro
+              ? NatusApp.fundo
+              : NatusApp.offWhite),
         ),
       ),
     ]);
@@ -8655,7 +9495,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         label: const Text('Salvar exame físico'),
         style: ElevatedButton.styleFrom(
           backgroundColor: NatusApp.vinho,
-          foregroundColor: Colors.white,
+          foregroundColor: (NatusApp.escuro
+              ? NatusApp.fundo
+              : NatusApp.offWhite),
         ),
       ),
     ]);
@@ -8711,7 +9553,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         label: const Text('Salvar plano de cuidado'),
         style: ElevatedButton.styleFrom(
           backgroundColor: NatusApp.vinho,
-          foregroundColor: Colors.white,
+          foregroundColor: (NatusApp.escuro
+              ? NatusApp.fundo
+              : NatusApp.offWhite),
         ),
       ),
     ]);
@@ -8762,9 +9606,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               margin: const EdgeInsets.only(bottom: 14),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: NatusApp.offWhite,
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: NatusApp.rose.withValues(alpha: 0.35)),
+                border: Border.all(
+                  color: NatusApp.rose.withValues(alpha: 0.35),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -8773,7 +9619,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     children: [
                       CircleAvatar(
                         backgroundColor: NatusApp.rose.withValues(alpha: 0.2),
-                        child: const Icon(
+                        child: Icon(
                           Icons.medical_services,
                           color: NatusApp.vinho,
                         ),
@@ -8787,7 +9633,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           children: [
                             Text(
                               tipo,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 17,
                                 color: NatusApp.vinho,
@@ -8796,7 +9642,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                             Text(
                               '$data — $eo',
-                              style: const TextStyle(color: Colors.black54),
+                              style: TextStyle(color: NatusApp.textoSuave),
                             ),
                           ],
                         ),
@@ -8815,6 +9661,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           'eo',
                           'data',
                           'criadoEm',
+                          'profissionalUid',
                         ].contains(e.key);
                       })
                       .map((e) {
@@ -8826,14 +9673,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           padding: const EdgeInsets.only(bottom: 8),
                           child: RichText(
                             text: TextSpan(
-                              style: const TextStyle(
-                                color: Colors.black87,
+                              style: TextStyle(
+                                color: NatusApp.texto,
                                 fontSize: 14,
                               ),
                               children: [
                                 TextSpan(
-                                  text: '${e.key}: ',
-                                  style: const TextStyle(
+                                  text: '${rotuloCampoProntuario(e.key)}: ',
+                                  style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: NatusApp.vinho,
                                   ),
@@ -8853,21 +9700,33 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  String rotuloCampoProntuario(String campo) {
+    switch (campo) {
+      case 'riscoGestacionalAnterior':
+        return 'Risco anterior';
+      case 'riscoGestacional':
+        return 'Risco atualizado';
+      case 'diabetesGestacionalAnterior':
+        return 'Diabetes gestacional anterior';
+      case 'diabetesGestacional':
+        return 'Diabetes gestacional atual';
+      case 'observacoes':
+        return 'Observações clínicas';
+      default:
+        return campo;
+    }
+  }
+
   Widget blocoEvolucaoProntuario(Map<String, String> g) {
     return blocoFicha('Evoluções do prontuário', [
       if (usuarioEhAdmin())
-        dropdown(
-          'EO responsável',
-          eoResponsavelProntuario,
-          ['Maressa', 'Tuane'],
-          (v) {
-            setState(() {
-              eoResponsavelProntuario = v;
-            });
-          },
-        )
+        dropdown('Responsável', eoResponsavelProntuario, [], (v) {
+          setState(() {
+            eoResponsavelProntuario = v;
+          });
+        })
       else
-        campoInfo('EO responsável', nomeEoLogada()),
+        campoInfo('Responsável', nomeEoLogada()),
 
       const SizedBox(height: 10),
 
@@ -8948,7 +9807,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: corPorTipoObservacao(o['tipo'] ?? '').withValues(alpha: 0.1),
+                  color: corPorTipoObservacao(
+                    o['tipo'] ?? '',
+                  ).withValues(alpha: 0.1),
                   border: Border.all(
                     color: corPorTipoObservacao(o['tipo'] ?? ''),
                   ),
@@ -8992,11 +9853,149 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     ]);
   }
 
+  Widget telaConfiguracoes() {
+    final paletaAtiva = NatusTema.paleta;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Configurações',
+            style: TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.bold,
+              color: NatusApp.vinho,
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          Text(
+            'Personalize a aparência do Natus. A escolha vale para o seu '
+            'login e fica salva para as próximas sessões.',
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
+          ),
+
+          const SizedBox(height: 24),
+
+          bloco('Tema do aplicativo', [
+            Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: NatusTema.paletas
+                  .map((p) => cartaoTema(p, p.chave == paletaAtiva.chave))
+                  .toList(),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget cartaoTema(NatusPaleta p, bool ativo) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => selecionarTema(p),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 200,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: p.offWhite,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: ativo ? p.marsala : p.begeEscuro,
+            width: ativo ? 2.4 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                bolinhaCor(p.marsala),
+                const SizedBox(width: 6),
+                bolinhaCor(p.dourado),
+                const SizedBox(width: 6),
+                bolinhaCor(p.fundo, borda: p.begeEscuro),
+                const Spacer(),
+                if (ativo) Icon(Icons.check_circle, color: p.marsala, size: 20),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              p.nome,
+              style: TextStyle(fontWeight: FontWeight.w700, color: p.texto),
+            ),
+
+            const SizedBox(height: 2),
+
+            Text(
+              p.descricao,
+              style: TextStyle(fontSize: 12, color: p.textoSuave),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget bolinhaCor(Color c, {Color? borda}) {
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        color: c,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: borda ?? NatusApp.begeEscuro.withValues(alpha: 0.4),
+        ),
+      ),
+    );
+  }
+
+  Future<void> selecionarTema(NatusPaleta p) async {
+    NatusTema.aplicarPorChave(p.chave);
+
+    if (mounted) setState(() {});
+
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        await firestore.collection('usuarios').doc(uid).set({
+          'tema': p.chave,
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {
+      // Sem rede a troca continua valendo na sessão atual.
+    }
+  }
+
+  Future<void> carregarTemaUsuario() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      final doc = await firestore.collection('usuarios').doc(uid).get();
+      final tema = (doc.data() ?? const {})['tema']?.toString() ?? '';
+
+      if (tema.isNotEmpty) {
+        NatusTema.aplicarPorChave(tema);
+      }
+    } catch (_) {
+      // Mantém o tema padrão se não conseguir ler.
+    }
+  }
+
   Widget telaSimples(String texto) {
     return Center(
       child: Text(
         texto,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 22,
           fontWeight: FontWeight.bold,
           color: NatusApp.vinho,
@@ -9033,12 +10032,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           Container(
             width: double.infinity,
             padding: EdgeInsets.all(isMobile ? 12 : 16),
-            color: Colors.white,
+            color: NatusApp.offWhite,
             child: isMobile
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Icon(Icons.map, color: NatusApp.vinho),
                           SizedBox(width: 10),
@@ -9069,7 +10068,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           label: const Text('Atualizar mapa'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: NatusApp.vinho,
-                            foregroundColor: Colors.white,
+                            foregroundColor: (NatusApp.escuro
+                                ? NatusApp.fundo
+                                : NatusApp.offWhite),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                         ),
@@ -9078,9 +10079,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   )
                 : Row(
                     children: [
-                      const Icon(Icons.map, color: NatusApp.vinho),
+                      Icon(Icons.map, color: NatusApp.vinho),
                       const SizedBox(width: 10),
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Mapa de gestantes',
                           style: TextStyle(
@@ -9102,7 +10103,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         label: const Text('Atualizar'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: NatusApp.vinho,
-                          foregroundColor: Colors.white,
+                          foregroundColor: (NatusApp.escuro
+                              ? NatusApp.fundo
+                              : NatusApp.offWhite),
                         ),
                       ),
                     ],
@@ -9145,11 +10148,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.06),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
@@ -9170,7 +10173,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             child: Text(
               titulo,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
                 color: NatusApp.vinho,
@@ -9208,7 +10211,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: NatusApp.vinho, width: 1.5),
+            borderSide: BorderSide(color: NatusApp.vinho, width: 1.5),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,
@@ -9469,11 +10472,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       width: 210,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -9497,12 +10500,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               children: [
                 Text(
                   titulo,
-                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   valor,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: NatusApp.vinho,
@@ -9537,7 +10540,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Central de NFS-e',
                 style: TextStyle(
                   fontSize: 28,
@@ -9546,9 +10549,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Gere manualmente a nota fiscal de serviço pelo valor total do plano da cliente selecionada.',
-                style: TextStyle(fontSize: 14, color: Colors.black54),
+                style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
               ),
               const SizedBox(height: 22),
               Wrap(
@@ -9634,10 +10637,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   color: NatusApp.vinho.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: const Icon(
-                  Icons.receipt_long_rounded,
-                  color: NatusApp.vinho,
-                ),
+                child: Icon(Icons.receipt_long_rounded, color: NatusApp.vinho),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -9646,7 +10646,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   children: [
                     Text(
                       nome,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: NatusApp.vinho,
@@ -9655,12 +10655,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     const SizedBox(height: 3),
                     Text(
                       '$plano • ${formatarMoeda(valorTotal)}',
-                      style: const TextStyle(color: Colors.black54),
+                      style: TextStyle(color: NatusApp.textoSuave),
                     ),
                     if (cpf.isNotEmpty)
                       Text(
                         'CPF: $cpf',
-                        style: const TextStyle(color: Colors.black45),
+                        style: TextStyle(color: NatusApp.textoSuave),
                       ),
                   ],
                 ),
@@ -9683,7 +10683,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 label: Text(podeGerar ? 'Gerar NFS-e' : 'NFS-e em andamento'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: NatusApp.vinho,
-                  foregroundColor: Colors.white,
+                  foregroundColor: (NatusApp.escuro
+                      ? NatusApp.fundo
+                      : NatusApp.offWhite),
                 ),
               ),
               OutlinedButton.icon(
@@ -9770,7 +10772,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               label: const Text('Confirmar NFS-e'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
               ),
             ),
         ],
@@ -9793,16 +10797,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         children: [
           Text(
             titulo,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.black54,
+              color: NatusApp.textoSuave,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             valor.trim().isEmpty ? 'Não informado' : valor,
-            style: const TextStyle(fontSize: 14, color: Colors.black87),
+            style: TextStyle(fontSize: 14, color: NatusApp.texto),
           ),
         ],
       ),
@@ -9995,7 +10999,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Histórico Fiscal',
                 style: TextStyle(
                   fontSize: 28,
@@ -10004,9 +11008,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Acompanhe as NFS-e geradas pela Central Fiscal da Natus, com acesso rápido ao PDF e XML.',
-                style: TextStyle(fontSize: 14, color: Colors.black54),
+                style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
               ),
               const SizedBox(height: 22),
               Wrap(
@@ -10086,7 +11090,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.035),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -10103,10 +11107,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   color: NatusApp.vinho.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: const Icon(
-                  Icons.receipt_long_rounded,
-                  color: NatusApp.vinho,
-                ),
+                child: Icon(Icons.receipt_long_rounded, color: NatusApp.vinho),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -10115,7 +11116,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   children: [
                     Text(
                       cliente.isEmpty ? 'Cliente não informado' : cliente,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: NatusApp.vinho,
@@ -10124,7 +11125,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     const SizedBox(height: 4),
                     Text(
                       '$plano • ${formatarMoeda(valor)}',
-                      style: const TextStyle(color: Colors.black54),
+                      style: TextStyle(color: NatusApp.textoSuave),
                     ),
                   ],
                 ),
@@ -10153,7 +11154,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const SizedBox(height: 10),
             Text(
               mensagem,
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
+              style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
             ),
           ],
           const SizedBox(height: 14),
@@ -10192,7 +11193,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
       ),
@@ -10203,7 +11204,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           const SizedBox(width: 6),
           Text(
             texto,
-            style: const TextStyle(fontSize: 12, color: Colors.black54),
+            style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
           ),
         ],
       ),
@@ -10216,7 +11217,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Planos da Natus',
             style: TextStyle(
               fontSize: 24,
@@ -10225,9 +11226,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Cadastre os planos que serão usados no cadastro de gestantes, Asaas, ZapSign e NFS-e.',
-            style: TextStyle(fontSize: 13, color: Colors.black54),
+            style: TextStyle(fontSize: 13, color: NatusApp.textoSuave),
           ),
           const SizedBox(height: 24),
           bloco('Cadastrar novo plano', [
@@ -10259,7 +11260,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               label: const Text('Salvar plano'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 22,
                   vertical: 16,
@@ -10411,7 +11414,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ),
         child: Text(
           valor,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.bold,
             color: NatusApp.vinho,
@@ -10702,8 +11705,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return Column(
       children: listaFiltrada.map((g) {
         final igAtual = calcularIdadeGestacional(g['dpp'] ?? '');
-        final usuarioEnfermeira =
-            tipoEhProfissionalClinica(widget.tipoUsuario);
+        final usuarioEnfermeira = tipoEhProfissionalClinica(widget.tipoUsuario);
         final podeVerDadosFinanceiros = !usuarioEnfermeira;
 
         return NatusCardGestanteLista(
@@ -10760,23 +11762,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     await doc.reference.delete();
                   }
 
-                  await firestore
-                      .collection('gestantes')
-                      .doc(id)
-                      .delete();
+                  await firestore.collection('gestantes').doc(id).delete();
 
                   setState(() {
-                    gestantes.removeWhere(
-                      (item) => item['id'] == id,
-                    );
+                    gestantes.removeWhere((item) => item['id'] == id);
 
                     parcelasFinanceiras.removeWhere(
                       (p) => p['gestante'] == nome,
                     );
 
-                    marcadores.removeWhere(
-                      (m) => m.markerId.value == id,
-                    );
+                    marcadores.removeWhere((m) => m.markerId.value == id);
                     mapaJaCarregado = false;
                   });
 
@@ -10784,12 +11779,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     'Gestante e financeiro excluídos com sucesso.',
                   );
                 } catch (e) {
-                  debugPrint(
-                    '❌ Erro ao excluir gestante e financeiro: $e',
-                  );
-                  mostrarMensagem(
-                    'Erro ao excluir gestante e financeiro.',
-                  );
+                  debugPrint('❌ Erro ao excluir gestante e financeiro: $e');
+                  mostrarMensagem('Erro ao excluir gestante e financeiro.');
                 }
               },
               child: const Text('Excluir'),
@@ -10990,10 +11981,33 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarGestantesFirestore() async {
     try {
+      var nomeFiltroCarteira = widget.nomeUsuario;
+
+      // Obstetra: o filtro de carteira usa o nome do registro vinculado
+      // na coleção `obstetras` (mais confiável que o nome do login);
+      // se não houver vínculo, cai para o nome do usuário.
+      if (widget.tipoUsuario == 'obstetra') {
+        if (obstetras.isEmpty) {
+          await carregarObstetrasFirestore();
+        }
+
+        final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+        final obVinculado = obstetras.firstWhere(
+          (o) => o['uidObstetra'] == uidLogado,
+          orElse: () => {},
+        );
+
+        final nomeVinculado = (obVinculado['nome'] ?? '').trim();
+        if (nomeVinculado.isNotEmpty) {
+          nomeFiltroCarteira = nomeVinculado;
+        }
+      }
+
       final listaFirebase = gregras.filtrarGestantesPorPerfil(
         await dados.buscarGestantes(),
         tipoUsuario: widget.tipoUsuario,
-        nomeUsuario: widget.nomeUsuario,
+        nomeUsuario: nomeFiltroCarteira,
       );
 
       setState(() {
@@ -11414,7 +12428,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               label: const Text('Salvar'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
-                foregroundColor: Colors.white,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
               ),
             ),
           ],
@@ -11487,7 +12503,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         labelText: 'Tipo de usuário',
                         border: OutlineInputBorder(),
                       ),
-                      items: ['admin', 'enfermeira', 'gestante']
+                      items: ['admin', 'enfermeira', 'obstetra', 'gestante']
                           .map(
                             (tipo) => DropdownMenuItem(
                               value: tipo,
@@ -11500,6 +12516,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           novoTipoUsuario = value!;
                           gestanteSelecionadaLogin = null;
                           enfermeiraSelecionadaLogin = null;
+                          obstetraSelecionadoLogin = null;
                         });
                       },
                     ),
@@ -11563,6 +12580,36 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         },
                       ),
                     ],
+
+                    if (novoTipoUsuario == 'obstetra') ...[
+                      const SizedBox(height: 16),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: obstetraSelecionadoLogin,
+                        decoration: const InputDecoration(
+                          labelText: 'Selecionar obstetra',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: obstetras
+                            .where(
+                              (o) =>
+                                  o['uidObstetra'] == null ||
+                                  o['uidObstetra'] == '',
+                            )
+                            .map(
+                              (o) => DropdownMenuItem(
+                                value: o['id'],
+                                child: Text(o['nome'] ?? 'Sem nome'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setStatePopup(() {
+                            obstetraSelecionadoLogin = value;
+                          });
+                        },
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -11599,6 +12646,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (novoTipoUsuario == 'enfermeira' && enfermeiraSelecionadaLogin == null) {
       mostrarMensagem('Selecione a enfermeira para vincular ao login.');
+      return;
+    }
+
+    if (novoTipoUsuario == 'obstetra' && obstetraSelecionadoLogin == null) {
+      mostrarMensagem('Selecione o obstetra para vincular ao login.');
       return;
     }
 
@@ -11645,6 +12697,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             .update({'uidEnfermeira': uid});
       }
 
+      if (novoTipoUsuario == 'obstetra') {
+        await firestore
+            .collection('obstetras')
+            .doc(obstetraSelecionadoLogin)
+            .update({'uidObstetra': uid});
+      }
+
       await secondaryAuth.signOut();
       await secondaryApp.delete();
 
@@ -11654,9 +12713,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       novoEmailController.clear();
       gestanteSelecionadaLogin = null;
       enfermeiraSelecionadaLogin = null;
+      obstetraSelecionadoLogin = null;
       novoTipoUsuario = 'gestante';
 
       await carregarEnfermeirasFirestore();
+      await carregarObstetrasFirestore();
       await carregarGestantesFirestore();
 
       mostrarMensagem('Usuário criado com sucesso!');
@@ -12532,9 +13593,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               children: [
                 Text(
                   titulo,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Colors.black54,
+                    color: NatusApp.textoSuave,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -12566,7 +13627,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           Expanded(
             child: Text(
               texto,
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
+              style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
             ),
           ),
         ],
@@ -12585,7 +13646,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: cor.withValues(alpha: 0.20)),
       ),
@@ -12615,7 +13676,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     const SizedBox(height: 4),
                     Text(
                       'Vencimento: ${parcela['vencimento'] ?? 'Não informado'}',
-                      style: const TextStyle(color: Colors.black54),
+                      style: TextStyle(color: NatusApp.textoSuave),
                     ),
                   ],
                 ),
@@ -12682,7 +13743,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NatusApp.vinho,
-                    foregroundColor: Colors.white,
+                    foregroundColor: (NatusApp.escuro
+                        ? NatusApp.fundo
+                        : NatusApp.offWhite),
                   ),
                 ),
               if (temCobranca)
@@ -12785,9 +13848,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             color: NatusApp.rose.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(14),
           ),
-          child: const Text(
+          child: Text(
             'Nenhuma parcela encontrada para esta gestante.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: NatusApp.textoSuave),
           ),
         )
       else
@@ -13025,18 +14088,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final temCobrancaAsaas = pendentes.any(parcelaTemCobrancaAsaas);
 
     String descontoSelecionado = '0%';
+    DateTime dataQuitacaoSelecionada = DateTime.now();
 
     final confirmou = await showDialog<bool>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final percentual = double.tryParse(
-                  descontoSelecionado.replaceAll('%', ''),
-                ) ??
-                0;
-            final valorFinal =
-                fincalc.valorQuitacaoComDesconto(total, percentual);
+            final percentual =
+                double.tryParse(descontoSelecionado.replaceAll('%', '')) ?? 0;
+            final valorFinal = fincalc.valorQuitacaoComDesconto(
+              total,
+              percentual,
+            );
 
             return AlertDialog(
               title: const Text('Quitação antecipada'),
@@ -13048,7 +14112,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   children: [
                     Text(
                       nomeGestante,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
                         color: NatusApp.vinho,
@@ -13057,7 +14121,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     const SizedBox(height: 12),
                     Text(
                       '${pendentes.length} parcela(s) pendente(s) • Total: ${formatarMoeda(total)}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: NatusApp.textoSuave,
                       ),
@@ -13070,8 +14134,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       ),
                       items: [
                         for (final d in [
-                          '0%', '1%', '2%', '3%', '4%', '5%',
-                          '6%', '7%', '8%', '9%', '10%',
+                          '0%',
+                          '1%',
+                          '2%',
+                          '3%',
+                          '4%',
+                          '5%',
+                          '6%',
+                          '7%',
+                          '8%',
+                          '9%',
+                          '10%',
                         ])
                           DropdownMenuItem(value: d, child: Text(d)),
                       ],
@@ -13080,6 +14153,45 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           descontoSelecionado = v ?? '0%';
                         });
                       },
+                    ),
+                    const SizedBox(height: 16),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () async {
+                        final escolhida = await showDatePicker(
+                          context: context,
+                          initialDate: dataQuitacaoSelecionada,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                          helpText: 'Data em que o pagamento foi recebido',
+                        );
+
+                        if (escolhida != null) {
+                          setDialogState(() {
+                            dataQuitacaoSelecionada = escolhida;
+                          });
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Data real do pagamento',
+                          suffixIcon: Icon(Icons.calendar_today, size: 18),
+                        ),
+                        child: Text(
+                          '${dataQuitacaoSelecionada.day.toString().padLeft(2, '0')}/'
+                          '${dataQuitacaoSelecionada.month.toString().padLeft(2, '0')}/'
+                          '${dataQuitacaoSelecionada.year}',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Isso define em qual mês o valor aparece como '
+                      'recebido nos relatórios financeiros.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: NatusApp.textoSuave,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -13092,7 +14204,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'VALOR DA QUITAÇÃO',
                             style: TextStyle(
                               fontSize: 11,
@@ -13104,7 +14216,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           const SizedBox(height: 4),
                           Text(
                             formatarMoeda(valorFinal),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.w800,
                               color: NatusApp.vinho,
@@ -13155,6 +14267,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       nomeGestante,
       percentual,
       fincalc.valorQuitacaoComDesconto(total, percentual),
+      dataQuitacaoSelecionada,
     );
   }
 
@@ -13163,8 +14276,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String nomeGestante,
     double percentualDesconto,
     double valorFinal,
+    DateTime dataQuitacao,
   ) async {
-    final agora = formatarDataHora(DateTime.now());
+    final agora = formatarDataHora(dataQuitacao);
     final descontoTexto = '${percentualDesconto.toStringAsFixed(0)}%';
 
     final batch = firestore.batch();
@@ -13373,7 +14487,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Financeiro',
             style: TextStyle(
               fontSize: 30,
@@ -13386,7 +14500,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           Row(
             children: [
-              const Text(
+              Text(
                 'Período: ',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -13449,7 +14563,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             label: const Text('Exportar Excel'),
             style: ElevatedButton.styleFrom(
               backgroundColor: NatusApp.vinho,
-              foregroundColor: Colors.white,
+              foregroundColor: (NatusApp.escuro
+                  ? NatusApp.fundo
+                  : NatusApp.offWhite),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             ),
           ),
@@ -13483,7 +14599,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ],
           ),
 
-          const Text(
+          Text(
             'Parcelas do mês atual',
             style: TextStyle(
               fontSize: 22,
@@ -13589,11 +14705,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaDashboard() {
     final amamentacaoDados = contarAmamentacao();
-    final totalAmamentacao = amamentacaoDados.values.fold(0, (a, b) => a + b);
+    final crescimentoNascimentos = calcularCrescimentoNascimentos();
 
-    final maternidades = contarCampoGestantes('hospitalGestante');
-    final obstetras = contarCampoGestantes('obstetraGestante');
     final estoqueBaixo = materiaisComEstoqueBaixo();
+    final viaNascimentoDados = contarViaNascimento();
+    final riscoDados = contarRiscoGestacional();
+    final dgDados = contarDiabetesGestacional();
 
     List<MapEntry<String, int>> top5Maternidades() {
       final dados = contarCampoGestantes('hospitalGestante');
@@ -13617,8 +14734,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         children: [
           NatusSaudacaoDashboard(
             nomeEoLogada().trim().isEmpty ? 'equipe Natus' : nomeEoLogada(),
-            subtitulo:
-                'Período: ${nomeMes(mesSelecionado)} / $anoSelecionado',
+            subtitulo: 'Período: ${nomeMes(mesSelecionado)} / $anoSelecionado',
           ),
 
           const SizedBox(height: 20),
@@ -13679,13 +14795,65 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     Icons.check_circle,
                   ),
                 ),
+              ],
+            ),
+          ]),
+
+          const SizedBox(height: 12),
+
+          blocoDashboard('Risco gestacional (pré-natal)', [
+            Row(
+              children: [
+                Expanded(
+                  child: cardContagemResumo(
+                    'Risco habitual',
+                    riscoDados['Habitual'] ?? 0,
+                    Colors.green,
+                    Icons.verified_user,
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: cardContagemResumo(
-                    'Atendimentos',
-                    atendimentos.length,
-                    Colors.blueGrey,
-                    Icons.event,
+                    'Risco intermediário',
+                    riscoDados['Intermediário'] ?? 0,
+                    Colors.orange,
+                    Icons.report_problem,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: cardContagemResumo(
+                    'Alto risco',
+                    riscoDados['Alto Risco'] ?? 0,
+                    Colors.red,
+                    Icons.emergency,
+                  ),
+                ),
+              ],
+            ),
+          ]),
+
+          const SizedBox(height: 12),
+
+          blocoDashboard('Diabetes gestacional', [
+            Row(
+              children: [
+                Expanded(
+                  child: cardContagemResumo(
+                    'Com diabetes gestacional',
+                    dgDados['Sim'] ?? 0,
+                    Colors.red,
+                    Icons.bloodtype,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: cardContagemResumo(
+                    'Sem diabetes gestacional',
+                    dgDados['Não'] ?? 0,
+                    Colors.green,
+                    Icons.health_and_safety,
                   ),
                 ),
               ],
@@ -13731,18 +14899,27 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              blocoDashboard('Crescimento de nascimentos', [
-                Row(
-                  children: [
-                    legendaGrafico('2026', NatusApp.vinho),
-                    const SizedBox(width: 16),
-                    legendaGrafico('2025', Colors.grey),
-                  ],
+              blocoDashboard('Crescimento anual', [
+                Text(
+                  'Comparação automática por ano. O app usa os anos '
+                  'disponíveis no banco e atualiza sozinho quando virar '
+                  'o ano.',
+                  style: TextStyle(fontSize: 12.5, color: NatusApp.textoSuave),
                 ),
 
                 const SizedBox(height: 16),
 
-                graficoLinhaBebes(),
+                NatusPainelCrescimento(crescimentoNascimentos),
+
+                const SizedBox(height: 22),
+
+                NatusGraficoLinhaCrescimento(
+                  anos: crescimentoNascimentos.anosDisponiveis,
+                  dadosPorAno: {
+                    for (final ano in crescimentoNascimentos.anosDisponiveis)
+                      ano: contarBebesPorMes(ano.toString()),
+                  },
+                ),
               ]),
             ],
           ),
@@ -13796,44 +14973,44 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           const SizedBox(height: 8),
 
           blocoDashboard('Amamentação', [
+            NatusGraficoAmamentacao(amamentacaoDados),
+          ]),
+
+          blocoDashboard('Partos e cesáreas', [
             Row(
               children: [
-                Expanded(flex: 2, child: graficoPizzaAmamentacao()),
-                const SizedBox(width: 24),
                 Expanded(
-                  flex: 3,
-                  child: Column(
-                    children: [
-                      cardIndicadorAmamentacao(
-                        'AME',
-                        amamentacaoDados['AME'] ?? 0,
-                        totalAmamentacao,
-                        Colors.green,
-                      ),
-                      cardIndicadorAmamentacao(
-                        'Mista',
-                        amamentacaoDados['Mista'] ?? 0,
-                        totalAmamentacao,
-                        Colors.orange,
-                      ),
-                      cardIndicadorAmamentacao(
-                        'Fórmula',
-                        amamentacaoDados['Fórmula'] ?? 0,
-                        totalAmamentacao,
-                        Colors.red,
-                      ),
-                    ],
+                  child: cardContagemResumo(
+                    'Partos normais',
+                    (viaNascimentoDados['Vaginal'] ?? 0) +
+                        (viaNascimentoDados['Parto'] ?? 0) +
+                        (viaNascimentoDados['Normal'] ?? 0),
+                    Colors.green,
+                    Icons.favorite,
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: cardContagemResumo(
+                    'Cesáreas',
+                    (viaNascimentoDados['Cesárea'] ?? 0) +
+                        (viaNascimentoDados['Cesareana'] ?? 0),
+                    Colors.orange,
+                    Icons.local_hospital,
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: cardContagemResumo(
+                    'Não informado',
+                    viaNascimentoDados['Não informado'] ?? 0,
+                    Colors.grey,
+                    Icons.help_outline,
                   ),
                 ),
               ],
-            ),
-          ]),
-
-          blocoDashboard('Top 5 obstetras', [
-            podiumTop5(
-              dados: top5Obstetras(),
-              icone: Icons.medical_services,
-              cor: NatusApp.vinho,
             ),
           ]),
 
@@ -13841,9 +15018,30 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             podiumTop5(
               dados: top5Maternidades(),
               icone: Icons.local_hospital,
-              cor: Colors.blueGrey,
+              cor: NatusApp.marsalaSuave,
             ),
           ]),
+
+          if (widget.tipoUsuario == 'obstetra')
+            NatusBlocoMetricasObstetra(metricasDoObstetraLogado())
+          else
+            blocoDashboard('Top 5 obstetras — partos atendidos', [
+              podiumTop5(
+                dados: () {
+                  final lista = metricasDeTodosObstetras()
+                      .map((m) => MapEntry(m.nomeObstetra, m.jaPariu))
+                      .where((e) => e.value > 0)
+                      .toList();
+
+                  lista.sort((a, b) => b.value.compareTo(a.value));
+
+                  return lista.take(5).toList();
+                }(),
+                icone: Icons.medical_services,
+                cor: NatusApp.vinho,
+                rotulo: 'partos',
+              ),
+            ]),
 
           if (usuarioEhAdmin())
             blocoDashboard(

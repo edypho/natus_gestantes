@@ -129,7 +129,7 @@ class NatusParcelaItem extends StatelessWidget {
                   parcela['gestante'] ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 14,
                     color: NatusApp.texto,
@@ -138,7 +138,7 @@ class NatusParcelaItem extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   rotulo,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     color: NatusApp.textoSuave,
@@ -177,7 +177,7 @@ class NatusParcelaItem extends StatelessWidget {
             children: [
               Text(
                 parcela['valor'] ?? '',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 14,
                   color: NatusApp.vinho,
@@ -213,13 +213,13 @@ class NatusParcelaItem extends StatelessWidget {
           else
             IconButton(
               tooltip: 'Abrir comprovante',
-              icon: const Icon(Icons.fact_check_outlined,
+              icon: Icon(Icons.fact_check_outlined,
                   color: NatusApp.vinho, size: 21),
               onPressed: onAbrirComprovante,
             ),
           PopupMenuButton<String>(
             tooltip: 'Mais ações',
-            icon: const Icon(Icons.more_vert,
+            icon: Icon(Icons.more_vert,
                 color: NatusApp.textoSuave, size: 20),
             onSelected: (op) {
               switch (op) {
@@ -258,7 +258,7 @@ class NatusParcelaItem extends StatelessWidget {
                     value: 'comprovante_sel',
                     child: Text('Selecionar comprovante')),
                 if (onQuitarPlano != null)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'quitar',
                     child: Row(
                       children: [

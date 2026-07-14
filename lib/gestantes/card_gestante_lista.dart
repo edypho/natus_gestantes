@@ -74,7 +74,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                       NatusApp.marsala.withValues(alpha: 0.12),
                   child: Text(
                     _iniciais,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: NatusApp.marsala,
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
@@ -93,7 +93,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                               nome,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 15,
                                 color: NatusApp.texto,
@@ -108,7 +108,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         'IG: $igAtual  •  DPP: $dpp',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           color: NatusApp.textoSuave,
                           fontWeight: FontWeight.w600,
@@ -117,7 +117,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         '👶 $nomeBebe • $sexo',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           color: NatusApp.textoSuave,
                         ),
@@ -126,7 +126,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           '${gestante['plano'] ?? '-'}  •  ${gestante['valorPlano'] ?? '-'}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
                             color: NatusApp.douradoEscuro,
@@ -140,7 +140,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                 const SizedBox(width: 4),
                 PopupMenuButton<String>(
                   tooltip: 'Opções',
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.more_vert,
                     color: NatusApp.textoSuave,
                     size: 20,
@@ -149,7 +149,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                     if (opcao == 'abrir') onAbrir();
                     if (opcao == 'excluir') onExcluir();
                   },
-                  itemBuilder: (context) => const [
+                  itemBuilder: (context) => [
                     PopupMenuItem(
                       value: 'abrir',
                       child: Row(

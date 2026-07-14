@@ -125,7 +125,7 @@ class _AgendaPageState extends State<AgendaPage> {
   }
 
   Widget _telaSemPermissao() {
-    return const Center(
+    return Center(
       child: Text(
         'Agenda indisponível para este perfil.',
         style: TextStyle(fontSize: 18, color: NatusApp.vinho),
@@ -134,7 +134,7 @@ class _AgendaPageState extends State<AgendaPage> {
   }
 
   Widget _telaGestanteNaoIdentificada() {
-    return const Center(
+    return Center(
       child: Text(
         'Não foi possível identificar sua ficha de gestante para exibir a agenda.',
         textAlign: TextAlign.center,
@@ -160,9 +160,9 @@ class _AgendaPageState extends State<AgendaPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.warning_amber_rounded, color: NatusApp.vinho, size: 38),
+            Icon(Icons.warning_amber_rounded, color: NatusApp.vinho, size: 38),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Não foi possível carregar a agenda.',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -379,7 +379,7 @@ class _AgendaPageState extends State<AgendaPage> {
                 child: Text(
                   '${_nomeMes(_mesExibido.month)} de ${_mesExibido.year}',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: NatusApp.vinho,
@@ -517,7 +517,7 @@ class _AgendaPageState extends State<AgendaPage> {
               Expanded(
                 child: Text(
                   'Compromissos de $dataFormatada',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: NatusApp.vinho,
@@ -583,7 +583,7 @@ class _AgendaPageState extends State<AgendaPage> {
                   children: [
                     Text(
                       evento.titulo.isEmpty ? evento.tipo : evento.titulo,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
                         color: NatusApp.texto,
@@ -595,7 +595,7 @@ class _AgendaPageState extends State<AgendaPage> {
                 const SizedBox(height: 6),
                 Text(
                   '${evento.horaInicio} às ${evento.horaFim} • ${evento.tipo}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w600,
                     color: NatusApp.vinho,
                   ),
@@ -658,7 +658,7 @@ class _AgendaPageState extends State<AgendaPage> {
               color: NatusApp.vinho.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(18),
             ),
-            child: const Icon(Icons.child_friendly_rounded, color: NatusApp.vinho),
+            child: Icon(Icons.child_friendly_rounded, color: NatusApp.vinho),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -671,7 +671,7 @@ class _AgendaPageState extends State<AgendaPage> {
                   children: [
                     Text(
                       'DPP prevista • $nome',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
                         color: NatusApp.texto,

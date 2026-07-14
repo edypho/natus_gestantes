@@ -38,7 +38,7 @@ Widget usuariosTela({
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Controle de Usuários',
               style: TextStyle(
                 fontSize: 30,
@@ -108,7 +108,7 @@ Widget usuariosTela({
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
                   onTap: () => onAlterarTipo(doc.id, tipo),
-                  leading: const CircleAvatar(
+                  leading: CircleAvatar(
                     backgroundColor: NatusApp.rose,
                     child: Icon(Icons.person, color: NatusApp.vinho),
                   ),

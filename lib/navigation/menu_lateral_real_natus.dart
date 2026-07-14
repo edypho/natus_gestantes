@@ -16,7 +16,7 @@ Widget menuLateralRealNatus({
   required String telaAtual,
   required Function(String) onSelecionarTela,
 }) {
-  const marsala = NatusApp.marsala;
+  final marsala = NatusApp.marsala;
   const menuText = Color(0xFFFFF8F2);
 
   List<_NatusMenuItem> itensDoMenu() {

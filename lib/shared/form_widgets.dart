@@ -31,7 +31,7 @@ Widget bloco(String titulo, List<Widget> children) {
           ),
           child: Text(
             titulo,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.bold,
               color: NatusApp.vinho,
