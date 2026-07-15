@@ -5425,6 +5425,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ],
               ),
             ),
+
+            if (podeGerenciarBiblioteca) ...[
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerRight,
+                child: botaoAdicionarMaterialBiblioteca(),
+              ),
+            ],
           ],
         ),
       ),
@@ -5480,27 +5488,33 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
           ],
         ),
-        if (podeGerenciarBiblioteca) ...[
-          const SizedBox(height: 18),
-          botaoAdicionarMaterialBiblioteca(),
-        ],
       ],
     );
   }
 
   Widget botaoAdicionarMaterialBiblioteca() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: ElevatedButton.icon(
-        onPressed: abrirCadastroMaterialBiblioteca,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Adicionar material'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: NatusApp.vinho,
-          foregroundColor: NatusApp.offWhite,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+    return Tooltip(
+      message: 'Adicionar material',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: abrirCadastroMaterialBiblioteca,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: NatusApp.vinho,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: NatusApp.vinhoProfundo.withValues(alpha: 0.12),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Icon(Icons.add_rounded, color: NatusApp.offWhite, size: 24),
           ),
         ),
       ),
