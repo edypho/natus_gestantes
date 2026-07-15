@@ -2,7 +2,10 @@
 /* eslint-disable max-len */
 /* eslint-disable quote-props */
 const {setGlobalOptions} = require("firebase-functions");
-const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+} = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 const {defineSecret} = require("firebase-functions/params");
 
@@ -50,6 +53,72 @@ const ZAPSIGN_PLANOS_POR_TEMPLATE = {
     modalidadeNome: "Residencial",
   },
 };
+
+function normalizarTextoContrato(valor) {
+  return String(valor || "")
+      .toLowerCase()
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+}
+
+function descobrirTemplateKeyContrato(plano, consultorio) {
+  const planoNormalizado = normalizarTextoContrato(plano);
+  const consultorioNormalizado = normalizarTextoContrato(consultorio);
+
+  if (planoNormalizado.includes("acolher") &&
+    planoNormalizado.includes("consultorio")) {
+    return "acolher_consultorio";
+  }
+
+  if (planoNormalizado.includes("acolher") &&
+    planoNormalizado.includes("residencial")) {
+    return "acolher_residencial";
+  }
+
+  if (planoNormalizado.includes("presenca") &&
+    planoNormalizado.includes("consultorio")) {
+    return "presenca_consultorio";
+  }
+
+  if (planoNormalizado.includes("presenca") &&
+    planoNormalizado.includes("residencial")) {
+    return "presenca_residencial";
+  }
+
+  if (planoNormalizado.includes("plenitude") &&
+    planoNormalizado.includes("consultorio")) {
+    return "plenitude_consultorio";
+  }
+
+  if (planoNormalizado.includes("plenitude") &&
+    planoNormalizado.includes("residencial")) {
+    return "plenitude_residencial";
+  }
+
+  if (planoNormalizado.includes("acolher")) {
+    return consultorioNormalizado === "sim" ||
+      consultorioNormalizado.includes("consultorio") ?
+      "acolher_consultorio" :
+      "acolher_residencial";
+  }
+
+  if (planoNormalizado.includes("presenca")) {
+    return consultorioNormalizado === "sim" ||
+      consultorioNormalizado.includes("consultorio") ?
+      "presenca_consultorio" :
+      "presenca_residencial";
+  }
+
+  if (planoNormalizado.includes("plenitude")) {
+    return consultorioNormalizado === "sim" ||
+      consultorioNormalizado.includes("consultorio") ?
+      "plenitude_consultorio" :
+      "plenitude_residencial";
+  }
+
+  return "";
+}
 
 admin.initializeApp();
 
@@ -210,7 +279,9 @@ async function buscarConfiguracaoZapSign() {
 }
 
 function montarPayloadContratoDaGestante(idGestante, dados) {
-  const templateKey = dados.contratoTemplateKey || "";
+  const templateKey =
+    dados.contratoTemplateKey ||
+    descobrirTemplateKeyContrato(dados.plano || "", dados.consultorio || "");
   const definicaoPlano = ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey] || {};
   const partesEndereco = [
     dados.enderecoGestante || "",
@@ -231,7 +302,10 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     rgPaciente: dados.rgGestante || "",
     enderecoPaciente: partesEndereco.join(", "),
     nomeResponsavel: dados.nomePai || "",
+    emailResponsavel: dados.emailPai || "",
+    telefoneResponsavel: dados.telefonePai || "",
     cpfResponsavel: dados.cpfPai || "",
+    rgResponsavel: dados.rgPai || "",
     enderecoResponsavel: partesEndereco.join(", "),
     dpp: dados.dpp || "",
     planoNome: definicaoPlano.planoNome || dados.plano || "",
@@ -274,6 +348,14 @@ function montarCamposDinamicos(payload, configuracao) {
     "{{nome_acompanhante}}": payload.nomeResponsavel || "",
     "{{cpf_acompanhante}}": payload.cpfResponsavel || "",
     "{{endereco_acompanhante}}": payload.enderecoResponsavel || "",
+    "{{nome_esposa}}": payload.nomePaciente || "",
+    "{{rg_esposa}}": payload.rgPaciente || "",
+    "{{cpf_esposa}}": payload.cpfPaciente || "",
+    "{{nome_esposo}}": payload.nomeResponsavel || "",
+    "{{rg_esposo}}": payload.rgResponsavel || "",
+    "{{cpf_esposo}}": payload.cpfResponsavel || "",
+    "{{endereco_contratantes}}":
+      payload.enderecoPaciente || payload.enderecoResponsavel || "",
     "{{data_assinatura}}": formatarDataAssinatura(payload.dataAssinatura),
     "{{cidade_assinatura}}": payload.cidadeAssinatura || "Curitiba",
     "{{plano_nome}}": payload.planoNome || "",
@@ -302,22 +384,44 @@ function montarCamposDinamicos(payload, configuracao) {
   }));
 }
 
-function montarLinkAssinatura(signers) {
-  if (!Array.isArray(signers) || signers.length === 0) {
-    return {
-      signerToken: "",
-      signerUrl: "",
-    };
+function extrairTokenAssinatura(signatario) {
+  return signatario.token ||
+    signatario.signer_token ||
+    signatario.sign_url_token ||
+    "";
+}
+
+function extrairLinkAssinatura(signatario) {
+  const linkDireto = signatario.sign_url || signatario.signer_url || "";
+
+  if (linkDireto) {
+    return linkDireto;
   }
 
-  const signerPrincipal = signers[0] || {};
-  const signerToken =
-    signerPrincipal.token ||
-    signerPrincipal.signer_token ||
-    signerPrincipal.sign_url_token ||
-    "";
+  const token = extrairTokenAssinatura(signatario);
+  return token ? `${ZAPSIGN_SIGNER_BASE_URL}/${token}` : "";
+}
 
-  if (!signerToken) {
+function mapearSignatariosZapSign(signers) {
+  if (!Array.isArray(signers)) {
+    return [];
+  }
+
+  return signers.map((signer) => ({
+    token: extrairTokenAssinatura(signer),
+    signUrl: extrairLinkAssinatura(signer),
+    nome: signer.name || signer.signer_name || "",
+    email: signer.email || "",
+    telefone: signer.phone_number || signer.phone || "",
+    status: signer.status || "",
+    qualificacao: signer.qualification || "",
+  }));
+}
+
+function montarLinkAssinaturaPrincipal(signers) {
+  const signatarios = mapearSignatariosZapSign(signers);
+
+  if (signatarios.length === 0) {
     return {
       signerToken: "",
       signerUrl: "",
@@ -325,9 +429,78 @@ function montarLinkAssinatura(signers) {
   }
 
   return {
-    signerToken,
-    signerUrl: `${ZAPSIGN_SIGNER_BASE_URL}/${signerToken}`,
+    signerToken: signatarios[0].token || "",
+    signerUrl: signatarios[0].signUrl || "",
   };
+}
+
+function montarSignatario({
+  nome,
+  email,
+  telefone,
+  qualificacao,
+  configuracao,
+}) {
+  const telefoneNormalizado = normalizarTelefone(telefone);
+  const signatario = {
+    name: String(nome || "").trim(),
+    auth_mode: "assinaturaTela",
+    qualification: qualificacao || "",
+    send_automatic_email:
+      configuracao.disableSignerEmails !== true && Boolean(email),
+    lock_name: true,
+    lock_email: Boolean(email),
+    lock_phone: Boolean(telefoneNormalizado.number),
+  };
+
+  if (email) {
+    signatario.email = String(email || "").trim();
+  }
+
+  if (telefoneNormalizado.countryCode && telefoneNormalizado.number) {
+    signatario.phone_country = telefoneNormalizado.countryCode;
+    signatario.phone_number = telefoneNormalizado.number;
+  }
+
+  return signatario;
+}
+
+function montarSignatariosContrato(payload, configuracao) {
+  const fixos = configuracao.placeholdersFixos || {};
+  const signatarios = [];
+
+  if (payload.nomePaciente) {
+    signatarios.push(montarSignatario({
+      nome: payload.nomePaciente,
+      email: payload.emailPaciente,
+      telefone: payload.telefonePaciente,
+      qualificacao: "Paciente",
+      configuracao,
+    }));
+  }
+
+  if (payload.nomeResponsavel) {
+    signatarios.push(montarSignatario({
+      nome: payload.nomeResponsavel,
+      email: payload.emailResponsavel,
+      telefone: payload.telefoneResponsavel,
+      qualificacao: "Responsavel",
+      configuracao,
+    }));
+  }
+
+  const nomeRepresentante = String(fixos.representanteLegal || "").trim();
+  if (nomeRepresentante) {
+    signatarios.push(montarSignatario({
+      nome: nomeRepresentante,
+      email: fixos.emailRepresentante || "",
+      telefone: fixos.telefoneRepresentante || "",
+      qualificacao: "Representante legal da clinica",
+      configuracao,
+    }));
+  }
+
+  return signatarios.filter((signatario) => signatario.name);
 }
 
 function montarPayloadCriacaoDocumento({
@@ -336,23 +509,24 @@ function montarPayloadCriacaoDocumento({
   configuracao,
   templateId,
 }) {
-  const telefone = normalizarTelefone(payload.telefonePaciente);
+  const signatarios = montarSignatariosContrato(payload, configuracao);
+  const signatarioPrincipal = signatarios[0] || {};
 
   const body = {
     template_id: templateId,
-    signer_name: payload.nomePaciente || "Paciente",
+    signer_name: signatarioPrincipal.name || payload.nomePaciente || "Paciente",
     data: montarCamposDinamicos(payload, configuracao),
     lang: configuracao.lang || "pt-br",
     disable_signer_emails: configuracao.disableSignerEmails === true,
   };
 
-  if (payload.emailPaciente) {
-    body.signer_email = payload.emailPaciente;
+  if (signatarioPrincipal.email) {
+    body.signer_email = signatarioPrincipal.email;
   }
 
-  if (telefone.countryCode && telefone.number) {
-    body.signer_phone_country = telefone.countryCode;
-    body.signer_phone_number = telefone.number;
+  if (signatarioPrincipal.phone_country && signatarioPrincipal.phone_number) {
+    body.signer_phone_country = signatarioPrincipal.phone_country;
+    body.signer_phone_number = signatarioPrincipal.phone_number;
   }
 
   if (configuracao.brandLogo) {
@@ -374,6 +548,31 @@ function montarPayloadCriacaoDocumento({
   body.name = `${payload.planoNome || "Contrato"} - ${payload.nomePaciente || contratoId}`;
 
   return body;
+}
+
+async function adicionarSignatariosSecundarios({
+  zapsignDocumentId,
+  signatarios,
+  apiToken,
+}) {
+  if (!zapsignDocumentId || !Array.isArray(signatarios) || signatarios.length <= 1) {
+    return [];
+  }
+
+  const signatariosAdicionados = [];
+
+  for (const signatario of signatarios.slice(1)) {
+    const resposta = await chamarZapSign({
+      method: "POST",
+      path: `/docs/${zapsignDocumentId}/add-signer/`,
+      apiToken,
+      body: signatario,
+    });
+
+    signatariosAdicionados.push(resposta);
+  }
+
+  return signatariosAdicionados;
 }
 
 async function atualizarGestanteComContrato(pacienteId, dados) {
@@ -435,6 +634,7 @@ async function processarGeracaoContrato({
   const templateKey = payload.templateKey || "";
   const pacienteId = payload.pacienteId || "";
   const configuracao = await buscarConfiguracaoZapSign();
+  const signatariosPlanejados = montarSignatariosContrato(payload, configuracao);
 
   if (configuracao.ativo === false) {
     throw new HttpsError(
@@ -496,19 +696,38 @@ async function processarGeracaoContrato({
       body,
     });
 
-    const linksAssinatura = montarLinkAssinatura(respostaZapSign.signers);
-    const statusInterno = normalizarStatusContrato(respostaZapSign.status);
+    await adicionarSignatariosSecundarios({
+      zapsignDocumentId: respostaZapSign.token || "",
+      signatarios: signatariosPlanejados,
+      apiToken,
+    });
+
+    const detalheDocumento = respostaZapSign.token ?
+      await chamarZapSign({
+        method: "GET",
+        path: `/docs/${respostaZapSign.token}/`,
+        apiToken,
+      }) :
+      respostaZapSign;
+    const signatariosFinais = mapearSignatariosZapSign(detalheDocumento.signers);
+    const linksAssinatura = montarLinkAssinaturaPrincipal(detalheDocumento.signers);
+    const statusInterno = normalizarStatusContrato(detalheDocumento.status);
 
     await atualizarContrato(contratoId, {
       status: statusInterno,
-      zapsignStatus: respostaZapSign.status || "",
-      zapsignDocumentId: respostaZapSign.token || "",
-      zapsignOpenId: String(respostaZapSign.open_id || ""),
+      zapsignStatus: detalheDocumento.status || respostaZapSign.status || "",
+      zapsignDocumentId: detalheDocumento.token || respostaZapSign.token || "",
+      zapsignOpenId: String(
+          detalheDocumento.open_id || respostaZapSign.open_id || "",
+      ),
       zapsignSignerToken: linksAssinatura.signerToken,
       zapsignSignerUrl: linksAssinatura.signerUrl,
-      zapsignOriginalFile: respostaZapSign.original_file || "",
-      zapsignSignedFile: respostaZapSign.signed_file || "",
-      respostaZapSign,
+      zapsignSigners: signatariosFinais,
+      zapsignOriginalFile:
+        detalheDocumento.original_file || respostaZapSign.original_file || "",
+      zapsignSignedFile:
+        detalheDocumento.signed_file || respostaZapSign.signed_file || "",
+      respostaZapSign: detalheDocumento,
       atualizadoEm: new Date().toISOString(),
     });
 
@@ -516,8 +735,11 @@ async function processarGeracaoContrato({
       contratoStatus: statusInterno,
       contratoTemplateKey: templateKey,
       contratoId,
-      contratoZapSignDocumentId: respostaZapSign.token || "",
+      contratoZapSignDocumentId:
+        detalheDocumento.token || respostaZapSign.token || "",
       contratoZapSignSignerUrl: linksAssinatura.signerUrl,
+      contratoZapSignSigners: signatariosFinais,
+      contratoErro: "",
       contratoUltimaTentativaEm: new Date().toISOString(),
     });
 
@@ -525,9 +747,10 @@ async function processarGeracaoContrato({
       sucesso: true,
       contratoId,
       status: statusInterno,
-      zapsignStatus: respostaZapSign.status || "",
-      zapsignDocumentId: respostaZapSign.token || "",
+      zapsignStatus: detalheDocumento.status || respostaZapSign.status || "",
+      zapsignDocumentId: detalheDocumento.token || respostaZapSign.token || "",
       zapsignSignerUrl: linksAssinatura.signerUrl,
+      zapsignSigners: signatariosFinais,
     };
   } catch (error) {
     await atualizarContrato(contratoId, {
@@ -546,6 +769,73 @@ async function processarGeracaoContrato({
         "internal",
         error.message || "Erro ao gerar contrato na ZapSign.",
     );
+  }
+}
+
+async function prepararContratoParaGestante(idGestante, dados) {
+  if (dados.origem === "importacao_xls") {
+    return;
+  }
+
+  const templateKey =
+    dados.contratoTemplateKey ||
+    descobrirTemplateKeyContrato(dados.plano || "", dados.consultorio || "");
+
+  if (!templateKey) {
+    return;
+  }
+
+  if (dados.contratoId) {
+    return;
+  }
+
+  const payload = montarPayloadContratoDaGestante(idGestante, {
+    ...dados,
+    contratoTemplateKey: templateKey,
+  });
+  const agora = new Date().toISOString();
+  const contratoRef = admin.firestore().collection("contratos").doc();
+
+  await contratoRef.set({
+    pacienteId: idGestante,
+    templateKey: payload.templateKey || "",
+    status: "pendente",
+    zapsignDocumentId: "",
+    zapsignSignerUrl: "",
+    payload,
+    criadoEm: agora,
+    atualizadoEm: agora,
+    origem: "cadastro_automatico_gestante",
+  });
+
+  await atualizarGestanteComContrato(idGestante, {
+    contratoGeracaoAutomatica: true,
+    contratoId: contratoRef.id,
+    contratoStatus: "pendente",
+    contratoTemplateKey: templateKey,
+    contratoPlanoCodigo: payload.templateKey.split("_")[0] || "",
+    contratoModalidadeCodigo: payload.templateKey.split("_")[1] || "",
+    contratoUltimaTentativaEm: agora,
+  });
+
+  try {
+    const apiToken = zapsignApiToken.value();
+
+    if (!apiToken) {
+      await atualizarContrato(contratoRef.id, {
+        status: "aguardando_secret",
+        atualizadoEm: new Date().toISOString(),
+      });
+      return;
+    }
+
+    await processarGeracaoContrato({
+      contratoId: contratoRef.id,
+      payload,
+      apiToken,
+    });
+  } catch (error) {
+    console.error("Erro ao preparar contrato ZapSign:", error);
   }
 }
 
@@ -637,60 +927,26 @@ exports.prepararContratoZapSignAoCadastrar = onDocumentCreated(
 
       const idGestante = event.params.idGestante;
       const dados = snapshot.data() || {};
+      await prepararContratoParaGestante(idGestante, dados);
+    },
+);
 
-      if (dados.origem === "importacao_xls") {
+exports.prepararContratoZapSignAoAtualizar = onDocumentUpdated(
+    {
+      document: "gestantes/{idGestante}",
+      region: "us-central1",
+      secrets: [zapsignApiToken],
+    },
+    async (event) => {
+      const after = event.data && event.data.after;
+
+      if (!after) {
         return;
       }
 
-      if (!dados.contratoTemplateKey) {
-        return;
-      }
-
-      if (dados.contratoId) {
-        return;
-      }
-
-      const payload = montarPayloadContratoDaGestante(idGestante, dados);
-      const agora = new Date().toISOString();
-      const contratoRef = admin.firestore().collection("contratos").doc();
-
-      await contratoRef.set({
-        pacienteId: idGestante,
-        templateKey: payload.templateKey || "",
-        status: "pendente",
-        zapsignDocumentId: "",
-        zapsignSignerUrl: "",
-        payload,
-        criadoEm: agora,
-        atualizadoEm: agora,
-        origem: "cadastro_automatico_gestante",
-      });
-
-      await atualizarGestanteComContrato(idGestante, {
-        contratoId: contratoRef.id,
-        contratoStatus: "pendente",
-        contratoUltimaTentativaEm: agora,
-      });
-
-      try {
-        const apiToken = zapsignApiToken.value();
-
-        if (!apiToken) {
-          await atualizarContrato(contratoRef.id, {
-            status: "aguardando_secret",
-            atualizadoEm: new Date().toISOString(),
-          });
-          return;
-        }
-
-        await processarGeracaoContrato({
-          contratoId: contratoRef.id,
-          payload,
-          apiToken,
-        });
-      } catch (error) {
-        console.error("Erro ao preparar contrato ZapSign:", error);
-      }
+      const idGestante = event.params.idGestante;
+      const dados = after.data() || {};
+      await prepararContratoParaGestante(idGestante, dados);
     },
 );
 
@@ -847,7 +1103,8 @@ exports.consultarContratoZapSign = onCall(
           apiToken,
         });
 
-        const linksAssinatura = montarLinkAssinatura(detalhe.signers);
+        const linksAssinatura = montarLinkAssinaturaPrincipal(detalhe.signers);
+        const signatarios = mapearSignatariosZapSign(detalhe.signers);
         const statusInterno = normalizarStatusContrato(detalhe.status);
 
         await atualizarContrato(contratoId, {
@@ -856,6 +1113,7 @@ exports.consultarContratoZapSign = onCall(
           zapsignDocumentId: detalhe.token || zapsignDocumentId,
           zapsignSignerToken: linksAssinatura.signerToken,
           zapsignSignerUrl: linksAssinatura.signerUrl,
+          zapsignSigners: signatarios,
           zapsignOriginalFile: detalhe.original_file || "",
           zapsignSignedFile: detalhe.signed_file || "",
           respostaConsultaZapSign: detalhe,
@@ -866,7 +1124,9 @@ exports.consultarContratoZapSign = onCall(
           contratoStatus: statusInterno,
           contratoZapSignDocumentId: detalhe.token || zapsignDocumentId,
           contratoZapSignSignerUrl: linksAssinatura.signerUrl,
+          contratoZapSignSigners: signatarios,
           contratoZapSignSignedFile: detalhe.signed_file || "",
+          contratoErro: "",
           contratoUltimaConsultaEm: new Date().toISOString(),
         });
 
@@ -877,6 +1137,7 @@ exports.consultarContratoZapSign = onCall(
           status: statusInterno,
           zapsignStatus: detalhe.status || "",
           zapsignSignerUrl: linksAssinatura.signerUrl,
+          zapsignSigners: signatarios,
           signedFile: detalhe.signed_file || "",
           originalFile: detalhe.original_file || "",
         };

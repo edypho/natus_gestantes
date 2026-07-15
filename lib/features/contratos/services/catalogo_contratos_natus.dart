@@ -128,7 +128,9 @@ class CatalogoContratosNatus {
 
   static ContratoModalidadeCodigo _modalidadePorCampo(String consultorio) {
     final valor = _normalizar(consultorio);
-    if (valor == 'sim' || valor == 'consultorio') {
+    if (valor == 'sim' ||
+        valor == 'consultorio' ||
+        valor.contains('consultorio')) {
       return ContratoModalidadeCodigo.consultorio;
     }
 
@@ -136,20 +138,39 @@ class CatalogoContratosNatus {
   }
 
   static String _normalizar(String valor) {
-    return valor
-        .toLowerCase()
-        .trim()
-        .replaceAll('á', 'a')
-        .replaceAll('à', 'a')
-        .replaceAll('ã', 'a')
-        .replaceAll('â', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('ê', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ô', 'o')
-        .replaceAll('õ', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ç', 'c');
+    const mapaAcentos = {
+      'á': 'a',
+      'à': 'a',
+      'ã': 'a',
+      'â': 'a',
+      'ä': 'a',
+      'é': 'e',
+      'è': 'e',
+      'ê': 'e',
+      'ë': 'e',
+      'í': 'i',
+      'ì': 'i',
+      'î': 'i',
+      'ï': 'i',
+      'ó': 'o',
+      'ò': 'o',
+      'ô': 'o',
+      'õ': 'o',
+      'ö': 'o',
+      'ú': 'u',
+      'ù': 'u',
+      'û': 'u',
+      'ü': 'u',
+      'ç': 'c',
+    };
+
+    final texto = valor.toLowerCase().trim();
+    final buffer = StringBuffer();
+
+    for (final caractere in texto.split('')) {
+      buffer.write(mapaAcentos[caractere] ?? caractere);
+    }
+
+    return buffer.toString();
   }
 }
