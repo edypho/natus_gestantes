@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:natus_gestantes/shared/natus_app.dart';
 import 'package:natus_gestantes/shared/natus_logo.dart';
-import 'package:natus_gestantes/shared/natus_premium_visual.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class _NatusMenuItem {
@@ -160,125 +159,86 @@ Widget menuLateralRealNatus({
     width: 294,
     decoration: BoxDecoration(
       gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
         colors: [NatusApp.menuTopo, NatusApp.menuMeio, NatusApp.menuBase],
         stops: [0.0, 0.58, 1.0],
       ),
       boxShadow: [
         BoxShadow(
-          color: NatusApp.vinhoProfundo.withValues(alpha: 0.28),
-          blurRadius: 34,
+          color: NatusApp.vinhoProfundo.withValues(alpha: 0.18),
+          blurRadius: 24,
           spreadRadius: -10,
-          offset: const Offset(12, 0),
+          offset: const Offset(10, 0),
         ),
       ],
     ),
-    child: Stack(
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(-0.9, -0.95),
-                  radius: 1.15,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.105),
-                    Colors.transparent,
+    child: SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+            child: SizedBox(
+              height: 184,
+              width: double.infinity,
+              child: const NatusLogo(color: NatusApp.sobreMarca),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.only(bottom: 12),
+              itemCount: itens.length,
+              itemBuilder: (context, index) => itemMenu(itens[index]),
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 6, 12, 14),
+            padding: const EdgeInsets.only(top: 10),
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(color: Colors.white.withValues(alpha: 0.13)),
+              ),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () async {
+                await FirebaseAuth.instance.signOut();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.105),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.logout_rounded,
+                      color: NatusApp.sobreMarca,
+                      size: 20,
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Sair',
+                      style: TextStyle(
+                        color: NatusApp.sobreMarca,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
           ),
-        ),
-        Positioned(
-          right: -96,
-          bottom: 36,
-          child: Opacity(
-            opacity: 0.18,
-            child: SizedBox(
-              width: 260,
-              height: 260,
-              child: CustomPaint(
-                painter: BotanicalNatusPainter(
-                  color: NatusApp.sobreMarcaSuave,
-                  mirror: true,
-                ),
-              ),
-            ),
-          ),
-        ),
-        SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-                child: SizedBox(
-                  height: 184,
-                  width: double.infinity,
-                  child: const NatusLogo(color: NatusApp.sobreMarca),
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  itemCount: itens.length,
-                  itemBuilder: (context, index) => itemMenu(itens[index]),
-                ),
-              ),
-              Container(
-                margin: const EdgeInsets.fromLTRB(12, 6, 12, 14),
-                padding: const EdgeInsets.only(top: 10),
-                decoration: BoxDecoration(
-                  border: Border(
-                    top: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.13),
-                    ),
-                  ),
-                ),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () async {
-                    await FirebaseAuth.instance.signOut();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.105),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.12),
-                      ),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(
-                          Icons.logout_rounded,
-                          color: NatusApp.sobreMarca,
-                          size: 20,
-                        ),
-                        SizedBox(width: 10),
-                        Text(
-                          'Sair',
-                          style: TextStyle(
-                            color: NatusApp.sobreMarca,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }

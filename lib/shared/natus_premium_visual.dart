@@ -19,53 +19,13 @@ class PremiumNatusBackground extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [p.offWhite, p.creme, p.bege],
-          stops: const [0.0, 0.58, 1.0],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [p.offWhite, p.creme],
+          stops: const [0.0, 1.0],
         ),
       ),
-      child: Stack(
-        children: [
-          // Direção "editorial sereno": fundo limpo, profundidade apenas
-          // por dois brilhos de cor muito sutis — sem elementos figurativos.
-          Positioned(
-            top: -220,
-            right: -180,
-            child: _SoftOrb(size: 560, color: p.douradoSuave, opacity: 0.14),
-          ),
-          Positioned(
-            bottom: -260,
-            left: -200,
-            child: _SoftOrb(size: 560, color: p.marsala, opacity: 0.045),
-          ),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _SoftOrb extends StatelessWidget {
-  final double size;
-  final Color color;
-  final double opacity;
-
-  const _SoftOrb({
-    required this.size,
-    required this.color,
-    required this.opacity,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withValues(alpha: opacity),
-      ),
+      child: child,
     );
   }
 }

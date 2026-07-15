@@ -2146,110 +2146,43 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       width: 292,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
           colors: [NatusApp.menuTopo, NatusApp.menuMeio, NatusApp.menuBase],
-          stops: [0.0, 0.48, 1.0],
+          stops: [0.0, 0.56, 1.0],
         ),
-      ),
-      child: Stack(
-        children: [
-          const Positioned(
-            right: -94,
-            top: -8,
-            child: NatusBotanicalAsset(
-              asset: NatusBotanicalAssets.branchHero,
-              width: 285,
-              opacity: 0.28,
-            ),
-          ),
-          const Positioned(
-            left: -98,
-            top: 230,
-            child: NatusBotanicalAsset(
-              asset: NatusBotanicalAssets.branchTall,
-              width: 270,
-              opacity: 0.20,
-              rotation: -0.10,
-            ),
-          ),
-          const Positioned(
-            right: -104,
-            top: 392,
-            child: NatusBotanicalAsset(
-              asset: NatusBotanicalAssets.branchAccent,
-              width: 260,
-              opacity: 0.18,
-              rotation: 0.18,
-            ),
-          ),
-          const Positioned(
-            left: -82,
-            bottom: 110,
-            child: NatusBotanicalAsset(
-              asset: NatusBotanicalAssets.branchCornerLeft,
-              width: 270,
-              opacity: 0.22,
-            ),
-          ),
-          const Positioned(
-            right: -72,
-            bottom: 12,
-            child: NatusBotanicalAsset(
-              asset: NatusBotanicalAssets.branchFine,
-              width: 210,
-              opacity: 0.16,
-            ),
-          ),
-          Positioned(
-            left: -110,
-            top: 150,
-            child: Container(
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: NatusApp.olivaSeco.withValues(alpha: 0.12),
-              ),
-            ),
-          ),
-          Positioned(
-            right: -120,
-            bottom: 245,
-            child: Container(
-              width: 230,
-              height: 230,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: NatusApp.douradoSuave.withValues(alpha: 0.10),
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 30, 8, 22),
-                  child: SizedBox(
-                    height: 180,
-                    width: double.infinity,
-                    child: NatusLogo(
-                      color: NatusApp.sobreMarca,
-                      fit: BoxFit.fitHeight,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    children: itensVisiveis,
-                  ),
-                ),
-                logoutFixo(),
-              ],
-            ),
+        boxShadow: [
+          BoxShadow(
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.18),
+            blurRadius: 24,
+            spreadRadius: -10,
+            offset: const Offset(10, 0),
           ),
         ],
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 30, 8, 22),
+              child: SizedBox(
+                height: 180,
+                width: double.infinity,
+                child: NatusLogo(
+                  color: NatusApp.sobreMarca,
+                  fit: BoxFit.fitHeight,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 8),
+                children: itensVisiveis,
+              ),
+            ),
+            logoutFixo(),
+          ],
+        ),
       ),
     );
   }
