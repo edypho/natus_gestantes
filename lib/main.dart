@@ -1702,6 +1702,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final eoEmailController = TextEditingController();
   final eoCorenController = TextEditingController();
   final eoEspecialidadeController = TextEditingController();
+  String tipoProfissionalCadastro = 'EO';
 
   final obNomeController = TextEditingController();
   final obTelefoneController = TextEditingController();
@@ -2003,8 +2004,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Documentos',
         'Exames',
         'Usuários',
-        'Cadastrar EO',
-        'Cadastrar Obstetra',
+        'Cadastrar Profissional',
         'Configurações',
       ],
       'enfermeira': [
@@ -2131,10 +2131,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (menusDoUsuario.contains('Documentos'))
         itemMenu(Icons.description, 'Documentos'),
       if (menusDoUsuario.contains('Exames')) itemMenu(Icons.biotech, 'Exames'),
-      if (menusDoUsuario.contains('Cadastrar EO'))
-        itemMenu(Icons.medical_information, 'Cadastrar EO'),
-      if (menusDoUsuario.contains('Cadastrar Obstetra'))
-        itemMenu(Icons.medical_services, 'Cadastrar Obstetra'),
+      if (menusDoUsuario.contains('Cadastrar Profissional'))
+        itemMenu(Icons.badge_rounded, 'Cadastrar Profissional'),
       if (menusDoUsuario.contains('Usuários'))
         itemMenu(Icons.people, 'Usuários'),
       if (menusDoUsuario.contains('Área da gestante'))
@@ -2466,6 +2464,115 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  Widget telaCadastrarProfissional() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Cadastrar Profissional',
+            style: TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.bold,
+              color: NatusApp.vinho,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Escolha a especialidade e preencha o cadastro do profissional.',
+            style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
+          ),
+          const SizedBox(height: 24),
+          bloco('Tipo de profissional', [
+            SizedBox(
+              width: 280,
+              child: DropdownButtonFormField<String>(
+                initialValue: tipoProfissionalCadastro,
+                decoration: InputDecoration(
+                  labelText: 'Especialidade',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'EO', child: Text('EO')),
+                  DropdownMenuItem(value: 'Obstetra', child: Text('Obstetra')),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    tipoProfissionalCadastro = value;
+                  });
+                },
+              ),
+            ),
+          ]),
+          bloco(
+            tipoProfissionalCadastro == 'EO'
+                ? 'Dados da EO'
+                : 'Dados do Obstetra',
+            tipoProfissionalCadastro == 'EO'
+                ? [
+                    campo(eoNomeController, 'Nome'),
+                    const SizedBox(height: 16),
+                    campo(eoTelefoneController, 'Telefone'),
+                    const SizedBox(height: 16),
+                    campo(eoEmailController, 'E-mail'),
+                    const SizedBox(height: 16),
+                    campo(eoCorenController, 'COREN'),
+                    const SizedBox(height: 16),
+                    campo(eoEspecialidadeController, 'Especialidade'),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: salvarEO,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Salvar EO'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: NatusApp.vinho,
+                        foregroundColor: (NatusApp.escuro
+                            ? NatusApp.fundo
+                            : NatusApp.offWhite),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 18,
+                        ),
+                      ),
+                    ),
+                  ]
+                : [
+                    campo(obNomeController, 'Nome'),
+                    const SizedBox(height: 16),
+                    campo(obTelefoneController, 'Telefone'),
+                    const SizedBox(height: 16),
+                    campo(obEmailController, 'E-mail'),
+                    const SizedBox(height: 16),
+                    campo(obCrmController, 'CRM'),
+                    const SizedBox(height: 16),
+                    campo(obEspecialidadeController, 'Especialidade'),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: salvarObstetra,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Salvar Obstetra'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: NatusApp.vinho,
+                        foregroundColor: (NatusApp.escuro
+                            ? NatusApp.fundo
+                            : NatusApp.offWhite),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 18,
+                        ),
+                      ),
+                    ),
+                  ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget telaConteudo() {
     switch (telaAtual) {
       case 'Dashboard SaaS':
@@ -2541,11 +2648,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       case 'Usuários':
         return telaUsuarios();
 
-      case 'Cadastrar EO':
-        return telaCadastrarEO();
-
-      case 'Cadastrar Obstetra':
-        return telaCadastrarObstetra();
+      case 'Cadastrar Profissional':
+        return telaCadastrarProfissional();
 
       case 'Área da gestante':
         return telaAreaGestante();

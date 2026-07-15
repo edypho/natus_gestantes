@@ -87,7 +87,7 @@ Widget menuLateralRealNatus({
       _NatusMenuItem('Documentos', Icons.folder_copy_rounded),
       _NatusMenuItem('Exames', Icons.medical_information_rounded),
       _NatusMenuItem('Usuários', Icons.manage_accounts_rounded),
-      _NatusMenuItem('Cadastrar EO', Icons.badge_rounded),
+      _NatusMenuItem('Cadastrar Profissional', Icons.badge_rounded),
       _NatusMenuItem('Configurações', Icons.settings_rounded),
     ];
   }
