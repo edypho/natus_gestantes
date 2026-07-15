@@ -32,6 +32,7 @@ import 'dados/natus_data_source.dart' as dados;
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
+import 'shared/gestacao_helpers.dart' as gestacao;
 import 'uploads/upload_progress_dialog.dart';
 
 export 'core/firebase_globals.dart';
@@ -4459,7 +4460,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                                 Expanded(
                                   child: Text(
-                                    'Seu bebê está do tamanho de uma $fruta.\n\n${mensagemGestacional(semanas)}',
+                                    'Seu bebê está do tamanho de ${artigoFruta(fruta)} $fruta.\n\n${mensagemGestacional(semanas)}',
                                     style: TextStyle(
                                       fontSize: 17,
                                       fontWeight: FontWeight.w600,
@@ -7831,88 +7832,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   int calcularSemanas(String dpp) {
-    try {
-      final partes = dpp.split('/');
-      if (partes.length != 3) return 0;
-
-      final dia = int.parse(partes[0]);
-      final mes = int.parse(partes[1]);
-      final ano = int.parse(partes[2]);
-
-      final dataDpp = DateTime(ano, mes, dia);
-      final hoje = DateTime.now();
-
-      final diasParaDpp = dataDpp.difference(hoje).inDays;
-      final semanas = 40 - (diasParaDpp ~/ 7);
-
-      return semanas.clamp(0, 42);
-    } catch (e) {
-      return 0;
-    }
+    return gestacao.calcularSemanas(dpp);
   }
 
   String frutaDaSemana(int semanas) {
-    if (semanas <= 4) return 'grão de papoula';
-    if (semanas <= 6) return 'lentilha';
-    if (semanas <= 8) return 'uva';
-    if (semanas <= 10) return 'morango';
-    if (semanas <= 12) return 'limão';
-    if (semanas <= 16) return 'abacate';
-    if (semanas <= 20) return 'manga';
-    if (semanas <= 24) return 'milho';
-    if (semanas <= 28) return 'berinjela';
-    if (semanas <= 32) return 'coco';
-    if (semanas <= 36) return 'melão';
-
-    return 'melancia';
+    return gestacao.frutaDaSemana(semanas);
   }
 
   String imagemFrutaDaSemana(int semanas) {
-    final int semana = semanas.clamp(4, 42).toInt();
-
-    final imagens = <int, String>{
-      4: 'assets/frutas/mirtilo.png',
-      5: 'assets/frutas/framboesa.png',
-      6: 'assets/frutas/framboesa.png',
-      7: 'assets/frutas/uva.png',
-      8: 'assets/frutas/uva.png',
-      9: 'assets/frutas/morango.png',
-      10: 'assets/frutas/morango.png',
-      11: 'assets/frutas/limao.png',
-      12: 'assets/frutas/limao.png',
-      13: 'assets/frutas/pessego.png',
-      14: 'assets/frutas/pessego.png',
-      15: 'assets/frutas/abacate.png',
-      16: 'assets/frutas/abacate.png',
-      17: 'assets/frutas/pera.png',
-      18: 'assets/frutas/manga.png',
-      19: 'assets/frutas/manga.png',
-      20: 'assets/frutas/manga.png',
-      21: 'assets/frutas/milho.png',
-      22: 'assets/frutas/milho.png',
-      23: 'assets/frutas/berinjela.png',
-      24: 'assets/frutas/berinjela.png',
-      25: 'assets/frutas/couve flor.png',
-      26: 'assets/frutas/couve flor.png',
-      27: 'assets/frutas/repolho.png',
-      28: 'assets/frutas/repolho.png',
-      29: 'assets/frutas/abobora.png',
-      30: 'assets/frutas/abobora.png',
-      31: 'assets/frutas/coco.png',
-      32: 'assets/frutas/coco.png',
-      33: 'assets/frutas/abacaxi.png',
-      34: 'assets/frutas/abacaxi.png',
-      35: 'assets/frutas/melao.png',
-      36: 'assets/frutas/melao.png',
-      37: 'assets/frutas/melancia.png',
-      38: 'assets/frutas/melancia.png',
-      39: 'assets/frutas/melancia.png',
-      40: 'assets/frutas/melancia.png',
-      41: 'assets/frutas/melancia.png',
-      42: 'assets/frutas/melancia.png',
-    };
-
-    return imagens[semana] ?? 'assets/frutas/morango.png';
+    return gestacao.imagemFrutaDaSemana(semanas);
   }
 
   Widget imagemGestacional({required int semanas, double tamanho = 150}) {
@@ -7942,6 +7870,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'melancia',
       'uva',
       'berinjela',
+      'couve-flor',
+      'abóbora',
     };
     return femininas.contains(fruta.toLowerCase().trim()) ? 'uma' : 'um';
   }
@@ -9203,7 +9133,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 20),
 
-          listaContracoes(),
+          painelResumoContracoes(),
         ],
       ),
     );
@@ -9372,8 +9302,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
                 ElevatedButton(
                   onPressed: () {
+                    final gestanteSelecionada = gestantes.firstWhere(
+                      (g) =>
+                          (g['nomeGestante'] ?? '') ==
+                          contracaoGestanteSelecionada,
+                      orElse: () => {},
+                    );
+
                     final novaContracao = {
                       'gestante': contracaoGestanteSelecionada,
+                      'idGestante': gestanteSelecionada['id'] ?? '',
+                      'uidGestante': gestanteSelecionada['uidGestante'] ?? '',
                       'inicio': formatarDataHora(inicioContracao!),
                       'inicioISO': inicioContracao!.toIso8601String(),
                       'fim': formatarDataHora(fimContracao),
@@ -9489,6 +9428,207 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         );
       }).toList(),
     );
+  }
+
+  Widget painelResumoContracoes() {
+    final hoje = DateTime.now();
+    final textoBusca = buscaContracoesController.text.trim().toLowerCase();
+    final grupos = <String, List<Map<String, String>>>{};
+
+    for (final contracao in contracoes) {
+      final dataContracao = dataReferenciaContracao(contracao);
+
+      if (dataContracao == null || !mesmaData(dataContracao, hoje)) {
+        continue;
+      }
+
+      final nomeGestante = nomeGestanteDaContracao(contracao);
+
+      if (widget.tipoUsuario == 'gestante') {
+        if (nomeGestante != contracaoGestanteSelecionada) {
+          continue;
+        }
+      } else if (textoBusca.isNotEmpty &&
+          !nomeGestante.toLowerCase().contains(textoBusca)) {
+        continue;
+      }
+
+      grupos.putIfAbsent(nomeGestante, () => []).add(contracao);
+    }
+
+    if (grupos.isEmpty) {
+      return Text(
+        widget.tipoUsuario == 'gestante'
+            ? 'Nenhuma contração registrada hoje.'
+            : 'Nenhuma contração registrada hoje para a busca informada.',
+      );
+    }
+
+    final nomesOrdenados = grupos.keys.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Resumo de hoje',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: NatusApp.vinho,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Mostrando as 3 últimas contrações de cada gestante no dia.',
+          style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
+        ),
+        const SizedBox(height: 16),
+        ...nomesOrdenados.map((nomeGestante) {
+          final lista = grupos[nomeGestante]!
+            ..sort((a, b) {
+              final dataA =
+                  dataReferenciaContracao(a) ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
+              final dataB =
+                  dataReferenciaContracao(b) ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
+              return dataB.compareTo(dataA);
+            });
+
+          final ultimasTres = lista.take(3).toList();
+
+          return Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: NatusApp.offWhite,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: NatusApp.rose.withValues(alpha: 0.35)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: NatusApp.vinho,
+                      child: Icon(Icons.favorite, color: NatusApp.offWhite),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            nomeGestante,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: NatusApp.vinho,
+                            ),
+                          ),
+                          Text(
+                            '${lista.length} contração(ões) registrada(s) hoje',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: NatusApp.textoSuave,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                ...ultimasTres.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final c = entry.value;
+
+                  return Container(
+                    width: double.infinity,
+                    margin: EdgeInsets.only(
+                      bottom: index == ultimasTres.length - 1 ? 0 : 10,
+                    ),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: index == 0
+                          ? const Color(0xFFFFEFEA)
+                          : NatusApp.vinho.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Início: ${c['inicio'] ?? '-'} | Fim: ${c['fim'] ?? '-'}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: NatusApp.texto,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Duração: ${c['duracao'] ?? 'Não informada'} | '
+                          'Intervalo: ${c['intervalo'] ?? 'Não informado'} | '
+                          'Intensidade: ${c['intensidade'] ?? 'Não informada'}',
+                        ),
+                        if ((c['observacao'] ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text('Observação: ${c['observacao']}'),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  DateTime? dataReferenciaContracao(Map<String, String> contracao) {
+    return DateTime.tryParse(contracao['fimISO'] ?? '') ??
+        DateTime.tryParse(contracao['inicioISO'] ?? '') ??
+        DateTime.tryParse(contracao['criadoEm'] ?? '');
+  }
+
+  bool mesmaData(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String nomeGestanteDaContracao(Map<String, String> contracao) {
+    final nomeSalvo = (contracao['gestante'] ?? '').trim();
+
+    if (nomeSalvo.isNotEmpty) {
+      return nomeSalvo;
+    }
+
+    final idGestante = (contracao['idGestante'] ?? '').trim();
+    final uidGestante = (contracao['uidGestante'] ?? '').trim();
+
+    for (final gestante in gestantes) {
+      if (idGestante.isNotEmpty && (gestante['id'] ?? '') == idGestante) {
+        return (gestante['nomeGestante'] ?? 'Gestante não identificada').trim();
+      }
+
+      if (uidGestante.isNotEmpty &&
+          (gestante['uidGestante'] ?? '') == uidGestante) {
+        return (gestante['nomeGestante'] ?? 'Gestante não identificada').trim();
+      }
+    }
+
+    return 'Gestante não identificada';
   }
 
   Widget telaUsuarios() {
@@ -12586,34 +12726,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   String calcularIdadeGestacional(String dppTexto) {
-    try {
-      final partes = dppTexto.split('/');
-
-      if (partes.length != 3) {
-        return 'Informe a DPP';
-      }
-
-      final dia = int.parse(partes[0]);
-      final mes = int.parse(partes[1]);
-      final ano = int.parse(partes[2]);
-
-      final dpp = DateTime(ano, mes, dia);
-      final hoje = DateTime.now();
-
-      final diasAteDpp = dpp.difference(hoje).inDays;
-      final diasGestacao = 280 - diasAteDpp;
-
-      if (diasGestacao < 0) {
-        return 'Antes da gestação';
-      }
-
-      final semanas = diasGestacao ~/ 7;
-      final dias = diasGestacao % 7;
-
-      return '$semanas semanas e $dias dias';
-    } catch (e) {
-      return 'Informe a DPP';
-    }
+    return gestacao.calcularIdadeGestacional(dppTexto);
   }
 
   double converterValor(String texto) {

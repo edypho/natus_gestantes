@@ -1,3 +1,87 @@
+const Map<int, String> _frutasPorSemana = <int, String>{
+  4: 'mirtilo',
+  5: 'framboesa',
+  6: 'framboesa',
+  7: 'uva',
+  8: 'uva',
+  9: 'morango',
+  10: 'morango',
+  11: 'limão',
+  12: 'limão',
+  13: 'pêssego',
+  14: 'pêssego',
+  15: 'abacate',
+  16: 'abacate',
+  17: 'manga',
+  18: 'manga',
+  19: 'manga',
+  20: 'manga',
+  21: 'milho',
+  22: 'milho',
+  23: 'berinjela',
+  24: 'berinjela',
+  25: 'couve-flor',
+  26: 'couve-flor',
+  27: 'repolho',
+  28: 'repolho',
+  29: 'abóbora',
+  30: 'abóbora',
+  31: 'coco',
+  32: 'coco',
+  33: 'abacaxi',
+  34: 'abacaxi',
+  35: 'melão',
+  36: 'melão',
+  37: 'melancia',
+  38: 'melancia',
+  39: 'melancia',
+  40: 'melancia',
+  41: 'melancia',
+  42: 'melancia',
+};
+
+const Map<int, String> _imagensFrutasPorSemana = <int, String>{
+  4: 'assets/frutas/mirtilo.png',
+  5: 'assets/frutas/framboesa.png',
+  6: 'assets/frutas/framboesa.png',
+  7: 'assets/frutas/uva.png',
+  8: 'assets/frutas/uva.png',
+  9: 'assets/frutas/morango.png',
+  10: 'assets/frutas/morango.png',
+  11: 'assets/frutas/limao.png',
+  12: 'assets/frutas/limao.png',
+  13: 'assets/frutas/pessego.png',
+  14: 'assets/frutas/pessego.png',
+  15: 'assets/frutas/abacate.png',
+  16: 'assets/frutas/abacate.png',
+  17: 'assets/frutas/manga.png',
+  18: 'assets/frutas/manga.png',
+  19: 'assets/frutas/manga.png',
+  20: 'assets/frutas/manga.png',
+  21: 'assets/frutas/milho.png',
+  22: 'assets/frutas/milho.png',
+  23: 'assets/frutas/berinjela.png',
+  24: 'assets/frutas/berinjela.png',
+  25: 'assets/frutas/couve flor.png',
+  26: 'assets/frutas/couve flor.png',
+  27: 'assets/frutas/repolho.png',
+  28: 'assets/frutas/repolho.png',
+  29: 'assets/frutas/abobora.png',
+  30: 'assets/frutas/abobora.png',
+  31: 'assets/frutas/coco.png',
+  32: 'assets/frutas/coco.png',
+  33: 'assets/frutas/abacaxi.png',
+  34: 'assets/frutas/abacaxi.png',
+  35: 'assets/frutas/melao.png',
+  36: 'assets/frutas/melao.png',
+  37: 'assets/frutas/melancia.png',
+  38: 'assets/frutas/melancia.png',
+  39: 'assets/frutas/melancia.png',
+  40: 'assets/frutas/melancia.png',
+  41: 'assets/frutas/melancia.png',
+  42: 'assets/frutas/melancia.png',
+};
+
 int calcularSemanas(String dpp) {
   try {
     final partes = dpp.split('/');
@@ -14,7 +98,6 @@ int calcularSemanas(String dpp) {
     final diasGestacao = 280 - diasParaDpp;
 
     final semanas = diasGestacao ~/ 7;
-
     return semanas.clamp(0, 42);
   } catch (e) {
     return 0;
@@ -23,50 +106,12 @@ int calcularSemanas(String dpp) {
 
 String frutaDaSemana(int semanas) {
   final semana = semanas.clamp(4, 42).toInt();
+  return _frutasPorSemana[semana] ?? 'morango';
+}
 
-  const frutasPorSemana = <int, String>{
-    4: 'Mirtilo',
-    5: 'Framboesa',
-    6: 'Framboesa',
-    7: 'Uva',
-    8: 'Uva',
-    9: 'Morango',
-    10: 'Morango',
-    11: 'Limão',
-    12: 'Limão',
-    13: 'Pêssego',
-    14: 'Pêssego',
-    15: 'Abacate',
-    16: 'Abacate',
-    17: 'Pera',
-    18: 'Manga',
-    19: 'Manga',
-    20: 'Manga',
-    21: 'Milho',
-    22: 'Milho',
-    23: 'Berinjela',
-    24: 'Berinjela',
-    25: 'Couve-flor',
-    26: 'Couve-flor',
-    27: 'Repolho',
-    28: 'Repolho',
-    29: 'Abóbora',
-    30: 'Abóbora',
-    31: 'Coco',
-    32: 'Coco',
-    33: 'Abacaxi',
-    34: 'Abacaxi',
-    35: 'Melão',
-    36: 'Melão',
-    37: 'Melancia',
-    38: 'Melancia',
-    39: 'Melancia',
-    40: 'Melancia',
-    41: 'Melancia',
-    42: 'Melancia',
-  };
-
-  return frutasPorSemana[semana] ?? 'Morango';
+String imagemFrutaDaSemana(int semanas) {
+  final semana = semanas.clamp(4, 42).toInt();
+  return _imagensFrutasPorSemana[semana] ?? 'assets/frutas/morango.png';
 }
 
 String calcularIdadeGestacional(String dppTexto) {
