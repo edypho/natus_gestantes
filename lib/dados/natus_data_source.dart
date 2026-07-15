@@ -20,8 +20,10 @@ Future<List<Map<String, String>>> buscarContracoes() async {
 }
 
 Future<List<Map<String, dynamic>>> buscarPlanos() async {
-  final resultado =
-      await firestore.collection('planos').orderBy('nomePlano').get();
+  final resultado = await firestore
+      .collection('planos')
+      .orderBy('nomePlano')
+      .get();
 
   return resultado.docs.map((doc) {
     final dados = doc.data();
@@ -69,9 +71,12 @@ Future<List<Map<String, String>>> buscarBiblioteca() async {
   final lista = resultado.docs.map((doc) {
     final dados = doc.data();
 
-    return dados.map((chave, valor) {
+    final mapa = dados.map((chave, valor) {
       return MapEntry(chave, valor.toString());
     });
+
+    mapa['id'] = doc.id;
+    return mapa;
   }).toList();
 
   lista.sort((a, b) {

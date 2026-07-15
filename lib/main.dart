@@ -644,6 +644,58 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
+  Future<void> confirmarExcluirItemBiblioteca(
+    Map<String, String> material,
+  ) async {
+    if (!usuarioEhAdmin()) return;
+
+    final id = (material['id'] ?? '').trim();
+    final titulo = (material['titulo'] ?? 'Material').trim();
+
+    if (id.isEmpty) {
+      mostrarMensagem('Material sem ID. Recarregue a biblioteca.');
+      return;
+    }
+
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Excluir material'),
+          content: Text(
+            'Tem certeza que deseja excluir "$titulo" da biblioteca?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.delete_rounded),
+              label: const Text('Excluir'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmou != true) return;
+
+    try {
+      await firestore.collection('biblioteca').doc(id).delete();
+      await carregarBibliotecaFirestore();
+      mostrarMensagem('Material excluído da biblioteca.');
+    } catch (e) {
+      debugPrint('❌ Erro ao excluir material da biblioteca: $e');
+      mostrarMensagem('Erro ao excluir material da biblioteca.');
+    }
+  }
+
   Future<void> carregarAtendimentosFirestore() async {
     try {
       final listaFirebase = await dados.buscarAtendimentos();
@@ -4953,6 +5005,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             cardBibliotecaNetflix(
                               materialDestaque,
                               largura: double.infinity,
+                              onExcluir: usuarioEhAdmin()
+                                  ? () => confirmarExcluirItemBiblioteca(
+                                      materialDestaque,
+                                    )
+                                  : null,
                             ),
                           ],
                         )
@@ -4962,6 +5019,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             cardBibliotecaNetflix(
                               materialDestaque,
                               largura: 280,
+                              onExcluir: usuarioEhAdmin()
+                                  ? () => confirmarExcluirItemBiblioteca(
+                                      materialDestaque,
+                                    )
+                                  : null,
                             ),
 
                             const SizedBox(width: 22),
@@ -5105,6 +5167,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         return cardBibliotecaNetflix(
                           material,
                           largura: isMobile ? 165 : 190,
+                          onExcluir: usuarioEhAdmin()
+                              ? () => confirmarExcluirItemBiblioteca(material)
+                              : null,
                         );
                       },
                     ),
@@ -5357,6 +5422,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   Widget cardBibliotecaNetflix(
     Map<String, String> material, {
     required double largura,
+    VoidCallback? onExcluir,
   }) {
     final tipo = material['tipo'] ?? 'pdf';
     final titulo = material['titulo'] ?? 'Material';
@@ -5482,6 +5548,44 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         ),
                       ),
                     ),
+
+                    if (onExcluir != null)
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: Tooltip(
+                          message: 'Excluir material',
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: onExcluir,
+                              child: Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withValues(alpha: 0.92),
+                                  borderRadius: BorderRadius.circular(999),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: NatusApp.vinhoProfundo.withValues(
+                                        alpha: 0.12,
+                                      ),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
 
                     Positioned(
                       right: 10,
