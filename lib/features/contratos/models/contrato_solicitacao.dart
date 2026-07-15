@@ -4,6 +4,7 @@ class ContratoSolicitacao {
   final String emailPaciente;
   final String telefonePaciente;
   final String cpfPaciente;
+  final String rgPaciente;
   final String enderecoPaciente;
   final String nomeResponsavel;
   final String cpfResponsavel;
@@ -15,6 +16,7 @@ class ContratoSolicitacao {
   final String cidadeAssinatura;
   final String dataAssinatura;
   final String formaPagamento;
+  final String vencimentoParcelas;
   final String observacoesContrato;
   final int numeroParcelas;
   final double valorTotal;
@@ -28,6 +30,7 @@ class ContratoSolicitacao {
     required this.emailPaciente,
     required this.telefonePaciente,
     required this.cpfPaciente,
+    required this.rgPaciente,
     required this.enderecoPaciente,
     required this.nomeResponsavel,
     required this.cpfResponsavel,
@@ -39,6 +42,7 @@ class ContratoSolicitacao {
     required this.cidadeAssinatura,
     required this.dataAssinatura,
     required this.formaPagamento,
+    required this.vencimentoParcelas,
     required this.observacoesContrato,
     required this.numeroParcelas,
     required this.valorTotal,
@@ -54,6 +58,7 @@ class ContratoSolicitacao {
       'emailPaciente': emailPaciente,
       'telefonePaciente': telefonePaciente,
       'cpfPaciente': cpfPaciente,
+      'rgPaciente': rgPaciente,
       'enderecoPaciente': enderecoPaciente,
       'nomeResponsavel': nomeResponsavel,
       'cpfResponsavel': cpfResponsavel,
@@ -65,6 +70,7 @@ class ContratoSolicitacao {
       'cidadeAssinatura': cidadeAssinatura,
       'dataAssinatura': dataAssinatura,
       'formaPagamento': formaPagamento,
+      'vencimentoParcelas': vencimentoParcelas,
       'observacoesContrato': observacoesContrato,
       'numeroParcelas': numeroParcelas,
       'valorTotal': valorTotal,
