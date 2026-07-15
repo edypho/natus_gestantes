@@ -341,6 +341,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   @override
   void dispose() {
     NatusTema.atual.removeListener(aoMudarTema);
+    buscaBibliotecaController.dispose();
     super.dispose();
   }
 
@@ -1576,6 +1577,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final List<Map<String, String>> documentos = [];
   final List<Map<String, String>> biblioteca = [];
   final List<Map<String, String>> observacoesProntuario = [];
+  final buscaBibliotecaController = TextEditingController();
+  String filtroCategoriaBiblioteca = 'Todos';
+  String filtroTipoBiblioteca = 'Todos';
+  int indiceDestaqueBiblioteca = 0;
 
   final observacaoProntuarioController = TextEditingController();
   String nomeArquivoSelecionado = '';
@@ -4748,6 +4753,127 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  String rotuloTipoBiblioteca(String tipo) {
+    switch (tipo.toLowerCase()) {
+      case 'video':
+        return 'Vídeos';
+      case 'link':
+        return 'Links';
+      case 'pdf':
+        return 'PDFs';
+      default:
+        return tipo.isEmpty ? 'Conteúdos' : tipo;
+    }
+  }
+
+  IconData iconeTipoBiblioteca(String tipo) {
+    switch (tipo.toLowerCase()) {
+      case 'video':
+        return Icons.play_circle_fill_rounded;
+      case 'link':
+        return Icons.link_rounded;
+      case 'pdf':
+        return Icons.picture_as_pdf_rounded;
+      default:
+        return Icons.auto_stories_rounded;
+    }
+  }
+
+  Widget chipBibliotecaFiltro({
+    required String label,
+    required IconData icon,
+    required bool selecionado,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        decoration: BoxDecoration(
+          color: selecionado
+              ? NatusApp.vinho
+              : Colors.white.withValues(alpha: 0.74),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selecionado
+                ? NatusApp.vinho
+                : NatusApp.rose.withValues(alpha: 0.45),
+          ),
+          boxShadow: selecionado
+              ? [
+                  BoxShadow(
+                    color: NatusApp.vinho.withValues(alpha: 0.17),
+                    blurRadius: 12,
+                    offset: const Offset(0, 5),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 17,
+              color: selecionado ? NatusApp.offWhite : NatusApp.vinho,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: TextStyle(
+                color: selecionado ? NatusApp.offWhite : NatusApp.vinho,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget chipBibliotecaCategoria({
+    required String label,
+    required bool selecionado,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        decoration: BoxDecoration(
+          color: selecionado ? NatusApp.vinho : NatusApp.offWhite,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: selecionado
+                ? NatusApp.vinho
+                : NatusApp.rose.withValues(alpha: 0.45),
+          ),
+          boxShadow: selecionado
+              ? [
+                  BoxShadow(
+                    color: NatusApp.vinho.withValues(alpha: 0.20),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selecionado ? NatusApp.offWhite : NatusApp.vinho,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget telaBiblioteca() {
     final isMobile = MediaQuery.of(context).size.width < 700;
     final podeGerenciarBiblioteca = usuarioEhAdmin();
@@ -4782,9 +4908,51 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       );
     }
 
+    final categoriasDisponiveis =
+        biblioteca
+            .map((item) => (item['categoria'] ?? 'Outros').trim())
+            .where((categoria) => categoria.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final tiposDisponiveis =
+        biblioteca
+            .map((item) => (item['tipo'] ?? 'pdf').trim().toLowerCase())
+            .where((tipo) => tipo.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final categoriaAtiva =
+        filtroCategoriaBiblioteca == 'Todos' ||
+            categoriasDisponiveis.contains(filtroCategoriaBiblioteca)
+        ? filtroCategoriaBiblioteca
+        : 'Todos';
+    final tipoAtivo =
+        filtroTipoBiblioteca == 'Todos' ||
+            tiposDisponiveis.contains(filtroTipoBiblioteca)
+        ? filtroTipoBiblioteca
+        : 'Todos';
+    final termoBusca = buscaBibliotecaController.text.trim().toLowerCase();
+    final materiaisFiltrados = biblioteca.where((item) {
+      final categoria = (item['categoria'] ?? 'Outros').trim();
+      final tipo = (item['tipo'] ?? 'pdf').trim().toLowerCase();
+      final textoBusca = [
+        item['titulo'] ?? '',
+        item['descricao'] ?? '',
+        categoria,
+        tipo,
+      ].join(' ').toLowerCase();
+
+      final passaCategoria =
+          categoriaAtiva == 'Todos' || categoria == categoriaAtiva;
+      final passaTipo = tipoAtivo == 'Todos' || tipo == tipoAtivo;
+      final passaBusca = termoBusca.isEmpty || textoBusca.contains(termoBusca);
+
+      return passaCategoria && passaTipo && passaBusca;
+    }).toList();
     final Map<String, List<Map<String, String>>> categorias = {};
 
-    for (var item in biblioteca) {
+    for (var item in materiaisFiltrados) {
       final categoria = item['categoria'] ?? 'Outros';
 
       if (!categorias.containsKey(categoria)) {
@@ -4794,7 +4962,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       categorias[categoria]!.add(item);
     }
 
-    final materialDestaque = biblioteca.first;
+    final materiaisParaDestaque = materiaisFiltrados.isEmpty
+        ? biblioteca
+        : materiaisFiltrados;
+    final indiceDestaqueSeguro = materiaisParaDestaque.isEmpty
+        ? 0
+        : indiceDestaqueBiblioteca % materiaisParaDestaque.length;
+    final materialDestaque = materiaisParaDestaque[indiceDestaqueSeguro];
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(isMobile ? 16 : 24),
@@ -4876,70 +5050,104 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
             const SizedBox(height: 22),
 
+            TextField(
+              controller: buscaBibliotecaController,
+              onChanged: (_) {
+                setState(() {});
+              },
+              decoration: InputDecoration(
+                labelText: 'Buscar na biblioteca',
+                hintText: 'Título, categoria, descrição ou tipo de material',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: buscaBibliotecaController.text.trim().isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Limpar busca',
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () {
+                          setState(() {
+                            buscaBibliotecaController.clear();
+                          });
+                        },
+                      ),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.72),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: BorderSide(
+                    color: NatusApp.rose.withValues(alpha: 0.35),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: BorderSide(
+                    color: NatusApp.rose.withValues(alpha: 0.35),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                chipBibliotecaFiltro(
+                  label: 'Todos',
+                  icon: Icons.grid_view_rounded,
+                  selecionado: tipoAtivo == 'Todos',
+                  onTap: () {
+                    setState(() {
+                      filtroTipoBiblioteca = 'Todos';
+                    });
+                  },
+                ),
+                ...tiposDisponiveis.map((tipo) {
+                  return chipBibliotecaFiltro(
+                    label: rotuloTipoBiblioteca(tipo),
+                    icon: iconeTipoBiblioteca(tipo),
+                    selecionado: tipoAtivo == tipo,
+                    onTap: () {
+                      setState(() {
+                        filtroTipoBiblioteca = tipo;
+                      });
+                    },
+                  );
+                }),
+              ],
+            ),
+
+            const SizedBox(height: 18),
+
             // CHIPS DE CATEGORIA
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 22,
-                      vertical: 13,
-                    ),
-                    decoration: BoxDecoration(
-                      color: NatusApp.vinho,
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: NatusApp.vinho.withValues(alpha: 0.20),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.grid_view_rounded,
-                          color: NatusApp.offWhite,
-                          size: 18,
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          'Todos',
-                          style: TextStyle(
-                            color: NatusApp.offWhite,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    ),
+                  chipBibliotecaCategoria(
+                    label: 'Todos',
+                    selecionado: categoriaAtiva == 'Todos',
+                    onTap: () {
+                      setState(() {
+                        filtroCategoriaBiblioteca = 'Todos';
+                      });
+                    },
                   ),
 
                   const SizedBox(width: 10),
 
-                  ...categorias.keys.map((nomeCategoria) {
+                  ...categoriasDisponiveis.map((nomeCategoria) {
                     return Padding(
                       padding: const EdgeInsets.only(right: 10),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 13,
-                        ),
-                        decoration: BoxDecoration(
-                          color: NatusApp.offWhite,
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(
-                            color: NatusApp.rose.withValues(alpha: 0.45),
-                          ),
-                        ),
-                        child: Text(
-                          nomeCategoria,
-                          style: TextStyle(
-                            color: NatusApp.vinho,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                      child: chipBibliotecaCategoria(
+                        label: nomeCategoria,
+                        selecionado: categoriaAtiva == nomeCategoria,
+                        onTap: () {
+                          setState(() {
+                            filtroCategoriaBiblioteca = nomeCategoria;
+                          });
+                        },
                       ),
                     );
                   }),
@@ -4949,8 +5157,46 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
             const SizedBox(height: 26),
 
+            if (materiaisFiltrados.isEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7F3),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: NatusApp.rose.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: const Color(0xFFFFEFEA),
+                      child: Icon(
+                        Icons.search_off_rounded,
+                        color: NatusApp.vinho,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        'Nenhum material encontrado com esses filtros. Mostrei um destaque da biblioteca para você continuar navegando.',
+                        style: TextStyle(
+                          fontSize: 14,
+                          height: 1.35,
+                          color: NatusApp.textoSuave,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+            ],
+
             // MATERIAL RECOMENDADO
-            Container(
+            if (false)
+              Container(
               width: double.infinity,
               padding: EdgeInsets.all(isMobile ? 16 : 22),
               decoration: BoxDecoration(
@@ -4986,7 +5232,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         ),
                         SizedBox(width: 6),
                         Text(
-                          'Recomendado para esta fase',
+                          materiaisFiltrados.isEmpty
+                              ? 'Destaque da biblioteca'
+                              : '${materiaisFiltrados.length} material${materiaisFiltrados.length == 1 ? '' : 'is'} encontrado${materiaisFiltrados.length == 1 ? '' : 's'}',
                           style: TextStyle(
                             color: NatusApp.vinho,
                             fontWeight: FontWeight.w800,
@@ -5072,33 +5320,73 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                                     const SizedBox(height: 18),
 
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 18,
-                                        vertical: 12,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: NatusApp.vinho,
-                                        borderRadius: BorderRadius.circular(18),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
+                                      children: [
+                                        ElevatedButton.icon(
+                                          onPressed: () {
+                                            final url =
+                                                materialDestaque['url'] ?? '';
+                                            if (url.isNotEmpty) {
+                                              abrirArquivo(url);
+                                            } else {
+                                              mostrarMensagem(
+                                                'Material ainda não disponível.',
+                                              );
+                                            }
+                                          },
+                                          icon: const Icon(
                                             Icons.auto_stories_rounded,
-                                            color: NatusApp.offWhite,
-                                            size: 20,
                                           ),
-                                          SizedBox(width: 8),
-                                          Text(
-                                            'Acessar material abaixo',
-                                            style: TextStyle(
-                                              color: NatusApp.offWhite,
-                                              fontWeight: FontWeight.w800,
+                                          label: const Text('Abrir destaque'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: NatusApp.vinho,
+                                            foregroundColor: NatusApp.offWhite,
+                                            elevation: 0,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 18,
+                                              vertical: 14,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
                                             ),
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                        OutlinedButton.icon(
+                                          onPressed:
+                                              materiaisParaDestaque.length <= 1
+                                              ? null
+                                              : () {
+                                                  setState(() {
+                                                    indiceDestaqueBiblioteca =
+                                                        indiceDestaqueSeguro +
+                                                        1;
+                                                  });
+                                                },
+                                          icon: const Icon(
+                                            Icons.skip_next_rounded,
+                                          ),
+                                          label: const Text('Próximo'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: NatusApp.vinho,
+                                            side: BorderSide(
+                                              color: NatusApp.rose.withValues(
+                                                alpha: 0.55,
+                                              ),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 14,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -5138,7 +5426,24 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
             const SizedBox(height: 20),
 
-            ...categorias.entries.map((categoria) {
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: materiaisFiltrados.map((material) {
+                return cardBibliotecaNetflix(
+                  material,
+                  largura: isMobile ? double.infinity : 238,
+                  onExcluir: usuarioEhAdmin()
+                      ? () => confirmarExcluirItemBiblioteca(material)
+                      : null,
+                );
+              }).toList(),
+            ),
+
+            const SizedBox(height: 28),
+
+            if (false)
+              ...categorias.entries.map((categoria) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -5297,6 +5602,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  Future<String?> uploadArquivoBiblioteca(PlatformFile arquivo) async {
+    try {
+      final bytes = arquivo.bytes;
+
+      if (bytes == null) {
+        mostrarMensagem('Não foi possível ler o arquivo selecionado.');
+        return null;
+      }
+
+      final nomeSeguro = arquivo.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final nomeFinal = '${DateTime.now().millisecondsSinceEpoch}_$nomeSeguro';
+      final ref = storage.ref().child('biblioteca/$nomeFinal');
+
+      await ref.putData(bytes);
+
+      return ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('❌ Erro ao enviar material da biblioteca: $e');
+      mostrarMensagem('Erro ao enviar material da biblioteca.');
+      return null;
+    }
+  }
+
   Future<void> abrirCadastroMaterialBiblioteca() async {
     if (!usuarioEhAdmin()) return;
 
@@ -5306,6 +5634,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final urlController = TextEditingController();
     final capaUrlController = TextEditingController();
     var tipoSelecionado = 'pdf';
+    PlatformFile? arquivoSelecionadoBiblioteca;
+    var salvandoMaterialBiblioteca = false;
 
     try {
       await showDialog<void>(
@@ -5350,7 +5680,76 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           },
                         ),
                         const SizedBox(height: 12),
-                        campoFull(urlController, 'URL do material'),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () async {
+                            final resultado = await FilePicker.platform
+                                .pickFiles(withData: true);
+
+                            if (resultado == null) return;
+
+                            setStateDialog(() {
+                              arquivoSelecionadoBiblioteca =
+                                  resultado.files.first;
+                            });
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF7F3),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: NatusApp.rose.withValues(alpha: 0.45),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: NatusApp.offWhite,
+                                  child: Icon(
+                                    Icons.cloud_upload_rounded,
+                                    color: NatusApp.vinho,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        arquivoSelecionadoBiblioteca == null
+                                            ? 'Selecionar arquivo do material'
+                                            : arquivoSelecionadoBiblioteca!
+                                                  .name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: NatusApp.vinho,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'PDF, imagem, vídeo ou outro arquivo para a biblioteca.',
+                                        style: TextStyle(
+                                          color: NatusApp.textoSuave,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        campoFull(
+                          urlController,
+                          'Link opcional (vídeo da internet ou material externo)',
+                        ),
                         const SizedBox(height: 12),
                         campoFull(capaUrlController, 'URL da capa'),
                         const SizedBox(height: 12),
