@@ -7876,222 +7876,195 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       width: double.infinity,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         color: NatusApp.offWhite,
         border: Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.6)),
         boxShadow: [
           BoxShadow(
             color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -90,
-            right: -70,
-            child: Container(
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: NatusApp.rose.withValues(alpha: 0.10),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(26),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compacto = constraints.maxWidth < 560;
-                final tamanhoImagem = compacto ? 132.0 : 154.0;
+      child: Padding(
+        padding: const EdgeInsets.all(26),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compacto = constraints.maxWidth < 560;
+            final tamanhoImagem = compacto ? 132.0 : 154.0;
 
-                final blocoTexto = Column(
-                  crossAxisAlignment: compacto
-                      ? CrossAxisAlignment.center
-                      : CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: NatusApp.marsala,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        idadeGestacional,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: NatusApp.offWhite,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
+            final blocoTexto = Column(
+              crossAxisAlignment: compacto
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: NatusApp.marsala,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    idadeGestacional,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: NatusApp.offWhite,
+                      letterSpacing: 0.3,
                     ),
-                    const SizedBox(height: 14),
-                    const SizedBox(height: 8),
-                    Text.rich(
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const SizedBox(height: 8),
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: '$nomeBebe está do tamanho\nde '),
                       TextSpan(
-                        children: [
-                          TextSpan(text: '$nomeBebe está do tamanho\nde '),
-                          TextSpan(
-                            text: '${artigoFruta(fruta)} $fruta',
-                            style: TextStyle(
-                              fontStyle: FontStyle.italic,
-                              fontFamily: 'Georgia',
-                              color: NatusApp.marsala,
-                            ),
-                          ),
-                        ],
+                        text: '${artigoFruta(fruta)} $fruta',
+                        style: TextStyle(
+                          fontStyle: FontStyle.italic,
+                          fontFamily: 'Georgia',
+                          color: NatusApp.marsala,
+                        ),
                       ),
-                      textAlign: compacto ? TextAlign.center : TextAlign.start,
-                      style: TextStyle(
-                        fontSize: compacto ? 26.0 : 32.0,
-                        height: 1.12,
-                        fontWeight: FontWeight.w900,
-                        color: NatusApp.vinho,
-                        letterSpacing: -0.4,
+                    ],
+                  ),
+                  textAlign: compacto ? TextAlign.center : TextAlign.start,
+                  style: TextStyle(
+                    fontSize: compacto ? 26.0 : 32.0,
+                    height: 1.12,
+                    fontWeight: FontWeight.w900,
+                    color: NatusApp.vinho,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Uma fase importante da jornada, acompanhada com cuidado e acolhimento.',
+                  textAlign: compacto ? TextAlign.center : TextAlign.start,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: NatusApp.textoSuave,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  alignment: compacto
+                      ? WrapAlignment.center
+                      : WrapAlignment.start,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    chipHeroGestante(
+                      icon: Icons.calendar_month,
+                      titulo: 'Semana',
+                      valor: semanas > 0 ? '$semanas semanas' : 'A calcular',
+                    ),
+                    chipHeroGestante(
+                      icon: Icons.auto_awesome,
+                      titulo: 'Fase',
+                      valor: fase,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: LinearProgressIndicator(
+                          value: semanas > 0
+                              ? (semanas / 40).clamp(0.0, 1.0)
+                              : 0.0,
+                          minHeight: 7,
+                          backgroundColor: NatusApp.bege,
+                          valueColor: AlwaysStoppedAnimation(NatusApp.marsala),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(width: 10),
                     Text(
-                      'Uma fase importante da jornada, acompanhada com cuidado e acolhimento.',
-                      textAlign: compacto ? TextAlign.center : TextAlign.start,
-                      style: TextStyle(
-                        fontSize: 14,
-                        height: 1.45,
-                        color: NatusApp.textoSuave,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Wrap(
-                      alignment: compacto
-                          ? WrapAlignment.center
-                          : WrapAlignment.start,
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        chipHeroGestante(
-                          icon: Icons.calendar_month,
-                          titulo: 'Semana',
-                          valor: semanas > 0
-                              ? '$semanas semanas'
-                              : 'A calcular',
-                        ),
-                        chipHeroGestante(
-                          icon: Icons.auto_awesome,
-                          titulo: 'Fase',
-                          valor: fase,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: LinearProgressIndicator(
-                              value: semanas > 0
-                                  ? (semanas / 40).clamp(0.0, 1.0)
-                                  : 0.0,
-                              minHeight: 7,
-                              backgroundColor: NatusApp.bege,
-                              valueColor: AlwaysStoppedAnimation(
-                                NatusApp.marsala,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          '$percentual%',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                            color: NatusApp.marsala,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      legendaProgresso,
-                      textAlign: compacto ? TextAlign.center : TextAlign.start,
+                      '$percentual%',
                       style: TextStyle(
                         fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: NatusApp.textoSuave,
+                        fontWeight: FontWeight.w800,
+                        color: NatusApp.marsala,
                       ),
                     ),
                   ],
-                );
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  legendaProgresso,
+                  textAlign: compacto ? TextAlign.center : TextAlign.start,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: NatusApp.textoSuave,
+                  ),
+                ),
+              ],
+            );
 
-                final blocoImagem = Container(
-                  width: compacto ? 222 : 235,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: NatusApp.offWhite,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: NatusApp.douradoClaro.withValues(alpha: 0.7),
+            final blocoImagem = Container(
+              width: compacto ? 222 : 235,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: NatusApp.offWhite,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: NatusApp.douradoClaro.withValues(alpha: 0.7),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  imagemGestacional(semanas: semanas, tamanho: tamanhoImagem),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Referência da semana',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: NatusApp.textoSuave,
+                      fontWeight: FontWeight.w700,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      imagemGestacional(
-                        semanas: semanas,
-                        tamanho: tamanhoImagem,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Referência da semana',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: NatusApp.textoSuave,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
+                ],
+              ),
+            );
 
-                if (compacto) {
-                  return Column(
-                    children: [
-                      blocoTexto,
-                      const SizedBox(height: 22),
-                      blocoImagem,
-                    ],
-                  );
-                }
+            if (compacto) {
+              return Column(
+                children: [blocoTexto, const SizedBox(height: 22), blocoImagem],
+              );
+            }
 
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(child: blocoTexto),
-                    const SizedBox(width: 24),
-                    blocoImagem,
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: blocoTexto),
+                const SizedBox(width: 24),
+                blocoImagem,
+              ],
+            );
+          },
+        ),
       ),
     );
   }

@@ -101,7 +101,7 @@ Widget menuLateralRealNatus({
       color: Colors.transparent,
       child: InkWell(
         onTap: () => onSelecionarTela(item.titulo),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
@@ -110,10 +110,19 @@ Widget menuLateralRealNatus({
             color: ativo
                 ? NatusApp.sobreMarca.withValues(alpha: 0.96)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             border: ativo
                 ? Border.all(color: Colors.white.withValues(alpha: 0.42))
                 : Border.all(color: Colors.transparent),
+            boxShadow: ativo
+                ? [
+                    BoxShadow(
+                      color: NatusApp.vinhoProfundo.withValues(alpha: 0.10),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
             children: [
@@ -124,7 +133,7 @@ Widget menuLateralRealNatus({
                   color: ativo
                       ? NatusApp.menuTopo.withValues(alpha: 0.12)
                       : Colors.white.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   item.icone,
@@ -167,9 +176,9 @@ Widget menuLateralRealNatus({
       boxShadow: [
         BoxShadow(
           color: NatusApp.vinhoProfundo.withValues(alpha: 0.18),
-          blurRadius: 24,
+          blurRadius: 18,
           spreadRadius: -10,
-          offset: const Offset(10, 0),
+          offset: const Offset(8, 0),
         ),
       ],
     ),
@@ -200,7 +209,7 @@ Widget menuLateralRealNatus({
               ),
             ),
             child: InkWell(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
               onTap: () async {
                 await FirebaseAuth.instance.signOut();
               },
@@ -211,7 +220,7 @@ Widget menuLateralRealNatus({
                 ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.105),
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: Colors.white.withValues(alpha: 0.12),
                   ),

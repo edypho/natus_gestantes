@@ -183,13 +183,13 @@ class PremiumHeaderNatus extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [NatusApp.menuTopo, NatusApp.menuMeio, NatusApp.menuBase],
         ),
-        borderRadius: BorderRadius.circular(mobile ? 32 : 42),
+        borderRadius: BorderRadius.circular(mobile ? 20 : 24),
         boxShadow: [
           BoxShadow(
-            color: NatusApp.vinho.withValues(alpha: 0.24),
-            blurRadius: 34,
+            color: NatusApp.vinho.withValues(alpha: 0.14),
+            blurRadius: 22,
             spreadRadius: -8,
-            offset: const Offset(0, 22),
+            offset: const Offset(0, 12),
           ),
         ],
       ),
@@ -260,7 +260,7 @@ class PremiumHeaderNatus extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.11),
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.16),
                         ),
@@ -313,17 +313,17 @@ class PremiumMetricCardNatus extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [NatusApp.offWhite, NatusApp.creme],
         ),
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.94),
           width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: cor.withValues(alpha: 0.12),
-            blurRadius: 26,
+            color: cor.withValues(alpha: 0.08),
+            blurRadius: 16,
             spreadRadius: -12,
-            offset: const Offset(0, 18),
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -338,18 +338,6 @@ class PremiumMetricCardNatus extends StatelessWidget {
               opacity: 0.20,
             ),
           ),
-          Positioned(
-            right: 10,
-            top: 10,
-            child: Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: NatusApp.olivaSeco.withValues(alpha: 0.070),
-              ),
-            ),
-          ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -358,7 +346,7 @@ class PremiumMetricCardNatus extends StatelessWidget {
                 height: 46,
                 decoration: BoxDecoration(
                   color: cor.withValues(alpha: 0.11),
-                  borderRadius: BorderRadius.circular(17),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: NatusApp.olivaSeco.withValues(alpha: 0.14),
                   ),
