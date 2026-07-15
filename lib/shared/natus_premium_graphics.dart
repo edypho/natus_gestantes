@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import 'natus_app.dart';
@@ -21,11 +19,7 @@ class FundoPremiumNatus extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            NatusApp.creme,
-            Color(0xFFFFFBF7),
-            Color(0xFFF8E8E0),
-          ],
+          colors: [NatusApp.creme, Color(0xFFFFFBF7), Color(0xFFF8E8E0)],
         ),
       ),
       child: Stack(
@@ -33,18 +27,12 @@ class FundoPremiumNatus extends StatelessWidget {
           const Positioned(
             right: -110,
             top: -95,
-            child: BolhaOrganicaNatus(
-              tamanho: 270,
-              opacity: 0.12,
-            ),
+            child: BolhaOrganicaNatus(tamanho: 270, opacity: 0.12),
           ),
           const Positioned(
             left: -120,
             bottom: -120,
-            child: BolhaOrganicaNatus(
-              tamanho: 310,
-              opacity: 0.09,
-            ),
+            child: BolhaOrganicaNatus(tamanho: 310, opacity: 0.09),
           ),
           const Positioned(
             right: 28,
@@ -55,10 +43,7 @@ class FundoPremiumNatus extends StatelessWidget {
               rotacao: -0.16,
             ),
           ),
-          Padding(
-            padding: padding,
-            child: child,
-          ),
+          Padding(padding: padding, child: child),
         ],
       ),
     );
@@ -70,7 +55,7 @@ class BolhaOrganicaNatus extends StatelessWidget {
   final double opacity;
   final Color? color;
 
-  BolhaOrganicaNatus({
+  const BolhaOrganicaNatus({
     super.key,
     this.tamanho = 220,
     this.opacity = 0.12,
@@ -106,7 +91,7 @@ class FolhasLinearesNatus extends StatelessWidget {
   final double rotacao;
   final Color? color;
 
-  FolhasLinearesNatus({
+  const FolhasLinearesNatus({
     super.key,
     this.tamanho = 120,
     this.opacity = 0.22,
@@ -196,10 +181,7 @@ class HeaderPremiumNatus extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [
-                      NatusApp.marsala,
-                      NatusApp.vinhoProfundo,
-                    ],
+                    colors: [NatusApp.marsala, NatusApp.vinhoProfundo],
                   ),
                   borderRadius: BorderRadius.circular(20),
                 ),

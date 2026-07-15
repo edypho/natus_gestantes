@@ -101,7 +101,7 @@ String rotuloParcelaFinanceiraWidget(Map<String, String> parcela) {
 
   final numero = (parcela['numero'] ?? '').trim();
   if (numero == '0') return 'Entrada';
-  if (numero.isNotEmpty) return '${numero}ª Parcela';
+  if (numero.isNotEmpty) return '$numeroª Parcela';
 
   return 'Parcela';
 }

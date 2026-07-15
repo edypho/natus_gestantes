@@ -7,7 +7,8 @@ class SuperAdminFirestoreList extends StatelessWidget {
   final Widget Function(
     BuildContext context,
     QueryDocumentSnapshot<Map<String, dynamic>> doc,
-  ) itemBuilder;
+  )
+  itemBuilder;
 
   const SuperAdminFirestoreList({
     super.key,
@@ -82,7 +83,7 @@ Widget superAdminListTile({
             ],
           ),
         ),
-        if (trailing != null) trailing,
+        ?trailing,
       ],
     ),
   );

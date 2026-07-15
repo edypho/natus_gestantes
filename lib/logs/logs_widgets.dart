@@ -12,9 +12,7 @@ Widget logAdministrativoCard({
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: Colors.black.withValues(alpha: 0.05),
-      ),
+      border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.035),
@@ -32,18 +30,13 @@ Widget logAdministrativoCard({
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                acao,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text(acao, style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               Text('Usuário: $usuario'),
               Text('Data: $data'),
-              if (detalhe != null && detalhe!.trim().isNotEmpty) ...[
+              if (detalhe != null && detalhe.trim().isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(detalhe!),
+                Text(detalhe),
               ],
             ],
           ),

@@ -2,7 +2,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import '../firebase_options.dart';
-import 'super_admin_auth_config.dart';
 
 class SuperAdminAuthService {
   static const String appSecundarioNome = 'superAdminCriacaoUsuarioSaaS';
@@ -22,9 +21,7 @@ class SuperAdminAuthService {
       );
     }
 
-    final authSecundario = FirebaseAuth.instanceFor(
-      app: appSecundario,
-    );
+    final authSecundario = FirebaseAuth.instanceFor(app: appSecundario);
 
     try {
       final credencial = await authSecundario.createUserWithEmailAndPassword(

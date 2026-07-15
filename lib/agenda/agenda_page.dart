@@ -63,8 +63,8 @@ class _AgendaPageState extends State<AgendaPage> {
 
   bool get _usuarioAdminOuEnfermeira =>
       widget.tipoUsuario == 'admin' ||
-          widget.tipoUsuario == 'enfermeira' ||
-          widget.tipoUsuario == 'obstetra';
+      widget.tipoUsuario == 'enfermeira' ||
+      widget.tipoUsuario == 'obstetra';
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +84,8 @@ class _AgendaPageState extends State<AgendaPage> {
         }
 
         final carregando =
-            snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData;
+            snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData;
         final eventos = snapshot.data ?? [];
         final eventosFiltrados = _filtrarEventos(eventos);
         final dppsFiltradas = _dppsFiltradas();
@@ -200,10 +201,7 @@ class _AgendaPageState extends State<AgendaPage> {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          subtitulo,
-          style: const TextStyle(color: Colors.black54),
-        ),
+        Text(subtitulo, style: const TextStyle(color: Colors.black54)),
       ],
     );
 
@@ -220,10 +218,7 @@ class _AgendaPageState extends State<AgendaPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           textos,
-          if (botaoNovo != null) ...[
-            const SizedBox(height: 14),
-            botaoNovo,
-          ],
+          if (botaoNovo != null) ...[const SizedBox(height: 14), botaoNovo],
         ],
       );
     }
@@ -232,21 +227,19 @@ class _AgendaPageState extends State<AgendaPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(child: textos),
-        if (botaoNovo != null) ...[
-          const SizedBox(width: 16),
-          botaoNovo,
-        ],
+        if (botaoNovo != null) ...[const SizedBox(width: 16), botaoNovo],
       ],
     );
   }
 
   Widget _filtrosAgenda() {
-    final nomesEnfermeiras = widget.enfermeiras
-        .map((e) => (e['nome'] ?? '').trim())
-        .where((nome) => nome.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final nomesEnfermeiras =
+        widget.enfermeiras
+            .map((e) => (e['nome'] ?? '').trim())
+            .where((nome) => nome.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
     final compacto = MediaQuery.sizeOf(context).width < 700;
     final larguraCampoBusca = compacto ? double.infinity : 320.0;
     final larguraStatus = compacto ? double.infinity : 190.0;
@@ -342,7 +335,10 @@ class _AgendaPageState extends State<AgendaPage> {
     );
   }
 
-  Widget _calendario(List<AgendaEvento> eventosFiltrados, List<Map<String, String>> dppsFiltradas) {
+  Widget _calendario(
+    List<AgendaEvento> eventosFiltrados,
+    List<Map<String, String>> dppsFiltradas,
+  ) {
     final primeiroDia = DateTime(_mesExibido.year, _mesExibido.month, 1);
     final diasNoMes = DateTime(_mesExibido.year, _mesExibido.month + 1, 0).day;
     final espacosAntes = primeiroDia.weekday - 1;
@@ -370,8 +366,15 @@ class _AgendaPageState extends State<AgendaPage> {
               IconButton(
                 tooltip: 'Mês anterior',
                 onPressed: () => setState(() {
-                  _mesExibido = DateTime(_mesExibido.year, _mesExibido.month - 1);
-                  _dataSelecionada = DateTime(_mesExibido.year, _mesExibido.month, 1);
+                  _mesExibido = DateTime(
+                    _mesExibido.year,
+                    _mesExibido.month - 1,
+                  );
+                  _dataSelecionada = DateTime(
+                    _mesExibido.year,
+                    _mesExibido.month,
+                    1,
+                  );
                 }),
                 icon: const Icon(Icons.chevron_left),
               ),
@@ -389,8 +392,15 @@ class _AgendaPageState extends State<AgendaPage> {
               IconButton(
                 tooltip: 'Próximo mês',
                 onPressed: () => setState(() {
-                  _mesExibido = DateTime(_mesExibido.year, _mesExibido.month + 1);
-                  _dataSelecionada = DateTime(_mesExibido.year, _mesExibido.month, 1);
+                  _mesExibido = DateTime(
+                    _mesExibido.year,
+                    _mesExibido.month + 1,
+                  );
+                  _dataSelecionada = DateTime(
+                    _mesExibido.year,
+                    _mesExibido.month,
+                    1,
+                  );
                 }),
                 icon: const Icon(Icons.chevron_right),
               ),
@@ -432,7 +442,11 @@ class _AgendaPageState extends State<AgendaPage> {
               final data = DateTime(_mesExibido.year, _mesExibido.month, dia);
               final selecionado = _mesmoDia(data, _dataSelecionada);
               final hoje = _mesmoDia(data, DateTime.now());
-              final quantidade = _contarItensDoDia(data, eventosFiltrados, dppsFiltradas);
+              final quantidade = _contarItensDoDia(
+                data,
+                eventosFiltrados,
+                dppsFiltradas,
+              );
 
               return InkWell(
                 borderRadius: BorderRadius.circular(18),
@@ -444,8 +458,8 @@ class _AgendaPageState extends State<AgendaPage> {
                     color: selecionado
                         ? NatusApp.vinho
                         : hoje
-                            ? NatusApp.rose.withValues(alpha: 0.18)
-                            : NatusApp.creme.withValues(alpha: 0.72),
+                        ? NatusApp.rose.withValues(alpha: 0.18)
+                        : NatusApp.creme.withValues(alpha: 0.72),
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
                       color: selecionado
@@ -483,7 +497,9 @@ class _AgendaPageState extends State<AgendaPage> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
-                                color: selecionado ? Colors.white : NatusApp.vinho,
+                                color: selecionado
+                                    ? Colors.white
+                                    : NatusApp.vinho,
                               ),
                             ),
                           ),
@@ -499,7 +515,10 @@ class _AgendaPageState extends State<AgendaPage> {
     );
   }
 
-  Widget _listaDoDia(List<AgendaEvento> eventos, List<Map<String, String>> dpps) {
+  Widget _listaDoDia(
+    List<AgendaEvento> eventos,
+    List<Map<String, String>> dpps,
+  ) {
     final dataFormatada = _formatarDataBr(_dataSelecionada);
 
     return Container(
@@ -526,7 +545,8 @@ class _AgendaPageState extends State<AgendaPage> {
               ),
               if (!_usuarioGestante)
                 TextButton.icon(
-                  onPressed: () => _abrirDialogEvento(dataInicial: _dataSelecionada),
+                  onPressed: () =>
+                      _abrirDialogEvento(dataInicial: _dataSelecionada),
                   icon: const Icon(Icons.add),
                   label: const Text('Adicionar neste dia'),
                 ),
@@ -604,7 +624,8 @@ class _AgendaPageState extends State<AgendaPage> {
                   Text('Gestante: ${evento.gestanteNome}'),
                 if (evento.enfermeiraNome.trim().isNotEmpty)
                   Text('EO: ${evento.enfermeiraNome}'),
-                if (evento.local.trim().isNotEmpty) Text('Local: ${evento.local}'),
+                if (evento.local.trim().isNotEmpty)
+                  Text('Local: ${evento.local}'),
                 if (evento.observacoes.trim().isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(
@@ -704,11 +725,7 @@ class _AgendaPageState extends State<AgendaPage> {
       ),
       child: Text(
         texto,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: cor,
-        ),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cor),
       ),
     );
   }
@@ -733,7 +750,9 @@ class _AgendaPageState extends State<AgendaPage> {
         ? (dataInicial ?? _dataSelecionada)
         : (_dataDoEvento(evento) ?? _dataSelecionada);
 
-    String tipo = tiposEvento.contains(evento?.tipo) ? evento!.tipo : 'Consulta';
+    String tipo = tiposEvento.contains(evento?.tipo)
+        ? evento!.tipo
+        : 'Consulta';
     String status = statusEvento.contains(evento?.status)
         ? evento!.status
         : 'Agendado';
@@ -784,7 +803,9 @@ class _AgendaPageState extends State<AgendaPage> {
                             child: DropdownButtonFormField<String>(
                               initialValue: tipo,
                               isExpanded: true,
-                              decoration: const InputDecoration(labelText: 'Tipo'),
+                              decoration: const InputDecoration(
+                                labelText: 'Tipo',
+                              ),
                               items: tiposEvento
                                   .map(
                                     (item) => DropdownMenuItem(
@@ -804,7 +825,9 @@ class _AgendaPageState extends State<AgendaPage> {
                             child: DropdownButtonFormField<String>(
                               initialValue: status,
                               isExpanded: true,
-                              decoration: const InputDecoration(labelText: 'Status'),
+                              decoration: const InputDecoration(
+                                labelText: 'Status',
+                              ),
                               items: statusEvento
                                   .map(
                                     (item) => DropdownMenuItem(
@@ -828,7 +851,9 @@ class _AgendaPageState extends State<AgendaPage> {
                           gestantesDisponiveis.map(_idGestante).toList(),
                         ),
                         isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Gestante vinculada'),
+                        decoration: const InputDecoration(
+                          labelText: 'Gestante vinculada',
+                        ),
                         items: gestantesDisponiveis.map((g) {
                           final id = _idGestante(g);
                           final nome = g['nomeGestante'] ?? 'Gestante sem nome';
@@ -846,7 +871,9 @@ class _AgendaPageState extends State<AgendaPage> {
                           enfermeirasDisponiveis.map(_idEnfermeira).toList(),
                         ),
                         isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Enfermeira responsável'),
+                        decoration: const InputDecoration(
+                          labelText: 'Enfermeira responsável',
+                        ),
                         items: enfermeirasDisponiveis.map((e) {
                           final id = _idEnfermeira(e);
                           final nome = e['nome'] ?? 'Enfermeira';
@@ -871,7 +898,9 @@ class _AgendaPageState extends State<AgendaPage> {
                                 );
 
                                 if (escolhida == null) return;
-                                setStateDialog(() => dataSelecionada = escolhida);
+                                setStateDialog(
+                                  () => dataSelecionada = escolhida,
+                                );
                               },
                               icon: const Icon(Icons.calendar_today),
                               label: Text(_formatarDataBr(dataSelecionada)),
@@ -918,7 +947,9 @@ class _AgendaPageState extends State<AgendaPage> {
                       TextField(
                         controller: observacoesController,
                         maxLines: 3,
-                        decoration: const InputDecoration(labelText: 'Observações'),
+                        decoration: const InputDecoration(
+                          labelText: 'Observações',
+                        ),
                       ),
                     ],
                   ),
@@ -984,9 +1015,13 @@ class _AgendaPageState extends State<AgendaPage> {
                         );
                       }
 
-                      if (!mounted) return;
+                      if (!mounted || !contextDialog.mounted) return;
                       Navigator.pop(contextDialog);
-                      _mensagem(editando ? 'Compromisso atualizado.' : 'Compromisso criado.');
+                      _mensagem(
+                        editando
+                            ? 'Compromisso atualizado.'
+                            : 'Compromisso criado.',
+                      );
                     } catch (e) {
                       _mensagem('Erro ao salvar compromisso: $e');
                     }
@@ -1006,7 +1041,10 @@ class _AgendaPageState extends State<AgendaPage> {
     observacoesController.dispose();
   }
 
-  Future<String?> _selecionarHora(BuildContext context, String valorAtual) async {
+  Future<String?> _selecionarHora(
+    BuildContext context,
+    String valorAtual,
+  ) async {
     final partes = valorAtual.split(':');
     final hora = int.tryParse(partes.first) ?? 8;
     final minuto = partes.length > 1 ? int.tryParse(partes[1]) ?? 0 : 0;
@@ -1135,21 +1173,24 @@ class _AgendaPageState extends State<AgendaPage> {
         return false;
       }
 
-      if (_filtroEnfermeira != 'Todas' && evento.enfermeiraNome != _filtroEnfermeira) {
+      if (_filtroEnfermeira != 'Todas' &&
+          evento.enfermeiraNome != _filtroEnfermeira) {
         return false;
       }
 
       if (busca.isEmpty) return true;
 
-      final texto = _normalizar([
-        evento.titulo,
-        evento.tipo,
-        evento.gestanteNome,
-        evento.enfermeiraNome,
-        evento.local,
-        evento.observacoes,
-        evento.status,
-      ].join(' '));
+      final texto = _normalizar(
+        [
+          evento.titulo,
+          evento.tipo,
+          evento.gestanteNome,
+          evento.enfermeiraNome,
+          evento.local,
+          evento.observacoes,
+          evento.status,
+        ].join(' '),
+      );
 
       return texto.contains(busca);
     }).toList();
@@ -1196,13 +1237,15 @@ class _AgendaPageState extends State<AgendaPage> {
 
       if (busca.isEmpty) return true;
 
-      final texto = _normalizar([
-        'DPP',
-        g['nomeGestante'],
-        g['telefoneGestante'],
-        g['hospitalGestante'],
-        g['obstetraGestante'],
-      ].join(' '));
+      final texto = _normalizar(
+        [
+          'DPP',
+          g['nomeGestante'],
+          g['telefoneGestante'],
+          g['hospitalGestante'],
+          g['obstetraGestante'],
+        ].join(' '),
+      );
 
       return texto.contains(busca);
     }).toList();
@@ -1237,7 +1280,9 @@ class _AgendaPageState extends State<AgendaPage> {
       return false;
     }
 
-    return status.contains('gestante') || status.contains('puerpera') || status.contains('puérpera');
+    return status.contains('gestante') ||
+        status.contains('puerpera') ||
+        status.contains('puérpera');
   }
 
   DateTime? _dataDoEvento(AgendaEvento evento) {

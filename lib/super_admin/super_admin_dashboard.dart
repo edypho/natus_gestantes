@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'super_admin_widgets.dart';
 import 'super_admin_stats.dart';
 
 class SuperAdminDashboard extends StatelessWidget {
@@ -24,9 +23,7 @@ class SuperAdminDashboard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'Painel administrativo da plataforma Natus SaaS',
-            style: TextStyle(
-              color: Colors.grey.shade700,
-            ),
+            style: TextStyle(color: Colors.grey.shade700),
           ),
           const SizedBox(height: 28),
           const SuperAdminStatsGrid(),

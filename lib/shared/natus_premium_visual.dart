@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import 'natus_app.dart';
@@ -39,11 +37,7 @@ class PremiumNatusBackground extends StatelessWidget {
           Positioned(
             bottom: -260,
             left: -200,
-            child: _SoftOrb(
-              size: 560,
-              color: p.marsala,
-              opacity: 0.045,
-            ),
+            child: _SoftOrb(size: 560, color: p.marsala, opacity: 0.045),
           ),
           child,
         ],
@@ -117,7 +111,6 @@ class NatusBotanicalAsset extends StatelessWidget {
     // alterar os dezenas de call sites — remoção definitiva no Lote 2f.
     return const SizedBox.shrink();
   }
-
 }
 
 class BotanicalNatusPainter extends CustomPainter {
@@ -162,7 +155,10 @@ class NatusPremiumShellCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: color ?? const Color(0xFFFFFCF7).withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(34),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.82), width: 1.1),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.82),
+          width: 1.1,
+        ),
         boxShadow: [
           BoxShadow(
             color: NatusApp.vinho.withValues(alpha: 0.10),
@@ -225,11 +221,7 @@ class PremiumHeaderNatus extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            NatusApp.menuTopo,
-            NatusApp.menuMeio,
-            NatusApp.menuBase,
-          ],
+          colors: [NatusApp.menuTopo, NatusApp.menuMeio, NatusApp.menuBase],
         ),
         borderRadius: BorderRadius.circular(mobile ? 32 : 42),
         boxShadow: [
@@ -254,7 +246,9 @@ class PremiumHeaderNatus extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.20),
+                  ),
                 ),
                 child: const Text(
                   'Natus • Cuidado materno e neonatal',
@@ -337,7 +331,7 @@ class PremiumMetricCardNatus extends StatelessWidget {
   final IconData icone;
   final Color? cor;
 
-  PremiumMetricCardNatus({
+  const PremiumMetricCardNatus({
     super.key,
     required this.titulo,
     required this.valor,
@@ -360,7 +354,10 @@ class PremiumMetricCardNatus extends StatelessWidget {
           colors: [NatusApp.offWhite, NatusApp.creme],
         ),
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.94), width: 1.2),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.94),
+          width: 1.2,
+        ),
         boxShadow: [
           BoxShadow(
             color: cor.withValues(alpha: 0.12),
@@ -462,7 +459,9 @@ class PremiumSectionTitle extends StatelessWidget {
             decoration: BoxDecoration(
               color: NatusApp.olivaSeco.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: NatusApp.marsala.withValues(alpha: 0.08)),
+              border: Border.all(
+                color: NatusApp.marsala.withValues(alpha: 0.08),
+              ),
             ),
             child: Icon(icone, color: NatusApp.marsala, size: 22),
           ),

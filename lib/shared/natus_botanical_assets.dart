@@ -32,7 +32,7 @@ class NatusBotanicalImage extends StatelessWidget {
           height: height,
           fit: fit,
           filterQuality: FilterQuality.high,
-          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
         ),
       ),
     );

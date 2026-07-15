@@ -21,7 +21,7 @@ class NatusCardKpi extends StatelessWidget {
   final String valor;
   final IconData icone;
 
-  const NatusCardKpi(this.titulo, this.valor, this.icone);
+  const NatusCardKpi(this.titulo, this.valor, this.icone, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +85,7 @@ class NatusCardKpi extends StatelessWidget {
 class NatusAlertaDpp extends StatelessWidget {
   final Map<String, String> g;
 
-  const NatusAlertaDpp(this.g);
+  const NatusAlertaDpp(this.g, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -143,19 +143,28 @@ class NatusCardAlertaDashboard extends StatelessWidget {
   final String valor;
   final IconData icone;
   final Color cor;
+  final VoidCallback? onTap;
 
   const NatusCardAlertaDashboard(
-      this.titulo, this.valor, this.icone, this.cor);
+    this.titulo,
+    this.valor,
+    this.icone,
+    this.cor, {
+    super.key,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 700;
-    return Container(
-      padding: const EdgeInsets.all(14),
+    return _NatusCardClicavel(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(16),
       ),
+      padding: const EdgeInsets.all(14),
       child: Row(
         children: [
           Container(
@@ -193,6 +202,10 @@ class NatusCardAlertaDashboard extends StatelessWidget {
               ],
             ),
           ),
+          if (onTap != null) ...[
+            const SizedBox(width: 8),
+            Icon(Icons.arrow_forward_rounded, color: cor, size: 18),
+          ],
         ],
       ),
     );
@@ -205,20 +218,31 @@ class NatusCardFinanceiroResumo extends StatelessWidget {
   final Color cor;
   final IconData icone;
   final String sufixo;
+  final VoidCallback? onTap;
 
-  const NatusCardFinanceiroResumo(this.titulo, this.valor, this.cor, this.icone,
-      {this.sufixo = ''});
+  const NatusCardFinanceiroResumo(
+    this.titulo,
+    this.valor,
+    this.cor,
+    this.icone, {
+    super.key,
+    this.sufixo = '',
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final textoValor =
-        sufixo == '%' ? '${valor.toStringAsFixed(1)}%' : formatarMoeda(valor);
+    final textoValor = sufixo == '%'
+        ? '${valor.toStringAsFixed(1)}%'
+        : formatarMoeda(valor);
 
     final isMobile = MediaQuery.of(context).size.width < 700;
 
-    return Container(
+    return _NatusCardClicavel(
+      onTap: onTap,
       constraints: const BoxConstraints(minHeight: 118),
       padding: const EdgeInsets.all(14),
+      borderRadius: BorderRadius.circular(18),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(18),
@@ -226,14 +250,21 @@ class NatusCardFinanceiroResumo extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: cor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icone, color: cor, size: 17),
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: cor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icone, color: cor, size: 17),
+              ),
+              const Spacer(),
+              if (onTap != null)
+                Icon(Icons.arrow_forward_rounded, color: cor, size: 18),
+            ],
           ),
           const SizedBox(height: 10),
           Text(
@@ -271,16 +302,26 @@ class NatusCardContagemResumo extends StatelessWidget {
   final int valor;
   final Color cor;
   final IconData icone;
+  final VoidCallback? onTap;
 
-  const NatusCardContagemResumo(this.titulo, this.valor, this.cor, this.icone);
+  const NatusCardContagemResumo(
+    this.titulo,
+    this.valor,
+    this.cor,
+    this.icone, {
+    super.key,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 700;
 
-    return Container(
+    return _NatusCardClicavel(
+      onTap: onTap,
       constraints: const BoxConstraints(minHeight: 118),
       padding: const EdgeInsets.all(14),
+      borderRadius: BorderRadius.circular(18),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(18),
@@ -288,14 +329,21 @@ class NatusCardContagemResumo extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: cor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icone, color: cor, size: 17),
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: cor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icone, color: cor, size: 17),
+              ),
+              const Spacer(),
+              if (onTap != null)
+                Icon(Icons.arrow_forward_rounded, color: cor, size: 18),
+            ],
           ),
           const SizedBox(height: 10),
           Text(
@@ -324,13 +372,64 @@ class NatusCardContagemResumo extends StatelessWidget {
   }
 }
 
+class _NatusCardClicavel extends StatelessWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final EdgeInsetsGeometry padding;
+  final BoxConstraints? constraints;
+  final BorderRadius borderRadius;
+  final Decoration decoration;
+
+  const _NatusCardClicavel({
+    required this.child,
+    required this.onTap,
+    required this.padding,
+    required this.borderRadius,
+    required this.decoration,
+    this.constraints,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final conteudo = Container(
+      constraints: constraints,
+      padding: padding,
+      decoration: decoration,
+      child: child,
+    );
+
+    if (onTap == null) return conteudo;
+
+    return Semantics(
+      button: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: borderRadius,
+            onTap: onTap,
+            child: conteudo,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class NatusCardResumo extends StatelessWidget {
   final String titulo;
   final String valor;
   final IconData icone;
   final Color? cor;
 
-  const NatusCardResumo(this.titulo, this.valor, this.icone, {this.cor});
+  const NatusCardResumo(
+    this.titulo,
+    this.valor,
+    this.icone, {
+    super.key,
+    this.cor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -404,7 +503,7 @@ class NatusBlocoDashboard extends StatelessWidget {
   final String titulo;
   final List<Widget> filhos;
 
-  const NatusBlocoDashboard(this.titulo, this.filhos);
+  const NatusBlocoDashboard(this.titulo, this.filhos, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -415,7 +514,9 @@ class NatusBlocoDashboard extends StatelessWidget {
       decoration: BoxDecoration(
         color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.55)),
+        border: Border.all(
+          color: NatusApp.douradoClaro.withValues(alpha: 0.55),
+        ),
         boxShadow: [
           BoxShadow(
             color: NatusApp.vinhoProfundo.withValues(alpha: 0.04),
@@ -462,7 +563,7 @@ class NatusBlocoDashboard extends StatelessWidget {
 class NatusAlertaDashboardFinanceiro extends StatelessWidget {
   final int atrasadas;
 
-  const NatusAlertaDashboardFinanceiro(this.atrasadas);
+  const NatusAlertaDashboardFinanceiro(this.atrasadas, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -508,7 +609,12 @@ class NatusCardIndicadorAmamentacao extends StatelessWidget {
   final Color cor;
 
   const NatusCardIndicadorAmamentacao(
-      this.titulo, this.valor, this.total, this.cor);
+    this.titulo,
+    this.valor,
+    this.total,
+    this.cor, {
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -630,11 +736,12 @@ class _NatusGraficoAmamentacaoState extends State<NatusGraficoAmamentacao> {
       return _estadoVazio();
     }
 
-    final entradas = _ordemCategorias
-        .map((c) => MapEntry(c, widget.dados[c] ?? 0))
-        .where((e) => e.value > 0)
-        .toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    final entradas =
+        _ordemCategorias
+            .map((c) => MapEntry(c, widget.dados[c] ?? 0))
+            .where((e) => e.value > 0)
+            .toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -643,9 +750,7 @@ class _NatusGraficoAmamentacaoState extends State<NatusGraficoAmamentacao> {
         final lista = _lista(entradas, total);
 
         if (empilhar) {
-          return Column(
-            children: [donut, const SizedBox(height: 20), lista],
-          );
+          return Column(children: [donut, const SizedBox(height: 20), lista]);
         }
 
         return Row(
@@ -714,8 +819,9 @@ class _NatusGraficoAmamentacaoState extends State<NatusGraficoAmamentacao> {
                   value: e.value.toDouble(),
                   radius: selecionado ? 60 : 52,
                   color: cor,
-                  title:
-                      percentual >= 0.08 ? '${(percentual * 100).round()}%' : '',
+                  title: percentual >= 0.08
+                      ? '${(percentual * 100).round()}%'
+                      : '',
                   titleStyle: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -760,9 +866,7 @@ class _NatusGraficoAmamentacaoState extends State<NatusGraficoAmamentacao> {
       children: List.generate(entradas.length, (i) {
         final e = entradas[i];
         return Padding(
-          padding: EdgeInsets.only(
-            bottom: i == entradas.length - 1 ? 0 : 12,
-          ),
+          padding: EdgeInsets.only(bottom: i == entradas.length - 1 ? 0 : 12),
           child: _linhaCategoria(
             titulo: e.key,
             valor: e.value,
@@ -860,7 +964,13 @@ class NatusCardResumoAlmox extends StatelessWidget {
   final IconData icone;
   final Color cor;
 
-  const NatusCardResumoAlmox(this.titulo, this.valor, this.icone, this.cor);
+  const NatusCardResumoAlmox(
+    this.titulo,
+    this.valor,
+    this.icone,
+    this.cor, {
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -998,11 +1108,7 @@ List<Widget> _corpoMetricasObstetra(kpis.ObstetraMetricasCompletas m) {
       '${m.riscoIntermediario}',
       cor: _tomAlerta,
     ),
-    _linhaMetricaObstetra(
-      'Alto risco',
-      '${m.riscoAltoRisco}',
-      cor: _tomErro,
-    ),
+    _linhaMetricaObstetra('Alto risco', '${m.riscoAltoRisco}', cor: _tomErro),
 
     _tituloSecaoMetrica('Diabetes gestacional (ativas)'),
     _linhaMetricaObstetra('Sim', '${m.diabetesSim}', cor: _tomAlerta),
@@ -1091,9 +1197,7 @@ class _NatusListaMetricasPorObstetraState
                     children: [
                       CircleAvatar(
                         radius: 17,
-                        backgroundColor: NatusApp.vinho.withValues(
-                          alpha: 0.12,
-                        ),
+                        backgroundColor: NatusApp.vinho.withValues(alpha: 0.12),
                         child: Icon(
                           Icons.medical_services,
                           size: 18,
@@ -1144,7 +1248,7 @@ class _NatusListaMetricasPorObstetraState
 class NatusStatusBadge extends StatelessWidget {
   final String status;
 
-  const NatusStatusBadge(this.status);
+  const NatusStatusBadge(this.status, {super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -1152,7 +1256,8 @@ class NatusStatusBadge extends StatelessWidget {
     Color cor;
     if (s.contains('puérpera') || s.contains('puerpera')) {
       cor = NatusApp.marsalaSuave;
-    } else if (s.contains('encerrada') || s.contains('histórico') ||
+    } else if (s.contains('encerrada') ||
+        s.contains('histórico') ||
         s.contains('historico')) {
       cor = NatusApp.textoSuave;
     } else {
@@ -1167,11 +1272,7 @@ class NatusStatusBadge extends StatelessWidget {
       ),
       child: Text(
         status,
-        style: TextStyle(
-          color: cor,
-          fontWeight: FontWeight.w700,
-          fontSize: 12,
-        ),
+        style: TextStyle(color: cor, fontWeight: FontWeight.w700, fontSize: 12),
       ),
     );
   }
@@ -1183,7 +1284,7 @@ class NatusSaudacaoDashboard extends StatelessWidget {
   final String nome;
   final String? subtitulo;
 
-  const NatusSaudacaoDashboard(this.nome, {this.subtitulo});
+  const NatusSaudacaoDashboard(this.nome, {super.key, this.subtitulo});
 
   @override
   Widget build(BuildContext context) {
@@ -1225,8 +1326,18 @@ class NatusSaudacaoDashboard extends StatelessWidget {
 }
 
 const List<String> _mesesAbrev = [
-  'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+  'Jan',
+  'Fev',
+  'Mar',
+  'Abr',
+  'Mai',
+  'Jun',
+  'Jul',
+  'Ago',
+  'Set',
+  'Out',
+  'Nov',
+  'Dez',
 ];
 
 /// Painel de KPIs de crescimento anual — 5 cards no estilo "Crescimento
@@ -1413,7 +1524,10 @@ class NatusGraficoLinhaCrescimento extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(
           'Ainda sem dados suficientes para o gráfico',
-          style: TextStyle(color: NatusApp.textoSuave, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            color: NatusApp.textoSuave,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       );
     }
@@ -1522,7 +1636,10 @@ class NatusGraficoLinhaCrescimento extends StatelessWidget {
                 return LineChartBarData(
                   spots: List.generate(12, (m) {
                     final mes = m + 1;
-                    return FlSpot(mes.toDouble(), (porMes[mes] ?? 0).toDouble());
+                    return FlSpot(
+                      mes.toDouble(),
+                      (porMes[mes] ?? 0).toDouble(),
+                    );
                   }),
                   isCurved: true,
                   curveSmoothness: 0.25,
@@ -1558,7 +1675,10 @@ class NatusGraficoLinhaCrescimento extends StatelessWidget {
         Container(
           width: 12,
           height: 12,
-          decoration: BoxDecoration(color: cor, borderRadius: BorderRadius.circular(4)),
+          decoration: BoxDecoration(
+            color: cor,
+            borderRadius: BorderRadius.circular(4),
+          ),
         ),
         const SizedBox(width: 6),
         Text(

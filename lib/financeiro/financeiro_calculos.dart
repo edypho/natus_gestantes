@@ -124,11 +124,7 @@ bool parcelaFoiPagaNoMesSelecionado(
     final partes = soData.split('/');
 
     if (partes.length != 3) {
-      return parcelaEhDoMesSelecionado(
-        parcela,
-        mesSelecionado,
-        anoSelecionado,
-      );
+      return parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado);
     }
 
     final mes = int.parse(partes[1]);
@@ -362,7 +358,7 @@ String rotuloParcelaFinanceira(Map<String, String> parcela) {
 
   final numero = (parcela['numero'] ?? '').trim();
   if (numero == '0') return 'Entrada';
-  if (numero.isNotEmpty) return '${numero}ª Parcela';
+  if (numero.isNotEmpty) return '$numeroª Parcela';
 
   return 'Parcela';
 }
@@ -404,8 +400,7 @@ List<Map<String, String>> parcelasPendentesDaGestante(
   final nome = nomeGestante.trim().toLowerCase();
 
   return parcelas.where((p) {
-    final mesmaGestante =
-        (p['gestante'] ?? '').trim().toLowerCase() == nome;
+    final mesmaGestante = (p['gestante'] ?? '').trim().toLowerCase() == nome;
     return mesmaGestante && p['status'] != 'Pago';
   }).toList();
 }
