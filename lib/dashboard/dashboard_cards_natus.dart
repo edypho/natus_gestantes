@@ -240,8 +240,8 @@ class NatusCardFinanceiroResumo extends StatelessWidget {
 
     return _NatusCardClicavel(
       onTap: onTap,
-      constraints: const BoxConstraints(minHeight: 118),
-      padding: const EdgeInsets.all(14),
+      constraints: const BoxConstraints(minHeight: 106),
+      padding: const EdgeInsets.all(12),
       borderRadius: BorderRadius.circular(18),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.07),
@@ -319,8 +319,8 @@ class NatusCardContagemResumo extends StatelessWidget {
 
     return _NatusCardClicavel(
       onTap: onTap,
-      constraints: const BoxConstraints(minHeight: 118),
-      padding: const EdgeInsets.all(14),
+      constraints: const BoxConstraints(minHeight: 98),
+      padding: const EdgeInsets.all(10),
       borderRadius: BorderRadius.circular(18),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.07),
@@ -332,35 +332,36 @@ class NatusCardContagemResumo extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
                   color: cor.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icone, color: cor, size: 17),
+                child: Icon(icone, color: cor, size: 15),
               ),
               const Spacer(),
               if (onTap != null)
-                Icon(Icons.arrow_forward_rounded, color: cor, size: 18),
+                Icon(Icons.arrow_forward_rounded, color: cor, size: 15),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Text(
             titulo,
             maxLines: 2,
-            overflow: TextOverflow.visible,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: isMobile ? 10 : 12,
+              fontSize: isMobile ? 9 : 10,
               fontWeight: FontWeight.w600,
               color: NatusApp.textoSuave,
+              height: 1.2,
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 3),
           Text(
             valor.toString(),
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.w800,
               color: cor,
               letterSpacing: -0.2,

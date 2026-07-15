@@ -1553,6 +1553,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   String telaAtual = 'Dashboard';
 
   String filtroStatusGestante = 'Ativas';
+  String filtroPlanoGestante = 'Todos';
   String filtroMaternidade = 'Todas';
   FiltroDashboardPacientes? filtroDashboardPacientes;
   final buscaGestantesController = TextEditingController();
@@ -3168,6 +3169,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return dados;
   }
 
+  List<MapEntry<String, int>> contarGestantesAtivasPorPlano() {
+    final dados = <String, int>{};
+
+    for (final g in gestantes) {
+      if (!gestanteEstaAtiva(g)) continue;
+
+      var plano = (g['plano'] ?? '').trim();
+      if (plano.isEmpty) {
+        plano = 'Plano não informado';
+      }
+
+      dados[plano] = (dados[plano] ?? 0) + 1;
+    }
+
+    final lista = dados.entries.toList();
+    lista.sort((a, b) {
+      final comparacaoQuantidade = b.value.compareTo(a.value);
+      if (comparacaoQuantidade != 0) return comparacaoQuantidade;
+      return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+    });
+    return lista;
+  }
+
   Map<String, int> contarViaNascimento() {
     final dados = {
       'Normal': 0,
@@ -3263,6 +3287,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     setState(() {
       filtroDashboardPacientes = filtro;
       filtroStatusGestante = 'Todas';
+      filtroPlanoGestante = 'Todos';
       buscaGestantesController.clear();
       gestanteSelecionada = null;
       telaAtual = 'Gestantes';
@@ -3272,6 +3297,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void limparFiltroDashboardPacientes() {
     setState(() {
       filtroDashboardPacientes = null;
+    });
+  }
+
+  void abrirGestantesPorPlanoDashboard(String planoSelecionado) {
+    setState(() {
+      filtroDashboardPacientes = null;
+      filtroStatusGestante = 'Ativas';
+      filtroPlanoGestante = planoSelecionado;
+      buscaGestantesController.clear();
+      gestanteSelecionada = null;
+      telaAtual = 'Gestantes';
     });
   }
 
@@ -4727,6 +4763,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }).length;
     final totalAtendimentos2025 = contarBebesPorAno('2025');
     final totalAtendimentos2026 = contarBebesPorAno('2026');
+    final opcoesPlanoGestante =
+        <String>{
+          'Todos',
+          ...gestantes
+              .map((g) => (g['plano'] ?? '').trim())
+              .where((plano) => plano.isNotEmpty),
+        }.toList()..sort((a, b) {
+          if (a == 'Todos') return -1;
+          if (b == 'Todos') return 1;
+          return a.toLowerCase().compareTo(b.toLowerCase());
+        });
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -4814,6 +4861,36 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               filtroBotao('Encerrada'),
               filtroBotao('Todas'),
             ],
+          ),
+
+          const SizedBox(height: 16),
+
+          DropdownButtonFormField<String>(
+            initialValue: opcoesPlanoGestante.contains(filtroPlanoGestante)
+                ? filtroPlanoGestante
+                : 'Todos',
+            decoration: InputDecoration(
+              labelText: 'Filtrar por plano',
+              prefixIcon: const Icon(Icons.filter_alt_outlined),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              filled: true,
+              fillColor: NatusApp.offWhite,
+            ),
+            items: opcoesPlanoGestante
+                .map(
+                  (plano) => DropdownMenuItem<String>(
+                    value: plano,
+                    child: Text(plano),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                filtroPlanoGestante = value ?? 'Todos';
+              });
+            },
           ),
 
           const SizedBox(height: 16),
@@ -12546,6 +12623,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return false;
       }
 
+      if (filtroPlanoGestante != 'Todos') {
+        final plano = (g['plano'] ?? '').trim();
+        if (plano != filtroPlanoGestante) {
+          return false;
+        }
+      }
+
       return gestanteApareceNaBusca(g, busca);
     }).toList();
 
@@ -15608,6 +15692,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final viaNascimentoDados = contarViaNascimento();
     final riscoDados = contarRiscoGestacional();
     final dgDados = contarDiabetesGestacional();
+    final gestantesPorPlano = contarGestantesAtivasPorPlano();
 
     List<MapEntry<String, int>> top5Maternidades() {
       final dados = mregras.contarPacientesPorMaternidade(gestantes);
@@ -15634,6 +15719,54 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
 
           const SizedBox(height: 20),
+
+          blocoDashboard('Gestantes ativas por plano', [
+            if (gestantesPorPlano.isEmpty)
+              Text(
+                'Nenhuma gestante ativa com plano identificado no momento.',
+                style: TextStyle(color: NatusApp.textoSuave),
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final larguraDisponivel = constraints.maxWidth;
+                  const espacamento = 10.0;
+                  final totalItens = gestantesPorPlano.length;
+                  const larguraMinimaCard = 118.0;
+                  final colunas = totalItens <= 7
+                      ? totalItens
+                      : ((larguraDisponivel + espacamento) /
+                                (larguraMinimaCard + espacamento))
+                            .floor()
+                            .clamp(1, 7);
+                  final larguraCard =
+                      (larguraDisponivel - ((colunas - 1) * espacamento)) /
+                      colunas;
+
+                  return Wrap(
+                    spacing: espacamento,
+                    runSpacing: espacamento,
+                    children: gestantesPorPlano
+                        .map(
+                          (item) => SizedBox(
+                            width: larguraCard,
+                            child: cardContagemResumo(
+                              item.key,
+                              item.value,
+                              NatusApp.olivaSeco,
+                              Icons.workspace_premium_rounded,
+                              onTap: () =>
+                                  abrirGestantesPorPlanoDashboard(item.key),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+              ),
+          ]),
+
+          const SizedBox(height: 12),
 
           if (usuarioEhAdmin())
             blocoDashboard('Central de alertas', [
