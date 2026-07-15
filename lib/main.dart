@@ -2752,7 +2752,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   ),
 
                   ElevatedButton.icon(
-                    onPressed: () => selecionarArquivoExame(idGestante),
+                    onPressed: () => selecionarArquivoExame(gestante),
                     icon: const Icon(Icons.add),
                     label: const Text('Enviar'),
                     style: ElevatedButton.styleFrom(
@@ -2794,6 +2794,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
               for (var exame in exames) {
                 final dados = exame.data() as Map<String, dynamic>;
+                dados['nomeGestante'] = nomeGestanteDoExame(dados);
 
                 final nomeGestante =
                     dados['nomeGestante'] ?? 'Gestante não identificada';
@@ -2936,8 +2937,47 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<void> selecionarArquivoExame(String? idGestante) async {
-    if (idGestante == null) {
+  String nomeGestanteDoExame(Map<String, dynamic> dados) {
+    final nomeSalvo = (dados['nomeGestante'] ?? '').toString().trim();
+    if (nomeSalvo.isNotEmpty) {
+      return nomeSalvo;
+    }
+
+    final idGestante = (dados['idGestante'] ?? '').toString().trim();
+    if (idGestante.isNotEmpty) {
+      final gestantePorId = gestantes.firstWhere(
+        (g) => (g['id'] ?? '').trim() == idGestante,
+        orElse: () => <String, String>{},
+      );
+
+      final nomePorId = (gestantePorId['nomeGestante'] ?? '').trim();
+      if (nomePorId.isNotEmpty) {
+        return nomePorId;
+      }
+    }
+
+    final uidGestante = (dados['uidGestante'] ?? '').toString().trim();
+    if (uidGestante.isNotEmpty) {
+      final gestantePorUid = gestantes.firstWhere(
+        (g) => (g['uidGestante'] ?? '').trim() == uidGestante,
+        orElse: () => <String, String>{},
+      );
+
+      final nomePorUid = (gestantePorUid['nomeGestante'] ?? '').trim();
+      if (nomePorUid.isNotEmpty) {
+        return nomePorUid;
+      }
+    }
+
+    return 'Gestante nÃ£o identificada';
+  }
+
+  Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
+    final idGestante = (gestante['id'] ?? '').trim();
+    final nomeGestante = (gestante['nomeGestante'] ?? '').trim();
+    final uidGestante = (gestante['uidGestante'] ?? '').trim();
+
+    if (idGestante.isEmpty) {
       mostrarMensagem('Erro: gestante não identificada.');
       return;
     }
@@ -2967,6 +3007,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       await firestore.collection('exames').add({
         'idGestante': idGestante,
+        'uidGestante': uidGestante,
+        'nomeGestante': nomeGestante,
         'nomeArquivo': nomeArquivo,
         'url': url,
         'criadoEm': DateTime.now().toIso8601String(),
