@@ -68,6 +68,11 @@ class CatalogoContratosNatus {
     required String nomePlano,
     required String consultorio,
   }) {
+    final templatePorNomeCompleto = localizarPorNomePlanoCompleto(nomePlano);
+    if (templatePorNomeCompleto != null) {
+      return templatePorNomeCompleto;
+    }
+
     final planoCodigo = _planoPorNome(nomePlano);
     if (planoCodigo == null) {
       return null;
@@ -78,6 +83,24 @@ class CatalogoContratosNatus {
     for (final template in templates) {
       if (template.planoCodigo == planoCodigo &&
           template.modalidadeCodigo == modalidadeCodigo) {
+        return template;
+      }
+    }
+
+    return null;
+  }
+
+  static ContratoTemplateConfig? localizarPorNomePlanoCompleto(
+    String nomePlano,
+  ) {
+    final valor = _normalizar(nomePlano);
+
+    for (final template in templates) {
+      final nomeCompleto = _normalizar(
+        '${template.nomePlano} ${template.nomeModalidade}',
+      );
+
+      if (nomeCompleto == valor) {
         return template;
       }
     }

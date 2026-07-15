@@ -1,3 +1,6 @@
+/* eslint-disable require-jsdoc */
+/* eslint-disable max-len */
+/* eslint-disable quote-props */
 const {setGlobalOptions} = require("firebase-functions");
 const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
@@ -12,6 +15,41 @@ const zapsignApiToken = defineSecret("ZAPSIGN_API_TOKEN");
 const ZAPSIGN_API_BASE_URL = "https://api.zapsign.com.br/api/v1";
 const ZAPSIGN_SIGNER_BASE_URL = "https://app.zapsign.co/verificar";
 const ZAPSIGN_CONFIG_PATH = "integracoes/zapsign";
+const ZAPSIGN_TEMPLATE_IDS_PADRAO = {
+  acolher_consultorio: "2037be9f-e33e-406b-98ad-e2b74b385c9f",
+  acolher_residencial: "1953c005-2ca1-450c-a779-d77e8a680ab8",
+  presenca_consultorio: "876e29dd-bb1f-4801-b146-d9e2e45cf6ed",
+  presenca_residencial: "b7337535-0c05-4038-97f4-8f879d1a4012",
+  plenitude_consultorio: "045ebda1-9835-4bd8-810f-7fb1bd2cf411",
+  plenitude_residencial: "83503f6b-f179-4a20-afe4-dbdc9ad0f031",
+};
+
+const ZAPSIGN_PLANOS_POR_TEMPLATE = {
+  acolher_consultorio: {
+    planoNome: "Acolher",
+    modalidadeNome: "Consultorio",
+  },
+  acolher_residencial: {
+    planoNome: "Acolher",
+    modalidadeNome: "Residencial",
+  },
+  presenca_consultorio: {
+    planoNome: "Presenca",
+    modalidadeNome: "Consultorio",
+  },
+  presenca_residencial: {
+    planoNome: "Presenca",
+    modalidadeNome: "Residencial",
+  },
+  plenitude_consultorio: {
+    planoNome: "Plenitude",
+    modalidadeNome: "Consultorio",
+  },
+  plenitude_residencial: {
+    planoNome: "Plenitude",
+    modalidadeNome: "Residencial",
+  },
+};
 
 admin.initializeApp();
 
@@ -136,14 +174,7 @@ async function buscarConfiguracaoZapSign() {
       brandPrimaryColor: "#6F3E46",
       brandLogo: "",
       folderToken: "",
-      templateIds: {
-        acolher_consultorio: "",
-        acolher_residencial: "",
-        presenca_consultorio: "",
-        presenca_residencial: "",
-        plenitude_consultorio: "",
-        plenitude_residencial: "",
-      },
+      templateIds: ZAPSIGN_TEMPLATE_IDS_PADRAO,
       placeholdersFixos: {
         razaoSocialNatus: "Natus",
         cnpjNatus: "63.395.279/0001-70",
@@ -170,12 +201,17 @@ async function buscarConfiguracaoZapSign() {
     brandPrimaryColor: dados.brandPrimaryColor || "#6F3E46",
     brandLogo: dados.brandLogo || "",
     folderToken: dados.folderToken || "",
-    templateIds: dados.templateIds || {},
+    templateIds: {
+      ...ZAPSIGN_TEMPLATE_IDS_PADRAO,
+      ...(dados.templateIds || {}),
+    },
     placeholdersFixos: dados.placeholdersFixos || {},
   };
 }
 
 function montarPayloadContratoDaGestante(idGestante, dados) {
+  const templateKey = dados.contratoTemplateKey || "";
+  const definicaoPlano = ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey] || {};
   const partesEndereco = [
     dados.enderecoGestante || "",
     dados.numeroGestante || "",
@@ -198,12 +234,12 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     cpfResponsavel: dados.cpfPai || "",
     enderecoResponsavel: partesEndereco.join(", "),
     dpp: dados.dpp || "",
-    planoNome: dados.plano || "",
-    modalidadeNome: dados.contratoResumo &&
-      dados.contratoResumo.modalidadeNome ?
+    planoNome: definicaoPlano.planoNome || dados.plano || "",
+    modalidadeNome: definicaoPlano.modalidadeNome ||
+      (dados.contratoResumo && dados.contratoResumo.modalidadeNome ?
       dados.contratoResumo.modalidadeNome :
-      (dados.consultorio === "Sim" ? "Consultorio" : "Residencial"),
-    templateKey: dados.contratoTemplateKey || "",
+      (dados.consultorio === "Sim" ? "Consultorio" : "Residencial")),
+    templateKey,
     cidadeAssinatura: dados.cidadeGestante || "Curitiba",
     dataAssinatura: new Date().toISOString(),
     formaPagamento: dados.formaPagamento || "",

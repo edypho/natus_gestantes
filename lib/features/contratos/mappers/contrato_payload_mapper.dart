@@ -64,7 +64,7 @@ class ContratoPayloadMapper {
       cpfResponsavel: (paciente['cpfPai'] ?? '').toString(),
       enderecoResponsavel: enderecoPaciente,
       dpp: (paciente['dpp'] ?? '').toString(),
-      planoNome: (paciente['plano'] ?? '').toString(),
+      planoNome: template?.nomePlano ?? (paciente['plano'] ?? '').toString(),
       modalidadeNome:
           template?.nomeModalidade ??
           _nomeModalidade((paciente['consultorio'] ?? '').toString()),
