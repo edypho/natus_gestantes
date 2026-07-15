@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'shared/natus_app.dart';
 import 'shared/natus_logo.dart';
 import 'shared/natus_premium_visual.dart';
@@ -31,6 +32,7 @@ import 'dados/natus_data_source.dart' as dados;
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
+import 'uploads/upload_progress_dialog.dart';
 
 export 'core/firebase_globals.dart';
 export 'core/usuario_tipos.dart';
@@ -740,6 +742,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required bool gerarFinanceiro,
     required bool forcarHistorico,
   }) async {
+    final controller = progressController ?? UploadProgressController();
+    final gerenciarDialogo = progressController == null;
+
     try {
       final resultado = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -5521,9 +5526,47 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  Future<void> _abrirDialogoUpload(UploadProgressController controller) async {
+    if (!mounted) return;
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: 'Upload em andamento',
+      barrierColor: Colors.black.withValues(alpha: 0.35),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return UploadProgressDialog(controller: controller);
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(scale: curved, child: child),
+        );
+      },
+    );
+  }
+
+  Future<void> _fecharDialogoUpload() async {
+    if (!mounted) return;
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+  }
+
   Future<String?> uploadArquivoBiblioteca(
     PlatformFile arquivo, {
     String pasta = 'biblioteca',
+    UploadProgressController? progressController,
+    String tituloUpload = 'Enviando material',
+    String mensagemPreparando = 'Preparando arquivo para envio...',
   }) async {
     try {
       final bytes = arquivo.bytes;
@@ -5533,6 +5576,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return null;
       }
 
+      if (gerenciarDialogo) {
+        unawaited(_abrirDialogoUpload(controller));
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+
+      controller.preparing(
+        titulo: tituloUpload,
+        mensagem: mensagemPreparando,
+      );
+
       final nomeSeguro = arquivo.name.replaceAll(
         RegExp(r'[^a-zA-Z0-9._-]'),
         '_',
@@ -5540,13 +5593,53 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final nomeFinal = '${DateTime.now().millisecondsSinceEpoch}_$nomeSeguro';
       final ref = storage.ref().child('$pasta/$nomeFinal');
 
-      await ref.putData(bytes);
+      final task = ref.putData(bytes);
 
-      return ref.getDownloadURL();
+      final subscription = task.snapshotEvents.listen((snapshot) {
+        final total = snapshot.totalBytes;
+        final transferred = snapshot.bytesTransferred;
+        final progress = total <= 0 ? 0.05 : transferred / total;
+
+        controller.uploading(
+          progress,
+          titulo: tituloUpload,
+          mensagem:
+              'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
+        );
+      });
+
+      await task;
+      await subscription.cancel();
+
+      final url = await ref.getDownloadURL();
+
+      controller.success(
+        titulo: 'Upload concluido',
+        mensagem: '${arquivo.name} foi enviado com sucesso.',
+      );
+
+      if (gerenciarDialogo) {
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+      }
+
+      return url;
     } catch (e) {
       debugPrint('❌ Erro ao enviar material da biblioteca: $e');
+      controller.error(
+        titulo: 'Erro no upload',
+        mensagem: 'Nao foi possivel concluir o envio de ${arquivo.name}.',
+      );
+
+      if (gerenciarDialogo) {
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
+      }
+
       mostrarMensagem('Erro ao enviar material da biblioteca.');
       return null;
+    } finally {
+      if (gerenciarDialogo) {
+        await _fecharDialogoUpload();
+      }
     }
   }
 
@@ -5790,10 +5883,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               () => salvandoMaterialBiblioteca = true,
                             );
 
+                            final uploadController = UploadProgressController(
+                              titulo: 'Enviando material',
+                              mensagem: 'Preparando arquivos da biblioteca...',
+                            );
+                            final bool temUploadVisual =
+                                arquivoSelecionadoBiblioteca != null ||
+                                capaSelecionadaBiblioteca != null;
+
+                            if (temUploadVisual) {
+                              unawaited(_abrirDialogoUpload(uploadController));
+                              await Future<void>.delayed(
+                                const Duration(milliseconds: 120),
+                              );
+                            }
+
                             final urlFinal =
                                 arquivoSelecionadoBiblioteca != null
                                 ? await uploadArquivoBiblioteca(
                                     arquivoSelecionadoBiblioteca!,
+                                    progressController: uploadController,
+                                    tituloUpload: 'Enviando material',
+                                    mensagemPreparando:
+                                        'Preparando material da biblioteca...',
                                   )
                                 : url;
 
@@ -5804,6 +5916,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                 ? await uploadArquivoBiblioteca(
                                         capaSelecionadaBiblioteca!,
                                         pasta: 'biblioteca/capas',
+                                        progressController: uploadController,
+                                        tituloUpload: 'Enviando capa',
+                                        mensagemPreparando:
+                                            'Preparando imagem de capa...',
                                       ) ??
                                       ''
                                 : '';
@@ -13639,28 +13755,70 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<String?> uploadArquivo(PlatformFile arquivo) async {
+    final controller = UploadProgressController(
+      titulo: 'Enviando arquivo',
+      mensagem: 'Preparando arquivo para envio...',
+    );
+
     try {
       if (arquivo.bytes == null) {
         mostrarMensagem('Não foi possível ler o arquivo.');
         return null;
       }
 
+      unawaited(_abrirDialogoUpload(controller));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+
       final nomeArquivo =
           '${DateTime.now().millisecondsSinceEpoch}_${arquivo.name}';
 
       final ref = storage.ref().child('documentos/$nomeArquivo');
 
-      await ref.putData(arquivo.bytes!);
+      controller.preparing(
+        titulo: 'Enviando arquivo',
+        mensagem: 'Iniciando envio de ${arquivo.name}...',
+      );
+
+      final task = ref.putData(arquivo.bytes!);
+
+      final subscription = task.snapshotEvents.listen((snapshot) {
+        final total = snapshot.totalBytes;
+        final transferred = snapshot.bytesTransferred;
+        final progress = total <= 0 ? 0.05 : transferred / total;
+
+        controller.uploading(
+          progress,
+          titulo: 'Enviando arquivo',
+          mensagem:
+              'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
+        );
+      });
+
+      await task;
+      await subscription.cancel();
 
       final url = await ref.getDownloadURL();
+
+      controller.success(
+        titulo: 'Upload concluido',
+        mensagem: '${arquivo.name} foi enviado com sucesso.',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 900));
 
       debugPrint('✅ Arquivo enviado: $url');
 
       return url;
     } catch (e) {
       debugPrint('❌ Erro no upload: $e');
+      controller.error(
+        titulo: 'Erro no upload',
+        mensagem: 'Nao foi possivel concluir o envio de ${arquivo.name}.',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
       mostrarMensagem('Erro ao enviar arquivo');
       return null;
+    } finally {
+      await _fecharDialogoUpload();
     }
   }
 
