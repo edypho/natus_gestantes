@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'shared/natus_app.dart';
+import 'shared/natus_logo.dart';
 import 'shared/natus_premium_visual.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:file_picker/file_picker.dart';
@@ -119,7 +120,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     await showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Alterar tipo de usuário'),
           content: DropdownButtonFormField<String>(
@@ -133,7 +134,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
@@ -142,8 +143,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   'tipo': novoTipo,
                 });
 
-                if (!context.mounted) return;
-                Navigator.pop(context);
+                if (!dialogContext.mounted) return;
+                Navigator.pop(dialogContext);
                 mostrarMensagem('Tipo de usuário atualizado.');
               },
               child: const Text('Salvar'),
@@ -2156,8 +2157,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   child: SizedBox(
                     height: 180,
                     width: double.infinity,
-                    child: Image.asset(
-                      'assets/logo.png',
+                    child: NatusLogo(
+                      color: NatusApp.sobreMarca,
                       fit: BoxFit.fitHeight,
                     ),
                   ),
@@ -12057,7 +12058,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Editar cadastro da gestante'),
           content: SizedBox(
