@@ -32,6 +32,7 @@ import 'dados/natus_data_source.dart' as dados;
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
+import 'features/contratos/contratos.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
 import 'uploads/upload_progress_dialog.dart';
 
@@ -12370,8 +12371,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     if (valorParcelado < 0) valorParcelado = 0;
 
     double valorParcela = valorParcelado / qtdParcelas;
-
-    final novaGestante = {
+    final dadosBaseGestante = <String, String>{
       'nomeGestante': nomeGestante.text.trim(),
       'cpfGestante': cpfGestante.text.trim(),
       'telefoneGestante': telefoneGestante.text.trim(),
@@ -12417,13 +12417,27 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'statusGestante': 'Gestante',
       'uid': FirebaseAuth.instance.currentUser!.uid,
     };
+    final metadadosContrato = ContratoPayloadMapper.criarMetadadosIniciais(
+      paciente: dadosBaseGestante,
+      valorTotal: valorFinal,
+      valorEntrada: entrada,
+      valorSaldo: valorParcelado,
+      valorParcela: valorParcela,
+      numeroParcelas: qtdParcelas,
+    );
+
+    final novaGestante = <String, String>{...dadosBaseGestante};
+    final gestanteFirestore = <String, dynamic>{
+      ...dadosBaseGestante,
+      ...metadadosContrato,
+    };
 
     setState(() {
       gestantes.add(novaGestante);
       limparCampos();
     });
 
-    salvarGestanteFirestore(novaGestante);
+    salvarGestanteFirestore(gestanteFirestore);
     gerarParcelasDaGestante(novaGestante);
   }
 
@@ -13974,7 +13988,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<void> salvarGestanteFirestore(Map<String, String> gestante) async {
+  Future<void> salvarGestanteFirestore(Map<String, dynamic> gestante) async {
     debugPrint('🔥 TENTANDO SALVAR NO FIREBASE');
 
     try {

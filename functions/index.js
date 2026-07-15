@@ -138,6 +138,101 @@ exports.excluirUsuarioAuth = onCall(
     },
 );
 
+exports.gerarContratoZapSign = onCall(
+    {
+      invoker: "private",
+      region: "us-central1",
+    },
+    async (request) => {
+      const uidUsuario = request.auth && request.auth.uid;
+
+      if (!uidUsuario) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Voce precisa estar logado para gerar contratos.",
+        );
+      }
+
+      const contratoId = request.data.contratoId || "";
+      const payload = request.data.payload || {};
+      const templateKey = payload.templateKey || "";
+
+      if (!contratoId) {
+        throw new HttpsError(
+            "invalid-argument",
+            "ContratoId nao informado.",
+        );
+      }
+
+      if (!templateKey) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Template do contrato nao informado.",
+        );
+      }
+
+      await admin.firestore().collection("contratos").doc(contratoId).set({
+        status: "aguardando_configuracao_zapsign",
+        payload: payload,
+        atualizadoEm: new Date().toISOString(),
+      }, {merge: true});
+
+      throw new HttpsError(
+          "failed-precondition",
+          "Integracao ZapSign ainda nao configurada. " +
+          "Finalize os templates e informe os templateIds.",
+      );
+    },
+);
+
+exports.consultarContratoZapSign = onCall(
+    {
+      invoker: "private",
+      region: "us-central1",
+    },
+    async (request) => {
+      const uidUsuario = request.auth && request.auth.uid;
+
+      if (!uidUsuario) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Voce precisa estar logado para consultar contratos.",
+        );
+      }
+
+      const contratoId = request.data.contratoId || "";
+      const zapsignDocumentId = request.data.zapsignDocumentId || "";
+
+      if (!contratoId || !zapsignDocumentId) {
+        throw new HttpsError(
+            "invalid-argument",
+            "ContratoId e zapsignDocumentId sao obrigatorios.",
+        );
+      }
+
+      const snapshot = await admin
+          .firestore()
+          .collection("contratos")
+          .doc(contratoId)
+          .get();
+
+      if (!snapshot.exists) {
+        throw new HttpsError(
+            "not-found",
+            "Contrato nao encontrado.",
+        );
+      }
+
+      return {
+        contratoId: contratoId,
+        zapsignDocumentId: zapsignDocumentId,
+        status: snapshot.data().status || "pendente",
+        mensagem: "Consulta preparada. A chamada real para a ZapSign " +
+          "sera implementada apos a configuracao dos templates.",
+      };
+    },
+);
+
 exports.reenviarLinkTrocaSenhaGestante = onRequest(
     {
       region: "us-central1",
