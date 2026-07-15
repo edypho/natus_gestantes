@@ -5928,6 +5928,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               setStateDialog(
                                 () => salvandoMaterialBiblioteca = false,
                               );
+                              if (temUploadVisual) {
+                                await _fecharDialogoUpload();
+                              }
                               return;
                             }
 
@@ -5936,7 +5939,22 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               setStateDialog(
                                 () => salvandoMaterialBiblioteca = false,
                               );
+                              if (temUploadVisual) {
+                                await _fecharDialogoUpload();
+                              }
                               return;
+                            }
+
+                            if (temUploadVisual) {
+                              uploadController.success(
+                                titulo: 'Material salvo',
+                                mensagem:
+                                    'Os arquivos da biblioteca foram enviados com sucesso.',
+                              );
+                              await Future<void>.delayed(
+                                const Duration(milliseconds: 700),
+                              );
+                              await _fecharDialogoUpload();
                             }
 
                             final Map<String, String> material = {
