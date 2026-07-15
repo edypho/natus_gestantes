@@ -3248,8 +3248,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return const Text('Nenhum dado encontrado.');
     }
 
-    final isMobile = MediaQuery.of(context).size.width < 700;
-
     final primeiro = dados[0];
     final segundo = dados.length > 1 ? dados[1] : null;
     final terceiro = dados.length > 2 ? dados[2] : null;
@@ -3258,77 +3256,83 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     final maximo = primeiro.value;
 
-    return Column(
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (segundo != null) ...[
-              podiumCard(
-                posicao: 2,
-                nome: segundo.key,
-                total: segundo.value,
-                icone: icone,
-                isMobile: isMobile,
-                rotulo: rotulo,
-              ),
-              SizedBox(width: isMobile ? 8 : 14),
-            ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 620;
 
-            podiumCard(
-              posicao: 1,
-              nome: primeiro.key,
-              total: primeiro.value,
-              icone: icone,
-              isMobile: isMobile,
-              rotulo: rotulo,
+        return Column(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (segundo != null) ...[
+                  podiumCard(
+                    posicao: 2,
+                    nome: segundo.key,
+                    total: segundo.value,
+                    icone: icone,
+                    isMobile: isMobile,
+                    rotulo: rotulo,
+                  ),
+                  SizedBox(width: isMobile ? 8 : 18),
+                ],
+
+                podiumCard(
+                  posicao: 1,
+                  nome: primeiro.key,
+                  total: primeiro.value,
+                  icone: icone,
+                  isMobile: isMobile,
+                  rotulo: rotulo,
+                ),
+
+                if (terceiro != null) ...[
+                  SizedBox(width: isMobile ? 8 : 18),
+                  podiumCard(
+                    posicao: 3,
+                    nome: terceiro.key,
+                    total: terceiro.value,
+                    icone: icone,
+                    isMobile: isMobile,
+                    rotulo: rotulo,
+                  ),
+                ],
+              ],
             ),
 
-            if (terceiro != null) ...[
-              SizedBox(width: isMobile ? 8 : 14),
-              podiumCard(
-                posicao: 3,
-                nome: terceiro.key,
-                total: terceiro.value,
-                icone: icone,
-                isMobile: isMobile,
-                rotulo: rotulo,
-              ),
-            ],
+            const SizedBox(height: 18),
+
+            Row(
+              children: [
+                if (quarto != null)
+                  Expanded(
+                    child: miniRankingCard(
+                      posicao: '4º',
+                      nome: quarto.key,
+                      total: quarto.value,
+                      maximo: maximo,
+                      cor: cor,
+                    ),
+                  ),
+
+                if (quarto != null && quinto != null) const SizedBox(width: 12),
+
+                if (quinto != null)
+                  Expanded(
+                    child: miniRankingCard(
+                      posicao: '5º',
+                      nome: quinto.key,
+                      total: quinto.value,
+                      maximo: maximo,
+                      cor: cor,
+                    ),
+                  ),
+              ],
+            ),
           ],
-        ),
-
-        const SizedBox(height: 18),
-
-        Row(
-          children: [
-            if (quarto != null)
-              Expanded(
-                child: miniRankingCard(
-                  posicao: '4º',
-                  nome: quarto.key,
-                  total: quarto.value,
-                  maximo: maximo,
-                  cor: cor,
-                ),
-              ),
-
-            if (quarto != null && quinto != null) const SizedBox(width: 12),
-
-            if (quinto != null)
-              Expanded(
-                child: miniRankingCard(
-                  posicao: '5º',
-                  nome: quinto.key,
-                  total: quinto.value,
-                  maximo: maximo,
-                  cor: cor,
-                ),
-              ),
-          ],
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -3356,8 +3360,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     };
 
     final largura = ouro
-        ? (isMobile ? 116.0 : 150.0)
-        : (isMobile ? 100.0 : 126.0);
+        ? (isMobile ? 116.0 : 190.0)
+        : (isMobile ? 100.0 : 174.0);
 
     return SizedBox(
       width: largura,
@@ -3373,7 +3377,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           Container(
             width: double.infinity,
             padding: EdgeInsets.symmetric(
-              horizontal: 10,
+              horizontal: isMobile ? 8 : 14,
               vertical: isMobile ? 12 : 14,
             ),
             decoration: BoxDecoration(
@@ -3403,18 +3407,25 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                 const SizedBox(height: 8),
 
-                Tooltip(
-                  message: nome,
-                  child: Text(
-                    nome,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: ouro ? 14 : 12.5,
-                      color: NatusApp.texto,
-                      height: 1.15,
+                SizedBox(
+                  height: isMobile ? 42 : 50,
+                  child: Center(
+                    child: Tooltip(
+                      message: nome,
+                      child: Text(
+                        nome,
+                        textAlign: TextAlign.center,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: isMobile
+                              ? (ouro ? 11.5 : 10.5)
+                              : (ouro ? 14 : 13),
+                          color: NatusApp.texto,
+                          height: 1.15,
+                        ),
+                      ),
                     ),
                   ),
                 ),
