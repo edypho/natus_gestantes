@@ -1999,7 +1999,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Contrações',
         'Financeiro',
         'Planos da Natus',
-        'Almoxarifado',
         'Biblioteca',
         'Documentos',
         'Exames',
@@ -2123,8 +2122,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         itemMenu(Icons.receipt_long_rounded, 'NFS-e'),
       if (menusDoUsuario.contains('Histórico Fiscal'))
         itemMenu(Icons.history_edu_rounded, 'Histórico Fiscal'),
-      if (menusDoUsuario.contains('Almoxarifado'))
-        itemMenu(Icons.inventory, 'Almoxarifado'),
       if (menusDoUsuario.contains('Centro de custo'))
         itemMenu(Icons.account_balance_wallet, 'Centro de custo'),
       if (menusDoUsuario.contains('Biblioteca'))

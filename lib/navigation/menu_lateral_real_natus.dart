@@ -82,7 +82,6 @@ Widget menuLateralRealNatus({
       _NatusMenuItem('Contrações', Icons.monitor_heart_rounded),
       _NatusMenuItem('Financeiro', Icons.payments_rounded),
       _NatusMenuItem('Planos da Natus', Icons.workspace_premium_rounded),
-      _NatusMenuItem('Almoxarifado', Icons.inventory_2_rounded),
       _NatusMenuItem('Centro de custo', Icons.account_balance_wallet_rounded),
       _NatusMenuItem('Biblioteca', Icons.video_library_rounded),
       _NatusMenuItem('Documentos', Icons.folder_copy_rounded),
