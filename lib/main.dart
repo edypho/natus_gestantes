@@ -15591,7 +15591,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final amamentacaoDados = contarAmamentacao();
     final crescimentoNascimentos = calcularCrescimentoNascimentos();
 
-    final estoqueBaixo = materiaisComEstoqueBaixo();
     final viaNascimentoDados = contarViaNascimento();
     final riscoDados = contarRiscoGestacional();
     final dgDados = contarDiabetesGestacional();
@@ -16057,19 +16056,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ),
             ),
           ]),
-
-          if (usuarioEhAdmin())
-            blocoDashboard(
-              'Estoque baixo detalhado',
-              estoqueBaixo.isEmpty
-                  ? [const Text('Nenhum material em estoque baixo.')]
-                  : estoqueBaixo.map((m) {
-                      return itemRanking(
-                        '${m['nome']} | Qtd: ${m['quantidade']} | Mínimo: ${m['minimo']}',
-                        0,
-                      );
-                    }).toList(),
-            ),
         ],
       ),
     );
