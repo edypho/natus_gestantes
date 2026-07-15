@@ -140,7 +140,9 @@ class _UploadProgressDialogState extends State<UploadProgressDialog>
                   ClipRRect(
                     borderRadius: BorderRadius.circular(999),
                     child: LinearProgressIndicator(
-                      value: status == UploadProgressStatus.error ? null : progress,
+                      value: status == UploadProgressStatus.error
+                          ? null
+                          : progress,
                       minHeight: 10,
                       backgroundColor: const Color(0xFFF4DFD7),
                       valueColor: AlwaysStoppedAnimation<Color>(
@@ -208,7 +210,8 @@ class _UploadPregnancyPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2 + 6);
     final accent = _statusColor(status);
     final baseBody = Paint()..color = const Color(0xFFD9A796);
-    final bodyShade = Paint()..color = const Color(0xFF40010D).withValues(alpha: 0.08);
+    final bodyShade = Paint()
+      ..color = const Color(0xFF40010D).withValues(alpha: 0.08);
     final pulsePaint = Paint()
       ..color = accent.withValues(alpha: 0.10 + (0.12 * pulse))
       ..style = PaintingStyle.stroke
@@ -218,24 +221,42 @@ class _UploadPregnancyPainter extends CustomPainter {
     final ringRadius = 34 + (progress * 18) + (pulse * 10);
 
     canvas.drawCircle(center.translate(8, 10), ringRadius, pulsePaint);
-    canvas.drawCircle(center.translate(8, 10), ringRadius + 14, pulsePaint..strokeWidth = 4);
+    canvas.drawCircle(
+      center.translate(8, 10),
+      ringRadius + 14,
+      pulsePaint..strokeWidth = 4,
+    );
 
-    final headRect = Rect.fromCircle(center: center.translate(-12, -52), radius: 16);
+    final headRect = Rect.fromCircle(
+      center: center.translate(-12, -52),
+      radius: 16,
+    );
     canvas.drawOval(headRect, baseBody);
 
     final torsoPath = Path()
       ..moveTo(center.dx - 22, center.dy - 24)
-      ..quadraticBezierTo(center.dx - 34, center.dy - 6, center.dx - 28, center.dy + 28)
-      ..quadraticBezierTo(center.dx - 6, center.dy + 18, center.dx + 6, center.dy - 2)
-      ..quadraticBezierTo(center.dx + 10, center.dy - 26, center.dx - 12, center.dy - 28)
+      ..quadraticBezierTo(
+        center.dx - 34,
+        center.dy - 6,
+        center.dx - 28,
+        center.dy + 28,
+      )
+      ..quadraticBezierTo(
+        center.dx - 6,
+        center.dy + 18,
+        center.dx + 6,
+        center.dy - 2,
+      )
+      ..quadraticBezierTo(
+        center.dx + 10,
+        center.dy - 26,
+        center.dx - 12,
+        center.dy - 28,
+      )
       ..close();
     canvas.drawPath(torsoPath, baseBody);
 
-    canvas.drawCircle(
-      center.translate(18, 6),
-      28 * bellyScale,
-      baseBody,
-    );
+    canvas.drawCircle(center.translate(18, 6), 28 * bellyScale, baseBody);
 
     canvas.drawArc(
       Rect.fromCircle(center: center.translate(12, 8), radius: 30 * bellyScale),

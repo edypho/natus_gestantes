@@ -647,6 +647,27 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
+  Future<void> atualizarItemBibliotecaFirestore(
+    Map<String, String> material,
+  ) async {
+    final id = (material['id'] ?? '').trim();
+
+    if (id.isEmpty) {
+      mostrarMensagem('Material sem ID. Recarregue a biblioteca.');
+      return;
+    }
+
+    try {
+      final dadosAtualizados = Map<String, String>.from(material)..remove('id');
+      await firestore.collection('biblioteca').doc(id).update(dadosAtualizados);
+      await carregarBibliotecaFirestore();
+      mostrarMensagem('Material atualizado com sucesso.');
+    } catch (e) {
+      debugPrint('Erro ao atualizar material da biblioteca: $e');
+      mostrarMensagem('Erro ao atualizar material da biblioteca.');
+    }
+  }
+
   Future<void> confirmarExcluirItemBiblioteca(
     Map<String, String> material,
   ) async {
@@ -742,9 +763,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     required bool gerarFinanceiro,
     required bool forcarHistorico,
   }) async {
-    final controller = progressController ?? UploadProgressController();
-    final gerenciarDialogo = progressController == null;
-
     try {
       final resultado = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -5158,6 +5176,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               cardBibliotecaNetflix(
                                 materialDestaque,
                                 largura: double.infinity,
+                                onEditar: usuarioEhAdmin()
+                                    ? () => abrirCadastroMaterialBiblioteca(
+                                        materialExistente: materialDestaque,
+                                      )
+                                    : null,
                                 onExcluir: usuarioEhAdmin()
                                     ? () => confirmarExcluirItemBiblioteca(
                                         materialDestaque,
@@ -5172,6 +5195,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               cardBibliotecaNetflix(
                                 materialDestaque,
                                 largura: 280,
+                                onEditar: usuarioEhAdmin()
+                                    ? () => abrirCadastroMaterialBiblioteca(
+                                        materialExistente: materialDestaque,
+                                      )
+                                    : null,
                                 onExcluir: usuarioEhAdmin()
                                     ? () => confirmarExcluirItemBiblioteca(
                                         materialDestaque,
@@ -5343,6 +5371,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 return cardBibliotecaNetflix(
                   material,
                   largura: isMobile ? double.infinity : 238,
+                  onEditar: usuarioEhAdmin()
+                      ? () => abrirCadastroMaterialBiblioteca(
+                          materialExistente: material,
+                        )
+                      : null,
                   onExcluir: usuarioEhAdmin()
                       ? () => confirmarExcluirItemBiblioteca(material)
                       : null,
@@ -5382,6 +5415,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           return cardBibliotecaNetflix(
                             material,
                             largura: isMobile ? 165 : 190,
+                            onEditar: usuarioEhAdmin()
+                                ? () => abrirCadastroMaterialBiblioteca(
+                                    materialExistente: material,
+                                  )
+                                : null,
                             onExcluir: usuarioEhAdmin()
                                 ? () => confirmarExcluirItemBiblioteca(material)
                                 : null,
@@ -5568,6 +5606,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String tituloUpload = 'Enviando material',
     String mensagemPreparando = 'Preparando arquivo para envio...',
   }) async {
+    final controller = progressController ?? UploadProgressController();
+    final gerenciarDialogo = progressController == null;
+    var dialogoAberto = false;
+
     try {
       final bytes = arquivo.bytes;
 
@@ -5579,12 +5621,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (gerenciarDialogo) {
         unawaited(_abrirDialogoUpload(controller));
         await Future<void>.delayed(const Duration(milliseconds: 120));
+        dialogoAberto = true;
       }
 
-      controller.preparing(
-        titulo: tituloUpload,
-        mensagem: mensagemPreparando,
-      );
+      controller.preparing(titulo: tituloUpload, mensagem: mensagemPreparando);
 
       final nomeSeguro = arquivo.name.replaceAll(
         RegExp(r'[^a-zA-Z0-9._-]'),
@@ -5603,8 +5643,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         controller.uploading(
           progress,
           titulo: tituloUpload,
-          mensagem:
-              'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
+          mensagem: 'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
         );
       });
 
@@ -5637,24 +5676,38 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       mostrarMensagem('Erro ao enviar material da biblioteca.');
       return null;
     } finally {
-      if (gerenciarDialogo) {
+      if (gerenciarDialogo && dialogoAberto) {
         await _fecharDialogoUpload();
       }
     }
   }
 
-  Future<void> abrirCadastroMaterialBiblioteca() async {
+  Future<void> abrirCadastroMaterialBiblioteca({
+    Map<String, String>? materialExistente,
+  }) async {
     if (!usuarioEhAdmin()) return;
 
-    final tituloController = TextEditingController();
+    final bool editando = materialExistente != null;
+    final tituloController = TextEditingController(
+      text: materialExistente?['titulo'] ?? '',
+    );
     final categoriaController = TextEditingController(text: 'Gestação');
-    final descricaoController = TextEditingController();
-    final urlController = TextEditingController();
-    final capaUrlController = TextEditingController();
-    var tipoSelecionado = 'pdf';
+    final descricaoController = TextEditingController(
+      text: materialExistente?['descricao'] ?? '',
+    );
+    final urlController = TextEditingController(
+      text: materialExistente?['url'] ?? '',
+    );
+    final capaUrlController = TextEditingController(
+      text: materialExistente?['capaUrl'] ?? '',
+    );
+    var tipoSelecionado = materialExistente?['tipo'] ?? 'pdf';
     PlatformFile? arquivoSelecionadoBiblioteca;
     PlatformFile? capaSelecionadaBiblioteca;
     var salvandoMaterialBiblioteca = false;
+
+    categoriaController.text =
+        materialExistente?['categoria'] ?? categoriaController.text;
 
     try {
       await showDialog<void>(
@@ -5663,7 +5716,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           return StatefulBuilder(
             builder: (context, setStateDialog) {
               return AlertDialog(
-                title: const Text('Adicionar material'),
+                title: Text(
+                  editando ? 'Editar material' : 'Adicionar material',
+                ),
                 content: SizedBox(
                   width: 520,
                   child: SingleChildScrollView(
@@ -5871,7 +5926,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               return;
                             }
 
-                            if (url.isEmpty &&
+                            if (!editando &&
+                                url.isEmpty &&
                                 arquivoSelecionadoBiblioteca == null) {
                               mostrarMensagem(
                                 'Selecione um arquivo ou informe um link externo.',
@@ -5907,7 +5963,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                     mensagemPreparando:
                                         'Preparando material da biblioteca...',
                                   )
-                                : url;
+                                : (url.isNotEmpty
+                                      ? url
+                                      : materialExistente?['url'] ?? '');
 
                             final String capaFinal =
                                 capaUrlController.text.trim().isNotEmpty
@@ -5958,6 +6016,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             }
 
                             final Map<String, String> material = {
+                              if (editando) 'id': materialExistente['id'] ?? '',
                               'titulo': titulo,
                               'categoria':
                                   categoriaController.text.trim().isEmpty
@@ -5966,17 +6025,27 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               'tipo': tipoSelecionado,
                               'url': urlFinal,
                               'arquivoNome':
-                                  arquivoSelecionadoBiblioteca?.name ?? '',
+                                  arquivoSelecionadoBiblioteca?.name ??
+                                  materialExistente?['arquivoNome'] ??
+                                  '',
                               'capaUrl': capaFinal,
                               'descricao': descricaoController.text.trim(),
                               'ativo': 'true',
-                              'ordem': (biblioteca.length + 1).toString(),
-                              'criadoEm': DateTime.now().toIso8601String(),
+                              'ordem':
+                                  materialExistente?['ordem'] ??
+                                  (biblioteca.length + 1).toString(),
+                              'criadoEm':
+                                  materialExistente?['criadoEm'] ??
+                                  DateTime.now().toIso8601String(),
                             };
 
                             if (!context.mounted) return;
                             Navigator.pop(context);
-                            await salvarItemBibliotecaFirestore(material);
+                            if (editando) {
+                              await atualizarItemBibliotecaFirestore(material);
+                            } else {
+                              await salvarItemBibliotecaFirestore(material);
+                            }
                           },
                     icon: salvandoMaterialBiblioteca
                         ? const SizedBox(
@@ -5986,7 +6055,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           )
                         : const Icon(Icons.save_rounded),
                     label: Text(
-                      salvandoMaterialBiblioteca ? 'Enviando...' : 'Salvar',
+                      salvandoMaterialBiblioteca
+                          ? 'Enviando...'
+                          : editando
+                          ? 'Salvar alterações'
+                          : 'Salvar',
                     ),
                   ),
                 ],
@@ -6007,6 +6080,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   Widget cardBibliotecaNetflix(
     Map<String, String> material, {
     required double largura,
+    VoidCallback? onEditar,
     VoidCallback? onExcluir,
   }) {
     final tipo = material['tipo'] ?? 'pdf';
@@ -6134,39 +6208,71 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       ),
                     ),
 
-                    if (onExcluir != null)
+                    if (onEditar != null || onExcluir != null)
                       Positioned(
                         top: 10,
                         right: 10,
-                        child: Tooltip(
-                          message: 'Excluir material',
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
+                        child: Material(
+                          color: Colors.transparent,
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: NatusApp.offWhite.withValues(alpha: 0.96),
                               borderRadius: BorderRadius.circular(999),
-                              onTap: onExcluir,
-                              child: Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withValues(alpha: 0.92),
-                                  borderRadius: BorderRadius.circular(999),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: NatusApp.vinhoProfundo.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
+                              boxShadow: [
+                                BoxShadow(
+                                  color: NatusApp.vinhoProfundo.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
                                 ),
-                                child: const Icon(
-                                  Icons.delete_outline_rounded,
-                                  color: Colors.white,
-                                  size: 18,
-                                ),
+                              ],
+                            ),
+                            child: PopupMenuButton<String>(
+                              tooltip: 'Ações do material',
+                              icon: Icon(
+                                Icons.more_vert_rounded,
+                                color: NatusApp.vinho,
+                                size: 18,
                               ),
+                              padding: EdgeInsets.zero,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              onSelected: (value) {
+                                if (value == 'editar') {
+                                  onEditar?.call();
+                                } else if (value == 'excluir') {
+                                  onExcluir?.call();
+                                }
+                              },
+                              itemBuilder: (context) {
+                                return [
+                                  if (onEditar != null)
+                                    const PopupMenuItem<String>(
+                                      value: 'editar',
+                                      child: ListTile(
+                                        dense: true,
+                                        leading: Icon(Icons.edit_rounded),
+                                        title: Text('Editar'),
+                                      ),
+                                    ),
+                                  if (onExcluir != null)
+                                    const PopupMenuItem<String>(
+                                      value: 'excluir',
+                                      child: ListTile(
+                                        dense: true,
+                                        leading: Icon(
+                                          Icons.delete_outline_rounded,
+                                          color: Colors.red,
+                                        ),
+                                        title: Text('Excluir'),
+                                      ),
+                                    ),
+                                ];
+                              },
                             ),
                           ),
                         ),
@@ -13777,6 +13883,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       titulo: 'Enviando arquivo',
       mensagem: 'Preparando arquivo para envio...',
     );
+    var dialogoAberto = false;
 
     try {
       if (arquivo.bytes == null) {
@@ -13786,6 +13893,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       unawaited(_abrirDialogoUpload(controller));
       await Future<void>.delayed(const Duration(milliseconds: 120));
+      dialogoAberto = true;
 
       final nomeArquivo =
           '${DateTime.now().millisecondsSinceEpoch}_${arquivo.name}';
@@ -13807,8 +13915,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         controller.uploading(
           progress,
           titulo: 'Enviando arquivo',
-          mensagem:
-              'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
+          mensagem: 'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
         );
       });
 
@@ -13836,7 +13943,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       mostrarMensagem('Erro ao enviar arquivo');
       return null;
     } finally {
-      await _fecharDialogoUpload();
+      if (dialogoAberto) {
+        await _fecharDialogoUpload();
+      }
     }
   }
 
