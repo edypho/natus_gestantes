@@ -33,6 +33,7 @@ import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
 import 'features/contratos/contratos.dart';
+import 'navigation/menu_inferior_coracao.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
 import 'uploads/upload_progress_dialog.dart';
 
@@ -287,6 +288,41 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return widget.tipoUsuario == 'admin';
   }
 
+  String rotuloPerfilUsuario() {
+    switch (widget.tipoUsuario) {
+      case 'admin':
+        return 'Admin da clínica';
+      case 'enfermeira':
+        return 'EO';
+      case 'obstetra':
+        return 'Obstetra';
+      case 'gestante':
+        return 'Gestante';
+      case 'superAdmin':
+        return 'Super Admin';
+      default:
+        return widget.tipoUsuario;
+    }
+  }
+
+  String iniciaisPerfilUsuario() {
+    final nome = widget.nomeUsuario.trim();
+    if (nome.isEmpty) return 'N';
+
+    final partes = nome
+        .split(RegExp(r'\s+'))
+        .where((parte) => parte.trim().isNotEmpty)
+        .toList();
+
+    if (partes.isEmpty) return 'N';
+    if (partes.length == 1) {
+      return partes.first.substring(0, 1).toUpperCase();
+    }
+
+    return '${partes.first.substring(0, 1)}${partes.last.substring(0, 1)}'
+        .toUpperCase();
+  }
+
   String nomeEoLogada() {
     final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
 
@@ -336,6 +372,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     carregarContracoesFirestore();
     carregarBibliotecaFirestore();
     carregarPlanosFirestore();
+    carregarPerfilUsuarioLogado();
   }
 
   void aoMudarTema() {
@@ -614,6 +651,346 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     } catch (e) {
       mostrarMensagem('Erro ao carregar obstetras.');
     }
+  }
+
+  Future<void> carregarPerfilUsuarioLogado() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    try {
+      final docUsuario = await firestore.collection('usuarios').doc(uid).get();
+      String foto = '';
+      String email = '';
+
+      if (docUsuario.exists) {
+        final dadosUsuario = docUsuario.data() ?? {};
+        foto = (dadosUsuario['fotoUrl'] ?? '').toString().trim();
+        email = (dadosUsuario['email'] ?? '').toString().trim();
+      }
+
+      if (foto.isEmpty) {
+        foto = await buscarFotoPerfilVinculada(uid);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        fotoPerfilUrl = foto;
+        emailPerfilLogado = email;
+      });
+    } catch (e) {
+      debugPrint('❌ Erro ao carregar perfil do usuário: $e');
+    }
+  }
+
+  Future<String> buscarFotoPerfilVinculada(String uid) async {
+    Future<String> buscarEmColecao(String colecao, String campoUid) async {
+      final resultado = await firestore
+          .collection(colecao)
+          .where(campoUid, isEqualTo: uid)
+          .limit(1)
+          .get();
+
+      if (resultado.docs.isEmpty) return '';
+      final dados = resultado.docs.first.data();
+      return (dados['fotoUrl'] ?? '').toString().trim();
+    }
+
+    if (widget.tipoUsuario == 'gestante') {
+      return buscarEmColecao('gestantes', 'uidGestante');
+    }
+
+    if (widget.tipoUsuario == 'enfermeira') {
+      return buscarEmColecao('enfermeiras', 'uidEnfermeira');
+    }
+
+    if (widget.tipoUsuario == 'obstetra') {
+      return buscarEmColecao('obstetras', 'uidObstetra');
+    }
+
+    return '';
+  }
+
+  Future<void> atualizarFotoPerfilVinculada(String uid, String fotoUrl) async {
+    Future<void> atualizarColecao(String colecao, String campoUid) async {
+      final resultado = await firestore
+          .collection(colecao)
+          .where(campoUid, isEqualTo: uid)
+          .limit(1)
+          .get();
+
+      if (resultado.docs.isEmpty) return;
+      await resultado.docs.first.reference.update({'fotoUrl': fotoUrl});
+    }
+
+    if (widget.tipoUsuario == 'gestante') {
+      await atualizarColecao('gestantes', 'uidGestante');
+    } else if (widget.tipoUsuario == 'enfermeira') {
+      await atualizarColecao('enfermeiras', 'uidEnfermeira');
+    } else if (widget.tipoUsuario == 'obstetra') {
+      await atualizarColecao('obstetras', 'uidObstetra');
+    }
+  }
+
+  Future<void> selecionarFotoPerfil() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) {
+      mostrarMensagem('Usuário não identificado para alterar a foto.');
+      return;
+    }
+
+    final resultado = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+      withData: true,
+    );
+
+    if (resultado == null || resultado.files.isEmpty) return;
+
+    final arquivo = resultado.files.first;
+    if (arquivo.bytes == null) {
+      mostrarMensagem('Não foi possível ler a imagem selecionada.');
+      return;
+    }
+
+    setState(() {
+      carregandoFotoPerfil = true;
+    });
+
+    try {
+      final nomeArquivo =
+          '${DateTime.now().millisecondsSinceEpoch}_${arquivo.name}';
+      final ref = storage.ref().child('perfis/$uid/$nomeArquivo');
+
+      await ref.putData(arquivo.bytes!);
+      final url = await ref.getDownloadURL();
+
+      await firestore.collection('usuarios').doc(uid).set({
+        'uid': uid,
+        'nome': widget.nomeUsuario,
+        'tipo': widget.tipoUsuario,
+        'tipoUsuario': widget.tipoUsuario,
+        'email': emailPerfilLogado,
+        'fotoUrl': url,
+        'fotoAtualizadaEm': DateTime.now().toIso8601String(),
+      }, SetOptions(merge: true));
+
+      await atualizarFotoPerfilVinculada(uid, url);
+
+      if (!mounted) return;
+      setState(() {
+        fotoPerfilUrl = url;
+      });
+
+      mostrarMensagem('Foto de perfil atualizada com sucesso.');
+    } catch (e) {
+      debugPrint('❌ Erro ao enviar foto de perfil: $e');
+      mostrarMensagem('Erro ao atualizar a foto de perfil.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          carregandoFotoPerfil = false;
+        });
+      }
+    }
+  }
+
+  Future<void> abrirPerfilUsuarioMenu() async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Meu perfil'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 42,
+                  backgroundColor: NatusApp.rose.withValues(alpha: 0.35),
+                  backgroundImage: fotoPerfilUrl.trim().isNotEmpty
+                      ? NetworkImage(fotoPerfilUrl)
+                      : null,
+                  child: fotoPerfilUrl.trim().isNotEmpty
+                      ? null
+                      : Text(
+                          iniciaisPerfilUsuario(),
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: NatusApp.vinho,
+                          ),
+                        ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  widget.nomeUsuario.trim().isEmpty
+                      ? 'Usuário Natus'
+                      : widget.nomeUsuario,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: NatusApp.vinho,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  rotuloPerfilUsuario(),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: NatusApp.textoSuave,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (emailPerfilLogado.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    emailPerfilLogado,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: carregandoFotoPerfil
+                        ? null
+                        : () async {
+                            Navigator.of(context).pop();
+                            await selecionarFotoPerfil();
+                          },
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: Text(
+                      carregandoFotoPerfil
+                          ? 'Enviando foto...'
+                          : 'Alterar foto',
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: NatusApp.vinho,
+                      foregroundColor: (NatusApp.escuro
+                          ? NatusApp.fundo
+                          : NatusApp.offWhite),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(context).pop();
+                      await abrirSeletorTemaUsuario();
+                    },
+                    icon: const Icon(Icons.palette_outlined),
+                    label: const Text('Personalizar tema'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: NatusApp.vinho,
+                      side: BorderSide(
+                        color: NatusApp.rose.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> abrirSeletorTemaUsuario() async {
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        final paletaAtiva = NatusTema.paleta;
+        final largura = MediaQuery.of(context).size.width;
+        final cardWidth = largura < 520 ? largura - 48 : 220.0;
+
+        return SafeArea(
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.82,
+            ),
+            decoration: BoxDecoration(
+              color: NatusApp.offWhite,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(28),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 24,
+                  spreadRadius: -8,
+                  offset: const Offset(0, -4),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 52,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: NatusApp.rose.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Tema do aplicativo',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: NatusApp.vinho,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Escolha a aparência do Natus para o seu login. A mudança fica salva para as próximas sessões.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.35,
+                      color: NatusApp.textoSuave,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 14,
+                    children: NatusTema.paletas.map((p) {
+                      return SizedBox(
+                        width: cardWidth,
+                        child: cartaoTema(p, p.chave == paletaAtiva.chave),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> carregarBibliotecaFirestore() async {
@@ -1654,6 +2031,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   String? gestanteSelecionadaLogin;
   String? enfermeiraSelecionadaLogin;
   String? obstetraSelecionadoLogin;
+  String fotoPerfilUrl = '';
+  String emailPerfilLogado = '';
+  bool carregandoFotoPerfil = false;
 
   final List<Map<String, String>> enfermeiras = [];
 
@@ -1835,11 +2215,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 700;
+    final mostrarMenuInferior = isMobile && exibirMenuInferiorCoracao();
+    final telaCoracao = telaCentralMenuCoracao();
+    final itensEsquerda = itensMenuInferiorEsquerda();
+    final itensDireita = itensMenuInferiorDireita();
 
     return PremiumNatusBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        drawer: isMobile
+        drawer: isMobile && !mostrarMenuInferior
             ? Drawer(
                 backgroundColor: Colors.transparent,
                 surfaceTintColor: Colors.transparent,
@@ -1851,36 +2235,42 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 builder: (context) {
                   return Stack(
                     children: [
-                      telaConteudo(),
-                      SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 12, top: 8),
-                          child: Material(
-                            color: NatusApp.offWhite.withValues(alpha: 0.92),
-                            borderRadius: BorderRadius.circular(18),
-                            child: InkWell(
+                      Padding(
+                        padding: EdgeInsets.only(
+                          bottom: mostrarMenuInferior ? 88 : 0,
+                        ),
+                        child: telaConteudo(),
+                      ),
+                      if (!mostrarMenuInferior)
+                        SafeArea(
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 12, top: 8),
+                            child: Material(
+                              color: NatusApp.offWhite.withValues(alpha: 0.92),
                               borderRadius: BorderRadius.circular(18),
-                              onTap: () => Scaffold.of(context).openDrawer(),
-                              child: Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(
-                                    color: NatusApp.offWhite.withValues(
-                                      alpha: 0.84,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(18),
+                                onTap: () => Scaffold.of(context).openDrawer(),
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: NatusApp.offWhite.withValues(
+                                        alpha: 0.84,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                child: Icon(
-                                  Icons.menu_rounded,
-                                  color: NatusApp.vinho,
+                                  child: Icon(
+                                    Icons.menu_rounded,
+                                    color: NatusApp.vinho,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   );
                 },
@@ -1891,6 +2281,32 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   Expanded(child: telaConteudo()),
                 ],
               ),
+        bottomNavigationBar: mostrarMenuInferior
+            ? NatusMenuInferiorCoracao(
+                itensEsquerda: itensEsquerda,
+                itensDireita: itensDireita,
+                telaAtual: telaAtual,
+                onSelecionarTela: selecionarTelaPrincipal,
+              )
+            : null,
+        floatingActionButton: mostrarMenuInferior
+            ? NatusFabCoracao(
+                ativo: widget.tipoUsuario == 'gestante'
+                    ? telaAtual == telaCoracao
+                    : false,
+                onTap: () {
+                  if (widget.tipoUsuario == 'gestante') {
+                    selecionarTelaPrincipal(telaCoracao);
+                    return;
+                  }
+
+                  abrirMenuSecundarioMobile();
+                },
+              )
+            : null,
+        floatingActionButtonLocation: mostrarMenuInferior
+            ? FloatingActionButtonLocation.centerDocked
+            : null,
       ),
     );
   }
@@ -2038,6 +2454,138 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     final menusDoUsuario = menusPermitidos[chaveMenus] ?? [];
 
+    Widget avatarPerfilLateral({double radius = 24}) {
+      final imagemUrl = fotoPerfilUrl.trim();
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: NatusApp.rose.withValues(alpha: 0.35),
+        backgroundImage: imagemUrl.isNotEmpty ? NetworkImage(imagemUrl) : null,
+        child: imagemUrl.isNotEmpty
+            ? null
+            : Text(
+                iniciaisPerfilUsuario(),
+                style: TextStyle(
+                  fontSize: radius * 0.7,
+                  fontWeight: FontWeight.bold,
+                  color: NatusApp.vinho,
+                ),
+              ),
+      );
+    }
+
+    Widget cardPerfilLateral() {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(22),
+            onTap: abrirPerfilUsuarioMenu,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              child: Row(
+                children: [
+                  Stack(
+                    children: [
+                      avatarPerfilLateral(),
+                      if (carregandoFotoPerfil)
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.28),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.nomeUsuario.trim().isEmpty
+                              ? 'Usuário Natus'
+                              : widget.nomeUsuario,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          rotuloPerfilUsuario(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Opções do perfil',
+                    onSelected: (value) async {
+                      if (value == 'perfil') {
+                        await abrirPerfilUsuarioMenu();
+                        return;
+                      }
+                      if (value == 'foto') {
+                        await selecionarFotoPerfil();
+                        return;
+                      }
+                      if (value == 'sair') {
+                        NatusTema.restaurarPadrao();
+                        await FirebaseAuth.instance.signOut();
+                      }
+                    },
+                    color: NatusApp.offWhite,
+                    icon: Icon(
+                      Icons.more_vert_rounded,
+                      color: Colors.white.withValues(alpha: 0.88),
+                    ),
+                    itemBuilder: (context) => const [
+                      PopupMenuItem<String>(
+                        value: 'perfil',
+                        child: Text('Meu perfil'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'foto',
+                        child: Text('Alterar foto'),
+                      ),
+                      PopupMenuItem<String>(value: 'sair', child: Text('Sair')),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     Widget logoutFixo() {
       return Container(
         margin: const EdgeInsets.fromLTRB(14, 8, 14, 16),
@@ -2176,6 +2724,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
               ),
             ),
+            cardPerfilLateral(),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -2265,6 +2814,366 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
         ),
       ),
+    );
+  }
+
+  void selecionarTelaPrincipal(String titulo) {
+    if (titulo == 'Mais') {
+      abrirMenuSecundarioMobile();
+      return;
+    }
+
+    setState(() {
+      telaAtual = titulo;
+      gestanteSelecionada = null;
+      if (titulo == 'Gestantes') {
+        filtroDashboardPacientes = null;
+      }
+    });
+  }
+
+  bool exibirMenuInferiorCoracao() {
+    return widget.tipoUsuario != 'superAdmin';
+  }
+
+  List<String> menusPermitidosUsuarioMobile() {
+    if (widget.tipoUsuario == 'superAdmin') {
+      return const [
+        'Dashboard SaaS',
+        'Clínicas cadastradas SaaS',
+        'Usuários/clientes SaaS',
+        'Mensalidades atrasadas SaaS',
+        'Financeiro das assinaturas SaaS',
+        'Criação de clínica/admin/enfermeira SaaS',
+        'Crescimento de usuários por período SaaS',
+      ];
+    }
+
+    if (widget.tipoUsuario == 'admin') {
+      return const [
+        'Dashboard',
+        'Agenda',
+        'Mapa',
+        'Cadastro',
+        'Gestantes',
+        'Prontuário',
+        'Calculadora de IG',
+        'Contrações',
+        'Financeiro',
+        'Planos da Natus',
+        'Biblioteca',
+        'Documentos',
+        'Exames',
+        'Usuários',
+        'Cadastrar Profissional',
+        'Configurações',
+      ];
+    }
+
+    if (widget.tipoUsuario == 'gestante') {
+      return const [
+        'Área da gestante',
+        'Agenda',
+        'Biblioteca',
+        'Exames',
+        'Documentos',
+        'Contrações',
+      ];
+    }
+
+    return const [
+      'Dashboard',
+      'Agenda',
+      'Mapa',
+      'Gestantes',
+      'Prontuário',
+      'Calculadora de IG',
+      'Contrações',
+      'Biblioteca',
+      'Exames',
+    ];
+  }
+
+  String telaCentralMenuCoracao() {
+    if (widget.tipoUsuario == 'gestante') {
+      return 'Área da gestante';
+    }
+    return 'Dashboard';
+  }
+
+  List<ItemMenuInferior> itensMenuInferiorEsquerda() {
+    if (widget.tipoUsuario == 'gestante') {
+      return const [
+        ItemMenuInferior('Agenda', Icons.event_note_rounded),
+        ItemMenuInferior('Biblioteca', Icons.auto_stories_rounded),
+      ];
+    }
+
+    return const [
+      ItemMenuInferior('Agenda', Icons.event_note_rounded),
+      ItemMenuInferior('Gestantes', Icons.pregnant_woman_rounded),
+    ];
+  }
+
+  List<ItemMenuInferior> itensMenuInferiorDireita() {
+    if (widget.tipoUsuario == 'gestante') {
+      return const [
+        ItemMenuInferior('Exames', Icons.biotech_rounded),
+        ItemMenuInferior('Mais', Icons.apps_rounded),
+      ];
+    }
+
+    return const [
+      ItemMenuInferior('Mapa', Icons.map_rounded),
+      ItemMenuInferior('Exames', Icons.biotech_rounded),
+    ];
+  }
+
+  List<String> menusOcultosMobile() {
+    final menus = menusPermitidosUsuarioMobile();
+    final atalhos = <String>{
+      ...itensMenuInferiorEsquerda().map((item) => item.titulo),
+      ...itensMenuInferiorDireita()
+          .where((item) => item.titulo != 'Mais')
+          .map((item) => item.titulo),
+    };
+
+    if (widget.tipoUsuario == 'gestante') {
+      atalhos.add(telaCentralMenuCoracao());
+    }
+
+    return menus.where((item) => !atalhos.contains(item)).toList();
+  }
+
+  IconData iconeMenuPorTitulo(String titulo) {
+    switch (titulo) {
+      case 'Dashboard':
+      case 'Dashboard SaaS':
+      case 'Área da gestante':
+        return Icons.favorite_rounded;
+      case 'Agenda':
+        return Icons.event_note_rounded;
+      case 'Mapa':
+        return Icons.map_rounded;
+      case 'Cadastro':
+        return Icons.person_add_alt_1_rounded;
+      case 'Gestantes':
+        return Icons.pregnant_woman_rounded;
+      case 'Prontuário':
+        return Icons.note_alt_rounded;
+      case 'Calculadora de IG':
+        return Icons.calculate_rounded;
+      case 'Contrações':
+        return Icons.monitor_heart_rounded;
+      case 'Financeiro':
+      case 'Financeiro das assinaturas SaaS':
+        return Icons.payments_rounded;
+      case 'Planos da Natus':
+        return Icons.workspace_premium_rounded;
+      case 'Biblioteca':
+        return Icons.auto_stories_rounded;
+      case 'Documentos':
+        return Icons.description_rounded;
+      case 'Exames':
+        return Icons.biotech_rounded;
+      case 'Usuários':
+      case 'Usuários/clientes SaaS':
+        return Icons.group_rounded;
+      case 'Cadastrar Profissional':
+      case 'Criação de clínica/admin/enfermeira SaaS':
+        return Icons.medical_services_rounded;
+      case 'Configurações':
+        return Icons.settings_rounded;
+      case 'Clínicas cadastradas SaaS':
+        return Icons.apartment_rounded;
+      case 'Mensalidades atrasadas SaaS':
+        return Icons.warning_amber_rounded;
+      case 'Crescimento de usuários por período SaaS':
+        return Icons.trending_up_rounded;
+      default:
+        return Icons.circle_rounded;
+    }
+  }
+
+  Future<void> abrirMenuSecundarioMobile() async {
+    final menus = menusOcultosMobile();
+
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return SafeArea(
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.82,
+            ),
+            decoration: BoxDecoration(
+              color: NatusApp.offWhite,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(30),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 28,
+                  offset: const Offset(0, -6),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 52,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: NatusApp.rose.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    widget.tipoUsuario == 'gestante'
+                        ? 'Mais opções'
+                        : 'Menu da Natus',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: NatusApp.vinho,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Acesse os módulos que ficaram fora dos atalhos rápidos.',
+                    style: TextStyle(fontSize: 13, color: NatusApp.textoSuave),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: menus.map((titulo) {
+                      final ativo = telaAtual == titulo;
+                      return SizedBox(
+                        width: 170,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () {
+                              Navigator.of(context).pop();
+                              selecionarTelaPrincipal(titulo);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: ativo
+                                    ? NatusApp.marsala.withValues(alpha: 0.12)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: ativo
+                                      ? NatusApp.marsala.withValues(alpha: 0.20)
+                                      : NatusApp.rose.withValues(alpha: 0.28),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      color: NatusApp.rose.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      iconeMenuPorTitulo(titulo),
+                                      color: NatusApp.vinho,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    titulo,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: NatusApp.texto,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            abrirPerfilUsuarioMenu();
+                          },
+                          icon: const Icon(Icons.person_outline_rounded),
+                          label: const Text('Meu perfil'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: NatusApp.vinho,
+                            side: BorderSide(
+                              color: NatusApp.rose.withValues(alpha: 0.55),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            Navigator.of(context).pop();
+                            NatusTema.restaurarPadrao();
+                            await FirebaseAuth.instance.signOut();
+                          },
+                          icon: const Icon(Icons.logout_rounded),
+                          label: const Text('Sair'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: NatusApp.vinho,
+                            foregroundColor: (NatusApp.escuro
+                                ? NatusApp.fundo
+                                : NatusApp.offWhite),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -6974,7 +7883,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = g['id'] ?? '';
 
     if (idGestante.isEmpty) {
-      return telaFichaGestante(g);
+      return telaCentralGestanteClinica(g);
     }
 
     return StreamBuilder<DocumentSnapshot>(
@@ -6996,7 +7905,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
         gestanteAtualizada['id'] = snapshot.data!.id;
 
-        return telaFichaGestante(gestanteAtualizada);
+        return telaCentralGestanteClinica(gestanteAtualizada);
       },
     );
   }
@@ -7270,6 +8179,864 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ]),
         ],
       ),
+    );
+  }
+
+  Widget telaCentralGestanteClinica(Map<String, String> g) {
+    final igAtual = calcularIdadeGestacional(g['dpp'] ?? '');
+    final podeVerFinanceiroGestante = usuarioEhAdmin();
+    final nomeGestante = (g['nomeGestante'] ?? '').trim();
+    final diasRestantesDpp = diasParaDpp(g['dpp'] ?? '');
+    final atendimentosDaGestante = atendimentosDaGestanteCentral(g);
+    final contracoesDaGestante = contracoesDaGestanteCentral(g);
+    final contracoesHoje = contracoesDaGestante.where((contracao) {
+      final data = dataReferenciaContracao(contracao);
+      return data != null && mesmaData(data, DateTime.now());
+    }).toList();
+    final documentosDaGestante = documentos.where((d) {
+      return (d['gestante'] ?? '').trim() == nomeGestante;
+    }).toList();
+    final documentosGeraisDaGestante = documentosDaGestante.where((d) {
+      final tipo = (d['tipo'] ?? '').trim();
+      return tipo.isNotEmpty && tipo != 'Exame';
+    }).toList();
+    final contratosDaGestante = documentosDaGestante.where((d) {
+      return (d['tipo'] ?? '').trim() == 'Contrato';
+    }).toList();
+    final comprovantesDaGestante = documentosDaGestante.where((d) {
+      return (d['tipo'] ?? '').trim() == 'Comprovante';
+    }).toList();
+    final parcelasDaGestante = parcelasDaGestanteFicha(g);
+    final totalPendenciasFinanceiras = parcelasDaGestante.where((parcela) {
+      return (parcela['status'] ?? '') != 'Pago';
+    }).length;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    gestanteSelecionada = null;
+                  });
+                },
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Voltar para lista'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: NatusApp.vinho,
+                  foregroundColor: (NatusApp.escuro
+                      ? NatusApp.fundo
+                      : NatusApp.offWhite),
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => abrirPopupEditarGestante(g),
+                icon: const Icon(Icons.edit),
+                label: const Text('Editar cadastro'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: NatusApp.offWhite,
+                  foregroundColor: NatusApp.vinho,
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => enviarAcessoGestante(g),
+                icon: const Icon(Icons.lock_reset),
+                label: const Text('Reenviar acesso'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: NatusApp.rose,
+                  foregroundColor: NatusApp.vinho,
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => atualizarStatusGestante(g),
+                icon: const Icon(Icons.swap_horiz),
+                label: Text(
+                  (g['statusGestante'] ?? 'Gestante') == 'Gestante'
+                      ? 'Transformar em puérpera'
+                      : (g['statusGestante'] ?? 'Gestante') == 'Puérpera'
+                      ? 'Encerrar atendimento'
+                      : 'Atendimento encerrado',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: NatusApp.offWhite,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: NatusApp.vinhoProfundo.withValues(alpha: 0.06),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Wrap(
+              spacing: 18,
+              runSpacing: 18,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: NatusApp.rose.withValues(alpha: 0.24),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Icon(
+                    Icons.pregnant_woman_rounded,
+                    size: 46,
+                    color: NatusApp.vinho,
+                  ),
+                ),
+                SizedBox(
+                  width: 420,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        nomeGestante.isEmpty
+                            ? 'Central da gestante'
+                            : nomeGestante,
+                        style: TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w800,
+                          color: NatusApp.vinho,
+                          letterSpacing: -0.8,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          badgeStatus(g['statusGestante'] ?? 'Gestante'),
+                          centralClinicaTag(
+                            Icons.favorite_rounded,
+                            'IG $igAtual',
+                          ),
+                          if ((g['dpp'] ?? '').trim().isNotEmpty)
+                            centralClinicaTag(
+                              Icons.event_rounded,
+                              'DPP ${g['dpp']}',
+                            ),
+                          if ((g['plano'] ?? '').trim().isNotEmpty)
+                            centralClinicaTag(
+                              Icons.workspace_premium_rounded,
+                              g['plano'] ?? '',
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Painel rápido para acompanhamento clínico, exames, contrações e evolução da cliente.',
+                        style: TextStyle(
+                          fontSize: 14,
+                          height: 1.5,
+                          color: NatusApp.textoSuave,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 360,
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      cardResumoCentralClinica(
+                        titulo: 'Hospital',
+                        valor: (g['hospitalGestante'] ?? '').trim().isEmpty
+                            ? 'Não informado'
+                            : g['hospitalGestante'] ?? '',
+                        icone: Icons.local_hospital_rounded,
+                        cor: NatusApp.vinho,
+                      ),
+                      cardResumoCentralClinica(
+                        titulo: 'Obstetra',
+                        valor: (g['obstetraGestante'] ?? '').trim().isEmpty
+                            ? 'Não informado'
+                            : g['obstetraGestante'] ?? '',
+                        icone: Icons.medical_services_rounded,
+                        cor: NatusApp.olivaSeco,
+                      ),
+                      cardResumoCentralClinica(
+                        titulo: 'Telefone',
+                        valor: (g['telefoneGestante'] ?? '').trim().isEmpty
+                            ? 'Não informado'
+                            : g['telefoneGestante'] ?? '',
+                        icone: Icons.phone_rounded,
+                        cor: NatusApp.marsalaSuave,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              chipAlertaCentralClinica(
+                icone: Icons.timelapse_rounded,
+                titulo: 'Contrações hoje',
+                subtitulo: contracoesHoje.isEmpty
+                    ? 'Sem registros no dia'
+                    : '${contracoesHoje.length} registro(s)',
+                cor: contracoesHoje.isEmpty
+                    ? NatusApp.textoSuave
+                    : NatusApp.vinho,
+              ),
+              chipAlertaCentralClinica(
+                icone: Icons.science_rounded,
+                titulo: 'Exames',
+                subtitulo: 'Acompanhe os envios recentes',
+                cor: NatusApp.marsalaSuave,
+              ),
+              chipAlertaCentralClinica(
+                icone: Icons.event_available_rounded,
+                titulo: 'DPP',
+                subtitulo: diasRestantesDpp < 0
+                    ? 'DPP já passou'
+                    : diasRestantesDpp == 0
+                    ? 'DPP é hoje'
+                    : 'Faltam $diasRestantesDpp dia(s)',
+                cor: diasRestantesDpp <= 14
+                    ? Colors.orange
+                    : NatusApp.olivaSeco,
+              ),
+              if (podeVerFinanceiroGestante)
+                chipAlertaCentralClinica(
+                  icone: Icons.payments_rounded,
+                  titulo: 'Financeiro',
+                  subtitulo: totalPendenciasFinanceiras == 0
+                      ? 'Sem pendências'
+                      : '$totalPendenciasFinanceiras pendência(s)',
+                  cor: totalPendenciasFinanceiras == 0
+                      ? Colors.green
+                      : Colors.red,
+                ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              secaoCentralClinica(
+                titulo: 'Últimas contrações',
+                largura: 350,
+                child: contracoesDaGestante.isEmpty
+                    ? vazioCentralClinica(
+                        'Nenhuma contração registrada para esta gestante.',
+                      )
+                    : Column(
+                        children: contracoesDaGestante.take(3).map((contracao) {
+                          return itemResumoCentralClinica(
+                            titulo:
+                                contracao['inicio'] ??
+                                contracao['dataRegistro'] ??
+                                'Contração registrada',
+                            subtitulo:
+                                'Duração: ${contracao['duracao'] ?? 'Não informada'}\n'
+                                'Intervalo: ${contracao['intervalo'] ?? 'Não informado'}',
+                            icone: Icons.favorite_border_rounded,
+                            cor: NatusApp.vinho,
+                          );
+                        }).toList(),
+                      ),
+              ),
+              secaoCentralClinica(
+                titulo: 'Exames recentes',
+                largura: 350,
+                child: examesRecentesCentralClinica(g),
+              ),
+              secaoCentralClinica(
+                titulo: 'Atendimentos recentes',
+                largura: 350,
+                child: atendimentosDaGestante.isEmpty
+                    ? vazioCentralClinica(
+                        'Nenhum atendimento registrado ainda.',
+                      )
+                    : Column(
+                        children: atendimentosDaGestante.take(3).map((a) {
+                          final observacao = (a['observacao'] ?? '').trim();
+                          return itemResumoCentralClinica(
+                            titulo: a['tipo'] ?? 'Atendimento',
+                            subtitulo:
+                                '${formatarDataHoraCurtaCentral(a['data'] ?? '')}\n'
+                                '${observacao.isEmpty ? 'Sem observações registradas.' : observacao}',
+                            icone: Icons.assignment_rounded,
+                            cor: NatusApp.olivaSeco,
+                          );
+                        }).toList(),
+                      ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          blocoFicha('Gestante', [
+            linhaInfo('Nome', g['nomeGestante']),
+            linhaInfo('CPF', g['cpfGestante']),
+            linhaInfo('Telefone', g['telefoneGestante']),
+            linhaInfo('E-mail', g['emailGestante']),
+            linhaInfo('Endereço', g['enderecoGestante']),
+            linhaInfo('Bairro', g['bairroGestante']),
+            linhaInfo('Cidade', g['cidadeGestante']),
+            linhaInfo('CEP', g['cepGestante']),
+            linhaInfo('Hospital', g['hospitalGestante']),
+            linhaInfo('Obstetra', g['obstetraGestante']),
+            linhaInfo('Convênio', g['convenioGestante']),
+            linhaInfo('Risco gestacional', g['riscoGestacional']),
+            linhaInfo('Diabetes gestacional', g['diabetesGestacional']),
+          ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Gestante')),
+          blocoFicha('Pai', [
+            linhaInfo('Nome do pai', g['nomePai']),
+            linhaInfo('CPF do pai / responsável', g['cpfPai']),
+            linhaInfo('Telefone do pai', g['telefonePai']),
+            linhaInfo('E-mail do pai', g['emailPai']),
+          ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Pai')),
+          blocoFicha('Bebê', [
+            linhaInfo('Nome do bebê', g['nomeBebe']),
+            linhaInfo('Sexo', g['sexo']),
+            linhaInfo('DPP', g['dpp']),
+            linhaInfo('IG atual', igAtual),
+            linhaInfo('Data de nascimento', g['dataNascimento']),
+            linhaInfo('Via de nascimento', g['viaNascimento']),
+            linhaInfo('IG ao nascer', g['igAoNascer']),
+            linhaInfo('Peso', g['pesoBebe']),
+            linhaInfo('Golden Hour', g['goldenHour']),
+            linhaInfo('Amamentação', g['amamentacao']),
+            linhaInfo('Observações', g['observacoesBebe']),
+          ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Bebê')),
+          if (podeVerFinanceiroGestante)
+            blocoFicha('Valores', [
+              linhaInfo('Plano', g['plano']),
+              linhaInfo('Valor do plano', g['valorPlano']),
+              linhaInfo(
+                'Desconto',
+                '${g['descontoPercentual']} (${g['valorDesconto']})',
+              ),
+              linhaInfo('Entrada', g['entrada']),
+              linhaInfo(
+                'Parcelas',
+                '${g['parcelas']}x de ${g['valorParcela']}',
+              ),
+              linhaInfo('Forma de pagamento', g['formaPagamento']),
+              linhaInfo('Consultório', g['consultorio']),
+            ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Valores')),
+          if (podeVerFinanceiroGestante) financeiroGestantePremium(g),
+          if (podeVerFinanceiroGestante)
+            blocoFicha('Centro de custo', [
+              linhaInfo(
+                'Custo total',
+                formatarMoeda(
+                  calcularCustoTotalGestante(g['nomeGestante'] ?? ''),
+                ),
+              ),
+              linhaInfo(
+                'Lucro estimado',
+                formatarMoeda(
+                  converterValor(g['valorPlano'] ?? '0') -
+                      calcularCustoTotalGestante(g['nomeGestante'] ?? ''),
+                ),
+              ),
+            ]),
+          blocoFicha('Atendimentos da gestante', [
+            if (atendimentosDaGestante.isEmpty)
+              linhaInfo('Atendimentos', 'Nenhum atendimento registrado ainda')
+            else
+              ...atendimentosDaGestante.map((a) {
+                return linhaInfo(
+                  a['tipo'] ?? 'Atendimento',
+                  'KM: ${a['km']}\n'
+                  'Custo deslocamento: ${a['custoDeslocamento']}\n'
+                  'Materiais: ${a['materiaisResumo']}\n'
+                  'Custo materiais: ${a['custoMateriais']}\n'
+                  'Obs: ${a['observacao']}',
+                );
+              }),
+          ]),
+          blocoFicha('Contrações', [
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  contracaoGestanteSelecionada = g['nomeGestante'] ?? '';
+                });
+
+                if (inicioContracao == null) {
+                  iniciarContracao();
+                } else {
+                  pararContracao();
+                }
+              },
+              icon: Icon(
+                inicioContracao == null ? Icons.play_arrow : Icons.stop,
+              ),
+              label: Text(
+                inicioContracao == null
+                    ? 'Iniciar contração'
+                    : 'Parar contração',
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: inicioContracao == null
+                    ? Colors.green
+                    : Colors.red,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 18,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            listaContracoes(),
+          ]),
+          timelineProntuario(g),
+          blocoFicha('Documentos da gestante', [
+            if (documentosGeraisDaGestante.isEmpty)
+              linhaInfo('Documentos', 'Nenhum documento adicional encontrado'),
+            ...documentosGeraisDaGestante.map((d) {
+              return linhaInfo(d['tipo'] ?? 'Documento', d['nome'] ?? '');
+            }),
+          ]),
+          blocoFicha('Exames', [examesCompletosCentralClinica(g)]),
+          if (podeVerFinanceiroGestante)
+            blocoFicha('Contratos', [
+              if (contratosDaGestante.isEmpty)
+                linhaInfo('Contratos', 'Nenhum contrato encontrado'),
+              ...contratosDaGestante.map(cardDocumentoProntuario),
+            ]),
+          if (podeVerFinanceiroGestante)
+            blocoFicha('Comprovantes', [
+              if (comprovantesDaGestante.isEmpty)
+                linhaInfo('Comprovantes', 'Nenhum comprovante encontrado'),
+              ...comprovantesDaGestante.map(cardDocumentoProntuario),
+            ]),
+        ],
+      ),
+    );
+  }
+
+  List<Map<String, String>> atendimentosDaGestanteCentral(
+    Map<String, String> g,
+  ) {
+    final nomeGestante = (g['nomeGestante'] ?? '').trim();
+    final lista = atendimentos.where((a) {
+      return (a['gestante'] ?? '').trim() == nomeGestante;
+    }).toList();
+
+    lista.sort((a, b) {
+      final dataA = DateTime.tryParse(a['data'] ?? '') ?? DateTime(1900);
+      final dataB = DateTime.tryParse(b['data'] ?? '') ?? DateTime(1900);
+      return dataB.compareTo(dataA);
+    });
+
+    return lista;
+  }
+
+  List<Map<String, String>> contracoesDaGestanteCentral(Map<String, String> g) {
+    final nomeGestante = (g['nomeGestante'] ?? '').trim();
+    final idGestante = (g['id'] ?? '').trim();
+    final lista = contracoes.where((contracao) {
+      final nome = (contracao['gestante'] ?? '').trim();
+      final id = (contracao['idGestante'] ?? '').trim();
+      return (nomeGestante.isNotEmpty && nome == nomeGestante) ||
+          (idGestante.isNotEmpty && id == idGestante);
+    }).toList();
+
+    lista.sort((a, b) {
+      final dataA =
+          dataReferenciaContracao(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dataB =
+          dataReferenciaContracao(b) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return dataB.compareTo(dataA);
+    });
+
+    return lista;
+  }
+
+  String formatarDataHoraCurtaCentral(String valor) {
+    final data = DateTime.tryParse(valor);
+    if (data == null) {
+      return valor.trim().isEmpty ? 'Data não informada' : valor;
+    }
+
+    final dia = data.day.toString().padLeft(2, '0');
+    final mes = data.month.toString().padLeft(2, '0');
+    final ano = data.year.toString();
+    final hora = data.hour.toString().padLeft(2, '0');
+    final minuto = data.minute.toString().padLeft(2, '0');
+    return '$dia/$mes/$ano às $hora:$minuto';
+  }
+
+  Widget cardResumoCentralClinica({
+    required String titulo,
+    required String valor,
+    required IconData icone,
+    required Color cor,
+  }) {
+    return Container(
+      width: 360,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cor.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: cor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icone, color: cor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: NatusApp.textoSuave,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  valor,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: NatusApp.texto,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget centralClinicaTag(IconData icone, String texto) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: 16, color: NatusApp.vinho),
+          const SizedBox(width: 6),
+          Text(
+            texto,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: NatusApp.vinho,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget chipAlertaCentralClinica({
+    required IconData icone,
+    required String titulo,
+    required String subtitulo,
+    required Color cor,
+  }) {
+    return Container(
+      width: 260,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: NatusApp.offWhite,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cor.withValues(alpha: 0.20)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: cor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icone, color: cor, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: NatusApp.vinho,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitulo,
+                  style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget secaoCentralClinica({
+    required String titulo,
+    required Widget child,
+    double largura = 340,
+  }) {
+    return Container(
+      width: largura,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: NatusApp.offWhite,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: NatusApp.vinho,
+            ),
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget itemResumoCentralClinica({
+    required String titulo,
+    required String subtitulo,
+    required IconData icone,
+    required Color cor,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cor.withValues(alpha: 0.14)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: cor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icone, color: cor, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: NatusApp.texto,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitulo,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: NatusApp.textoSuave,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget vazioCentralClinica(String texto) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        texto,
+        style: TextStyle(color: NatusApp.textoSuave, height: 1.4),
+      ),
+    );
+  }
+
+  Widget examesRecentesCentralClinica(Map<String, String> g) {
+    final idGestante = (g['id'] ?? '').trim();
+
+    if (idGestante.isEmpty) {
+      return vazioCentralClinica('Gestante sem identificação para exames.');
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: firestore
+          .collection('exames')
+          .where('idGestante', isEqualTo: idGestante)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(12),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final docs = snapshot.data!.docs.toList()
+          ..sort((a, b) {
+            final dadosA = a.data() as Map<String, dynamic>;
+            final dadosB = b.data() as Map<String, dynamic>;
+            final criadoEmA = (dadosA['criadoEm'] ?? '').toString();
+            final criadoEmB = (dadosB['criadoEm'] ?? '').toString();
+            return criadoEmB.compareTo(criadoEmA);
+          });
+
+        if (docs.isEmpty) {
+          return vazioCentralClinica(
+            'Nenhum exame enviado por esta gestante até o momento.',
+          );
+        }
+
+        return Column(
+          children: docs.take(3).map((doc) {
+            final dados = doc.data() as Map<String, dynamic>;
+            return itemResumoCentralClinica(
+              titulo: (dados['nomeArquivo'] ?? 'Exame').toString(),
+              subtitulo: formatarDataHoraCurtaCentral(
+                (dados['criadoEm'] ?? '').toString(),
+              ),
+              icone: Icons.description_rounded,
+              cor: NatusApp.marsalaSuave,
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  Widget examesCompletosCentralClinica(Map<String, String> g) {
+    final idGestante = (g['id'] ?? '').trim();
+
+    if (idGestante.isEmpty) {
+      return vazioCentralClinica('Gestante sem identificação para exames.');
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: firestore
+          .collection('exames')
+          .where('idGestante', isEqualTo: idGestante)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(12),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final docs = snapshot.data!.docs.toList()
+          ..sort((a, b) {
+            final dadosA = a.data() as Map<String, dynamic>;
+            final dadosB = b.data() as Map<String, dynamic>;
+            final criadoEmA = (dadosA['criadoEm'] ?? '').toString();
+            final criadoEmB = (dadosB['criadoEm'] ?? '').toString();
+            return criadoEmB.compareTo(criadoEmA);
+          });
+
+        if (docs.isEmpty) {
+          return vazioCentralClinica(
+            'Nenhum exame encontrado para esta gestante.',
+          );
+        }
+
+        return Column(
+          children: docs.map((doc) {
+            final dados = (doc.data() as Map<String, dynamic>).map((k, v) {
+              return MapEntry(k, v.toString());
+            });
+
+            return cardDocumentoProntuario({
+              'tipo': 'Exame',
+              'nome': dados['nomeArquivo'] ?? 'Exame',
+              'arquivoNome': dados['nomeArquivo'] ?? 'Exame',
+              'arquivoUrl': dados['url'] ?? '',
+              'data': formatarDataHoraCurtaCentral(dados['criadoEm'] ?? ''),
+            });
+          }).toList(),
+        );
+      },
     );
   }
 
@@ -12964,6 +14731,348 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return partes.join(', ');
   }
 
+  bool podeVisualizarDetalhesMapa() {
+    return widget.tipoUsuario == 'admin' ||
+        widget.tipoUsuario == 'enfermeira' ||
+        widget.tipoUsuario == 'obstetra' ||
+        widget.tipoUsuario == 'superAdmin';
+  }
+
+  String enderecoDetalhadoMapa(Map<String, String> g) {
+    final rua = (g['enderecoGestante'] ?? '').trim();
+    final numero = (g['numeroGestante'] ?? '').trim();
+    final complemento = (g['complementoGestante'] ?? '').trim();
+    final bairro = (g['bairroGestante'] ?? '').trim();
+    final cidade = (g['cidadeGestante'] ?? '').trim();
+    final estado = (g['estadoGestante'] ?? '').trim();
+    final cep = (g['cepGestante'] ?? '').trim();
+
+    final partes = <String>[
+      if (rua.isNotEmpty) rua,
+      if (numero.isNotEmpty) numero,
+      if (complemento.isNotEmpty) complemento,
+      if (bairro.isNotEmpty) bairro,
+      if (cidade.isNotEmpty) cidade,
+      if (estado.isNotEmpty) estado,
+      if (cep.isNotEmpty) 'CEP $cep',
+    ];
+
+    if (partes.isEmpty) {
+      return 'Endereço não informado';
+    }
+
+    return partes.join(', ');
+  }
+
+  Widget itemDetalheMapa({
+    required IconData icone,
+    required String titulo,
+    required String valor,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: NatusApp.rose.withValues(alpha: 0.20),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icone, size: 18, color: NatusApp.vinho),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: NatusApp.textoSuave,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  valor.trim().isEmpty ? 'Não informado' : valor,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: NatusApp.texto,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String normalizarTelefoneMapa(String telefone) {
+    return telefone.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  Future<void> abrirLinkExternoMapa(Uri uri, String mensagemErro) async {
+    try {
+      final abriu = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!abriu) {
+        mostrarMensagem(mensagemErro);
+      }
+    } catch (_) {
+      mostrarMensagem(mensagemErro);
+    }
+  }
+
+  Future<void> ligarParaGestanteMapa(String telefone) async {
+    final telefoneNormalizado = normalizarTelefoneMapa(telefone);
+    if (telefoneNormalizado.isEmpty) {
+      mostrarMensagem('Telefone da gestante não informado.');
+      return;
+    }
+
+    final uri = Uri.parse('tel:$telefoneNormalizado');
+    await abrirLinkExternoMapa(uri, 'Não foi possível iniciar a ligação.');
+  }
+
+  Future<void> abrirWhatsAppGestanteMapa(String telefone) async {
+    final telefoneNormalizado = normalizarTelefoneMapa(telefone);
+    if (telefoneNormalizado.isEmpty) {
+      mostrarMensagem('Telefone da gestante não informado.');
+      return;
+    }
+
+    final numeroComPais = telefoneNormalizado.startsWith('55')
+        ? telefoneNormalizado
+        : '55$telefoneNormalizado';
+
+    final uri = Uri.parse('https://wa.me/$numeroComPais');
+    await abrirLinkExternoMapa(uri, 'Não foi possível abrir o WhatsApp.');
+  }
+
+  Future<void> abrirRotaGestanteMapa(LatLng coordenada) async {
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=${coordenada.latitude},${coordenada.longitude}&travelmode=driving',
+    );
+    await abrirLinkExternoMapa(uri, 'Não foi possível abrir a rota.');
+  }
+
+  Widget botaoAcaoMapa({
+    required IconData icone,
+    required String texto,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      width: 160,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icone, size: 18),
+        label: Text(texto),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: NatusApp.vinho,
+          side: BorderSide(color: NatusApp.rose.withValues(alpha: 0.55)),
+          backgroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> abrirDetalhesMapaGestante(
+    Map<String, String> g,
+    LatLng coordenada,
+  ) async {
+    if (!podeVisualizarDetalhesMapa()) {
+      return;
+    }
+
+    final nomeGestante = (g['nomeGestante'] ?? '').trim();
+    final nomeBebeMapa = (g['nomeBebe'] ?? '').trim();
+    final dppMapa = (g['dpp'] ?? '').trim();
+    final planoMapa = (g['plano'] ?? '').trim();
+    final telefoneMapa = (g['telefoneGestante'] ?? '').trim();
+    final enderecoMapa = enderecoDetalhadoMapa(g);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SafeArea(
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.86,
+            ),
+            decoration: BoxDecoration(
+              color: NatusApp.offWhite,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(28),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 24,
+                  offset: const Offset(0, -4),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 54,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: NatusApp.rose.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: NatusApp.rose.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Icon(
+                          Icons.location_on_rounded,
+                          color: NatusApp.vinho,
+                          size: 26,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              nomeGestante.isEmpty
+                                  ? 'Paciente sem nome'
+                                  : nomeGestante,
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: NatusApp.vinho,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Detalhes do pin no mapa',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: NatusApp.textoSuave,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  itemDetalheMapa(
+                    icone: Icons.home_rounded,
+                    titulo: 'Endereço',
+                    valor: enderecoMapa,
+                  ),
+                  itemDetalheMapa(
+                    icone: Icons.phone_rounded,
+                    titulo: 'Telefone',
+                    valor: telefoneMapa,
+                  ),
+                  itemDetalheMapa(
+                    icone: Icons.workspace_premium_rounded,
+                    titulo: 'Plano',
+                    valor: planoMapa,
+                  ),
+                  itemDetalheMapa(
+                    icone: Icons.child_friendly_rounded,
+                    titulo: 'Nome do bebê',
+                    valor: nomeBebeMapa,
+                  ),
+                  itemDetalheMapa(
+                    icone: Icons.event_available_rounded,
+                    titulo: 'DPP',
+                    valor: dppMapa,
+                  ),
+                  const SizedBox(height: 2),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      botaoAcaoMapa(
+                        icone: Icons.call_rounded,
+                        texto: 'Ligar',
+                        onTap: () => ligarParaGestanteMapa(telefoneMapa),
+                      ),
+                      botaoAcaoMapa(
+                        icone: Icons.chat_rounded,
+                        texto: 'WhatsApp',
+                        onTap: () => abrirWhatsAppGestanteMapa(telefoneMapa),
+                      ),
+                      botaoAcaoMapa(
+                        icone: Icons.alt_route_rounded,
+                        texto: 'Traçar rota',
+                        onTap: () => abrirRotaGestanteMapa(coordenada),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        setState(() {
+                          gestanteSelecionada = g;
+                          telaAtual = 'Gestantes';
+                        });
+                      },
+                      icon: const Icon(Icons.open_in_new_rounded),
+                      label: const Text('Abrir central da gestante'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: NatusApp.vinho,
+                        foregroundColor: (NatusApp.escuro
+                            ? NatusApp.fundo
+                            : NatusApp.offWhite),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> carregarMarcadores() async {
     Set<Marker> novosMarcadores = {};
 
@@ -12988,9 +15097,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           Marker(
             markerId: MarkerId(g['id'] ?? g['nomeGestante'] ?? 'sem-id'),
             position: coordenada,
+            onTap: () => abrirDetalhesMapaGestante(g, coordenada),
             infoWindow: InfoWindow(
               title: g['nomeGestante'],
-              snippet: g['telefoneGestante'] ?? '',
+              snippet: podeVisualizarDetalhesMapa()
+                  ? '${(g['plano'] ?? '').trim().isEmpty ? 'Plano não informado' : g['plano']} • ${(g['dpp'] ?? '').trim().isEmpty ? 'DPP não informada' : 'DPP ${g['dpp']}'}'
+                  : 'Toque para visualizar',
             ),
           ),
         );
@@ -15730,13 +17842,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final larguraDisponivel = constraints.maxWidth;
-                  const espacamento = 10.0;
+                  final isMobile = larguraDisponivel < 700;
+                  const espacamento = 8.0;
                   final totalItens = gestantesPorPlano.length;
-                  const larguraMinimaCard = 118.0;
-                  final colunas = totalItens <= 7
+                  final colunas = isMobile
+                      ? (larguraDisponivel >= 540 ? 3 : 2).clamp(1, totalItens)
+                      : totalItens <= 7
                       ? totalItens
                       : ((larguraDisponivel + espacamento) /
-                                (larguraMinimaCard + espacamento))
+                                (104.0 + espacamento))
                             .floor()
                             .clamp(1, 7);
                   final larguraCard =

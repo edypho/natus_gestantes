@@ -9,43 +9,43 @@ Widget superAdminCard({
 }) {
   return InkWell(
     onTap: onTap,
-    borderRadius: BorderRadius.circular(24),
+    borderRadius: BorderRadius.circular(18),
     child: Container(
       width: width ?? 260,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(9),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icone, color: const Color(0xFF7B3A44), size: 20),
-          const SizedBox(height: 8),
+          Icon(icone, color: const Color(0xFF7B3A44), size: 17),
+          const SizedBox(height: 6),
           Text(
             titulo,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: Colors.grey.shade700,
-              fontSize: 11,
-              height: 1.2,
+              fontSize: 9.5,
+              height: 1.15,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             valor,
             style: const TextStyle(
               color: Color(0xFF7B3A44),
               fontWeight: FontWeight.bold,
-              fontSize: 20,
+              fontSize: 17,
             ),
           ),
         ],

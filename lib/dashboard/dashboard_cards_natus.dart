@@ -319,12 +319,12 @@ class NatusCardContagemResumo extends StatelessWidget {
 
     return _NatusCardClicavel(
       onTap: onTap,
-      constraints: const BoxConstraints(minHeight: 98),
-      padding: const EdgeInsets.all(10),
-      borderRadius: BorderRadius.circular(18),
+      constraints: const BoxConstraints(minHeight: 88),
+      padding: const EdgeInsets.all(8),
+      borderRadius: BorderRadius.circular(16),
       decoration: BoxDecoration(
         color: cor.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,36 +332,36 @@ class NatusCardContagemResumo extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 28,
-                height: 28,
+                width: 24,
+                height: 24,
                 decoration: BoxDecoration(
                   color: cor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icone, color: cor, size: 15),
+                child: Icon(icone, color: cor, size: 13),
               ),
               const Spacer(),
               if (onTap != null)
-                Icon(Icons.arrow_forward_rounded, color: cor, size: 15),
+                Icon(Icons.arrow_forward_rounded, color: cor, size: 13),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 5),
           Text(
             titulo,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: isMobile ? 9 : 10,
+              fontSize: isMobile ? 8.5 : 9.5,
               fontWeight: FontWeight.w600,
               color: NatusApp.textoSuave,
-              height: 1.2,
+              height: 1.15,
             ),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           Text(
             valor.toString(),
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w800,
               color: cor,
               letterSpacing: -0.2,

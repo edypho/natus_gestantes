@@ -115,13 +115,15 @@ class SuperAdminDashboard extends StatelessWidget {
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final larguraDisponivel = constraints.maxWidth;
-                  const espacamento = 12.0;
+                  final isMobile = larguraDisponivel < 700;
+                  const espacamento = 8.0;
                   final totalItens = planosOrdenados.length;
-                  const larguraMinimaCard = 118.0;
-                  final colunas = totalItens <= 7
+                  final colunas = isMobile
+                      ? (larguraDisponivel >= 540 ? 3 : 2).clamp(1, totalItens)
+                      : totalItens <= 7
                       ? totalItens
                       : ((larguraDisponivel + espacamento) /
-                                (larguraMinimaCard + espacamento))
+                                (104.0 + espacamento))
                             .floor()
                             .clamp(1, 7);
                   final larguraCard =

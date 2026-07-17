@@ -200,6 +200,22 @@ function formatarDataAssinatura(valor) {
   return data.toLocaleDateString("pt-BR");
 }
 
+function formatarDataHoraDocumento(valor) {
+  const data = valor instanceof Date ? valor : new Date(valor);
+
+  if (Number.isNaN(data.getTime())) {
+    return "";
+  }
+
+  const dia = String(data.getDate()).padStart(2, "0");
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const ano = String(data.getFullYear());
+  const hora = String(data.getHours()).padStart(2, "0");
+  const minuto = String(data.getMinutes()).padStart(2, "0");
+
+  return `${dia}/${mes}/${ano} ${hora}:${minuto}`;
+}
+
 function normalizarStatusContrato(zapsignStatus) {
   const valor = String(zapsignStatus || "").trim().toLowerCase();
 
@@ -591,6 +607,108 @@ async function atualizarContrato(contratoId, dados) {
   });
 }
 
+async function buscarGestantePorId(pacienteId) {
+  if (!pacienteId) {
+    return {};
+  }
+
+  const snapshot = await admin
+      .firestore()
+      .collection("gestantes")
+      .doc(pacienteId)
+      .get();
+
+  if (!snapshot.exists) {
+    return {};
+  }
+
+  return snapshot.data() || {};
+}
+
+function montarNomeDocumentoContrato(payload) {
+  const planoNome = String(payload.planoNome || "").trim();
+  const nomePaciente = String(payload.nomePaciente || "").trim();
+  let nome = "Contrato";
+
+  if (planoNome) {
+    nome += ` ${planoNome}`;
+  }
+
+  if (nomePaciente) {
+    nome += ` - ${nomePaciente}`;
+  }
+
+  return nome.replace(/\s+/g, " ").trim();
+}
+
+function montarArquivoNomeContrato(payload, statusInterno) {
+  const base = montarNomeDocumentoContrato(payload);
+  return statusInterno === "assinado" ? `${base} assinado` : base;
+}
+
+function resolverUrlDocumentoContrato({
+  detalheDocumento,
+  respostaZapSign,
+  signerUrl,
+}) {
+  return detalheDocumento.signed_file ||
+    respostaZapSign.signed_file ||
+    signerUrl ||
+    "";
+}
+
+async function sincronizarDocumentoContrato({
+  contratoId,
+  pacienteId,
+  payload,
+  statusInterno,
+  detalheDocumento,
+  respostaZapSign,
+  signerUrl,
+}) {
+  const gestante = await buscarGestantePorId(pacienteId);
+  const nomeGestante = String(
+      gestante.nomeGestante || payload.nomePaciente || "",
+  ).trim();
+
+  if (!nomeGestante) {
+    return;
+  }
+
+  const arquivoUrl = resolverUrlDocumentoContrato({
+    detalheDocumento,
+    respostaZapSign,
+    signerUrl,
+  });
+
+  const agora = new Date();
+  const documentoId = `contrato_${contratoId}`;
+  const nomeDocumento = montarNomeDocumentoContrato(payload);
+  const arquivoNome = montarArquivoNomeContrato(payload, statusInterno);
+
+  await admin.firestore().collection("documentos").doc(documentoId).set({
+    nome: nomeDocumento,
+    tipo: "Contrato",
+    gestante: nomeGestante,
+    gestanteId: pacienteId,
+    arquivoNome,
+    arquivoUrl,
+    arquivoPrincipalUrl: arquivoUrl,
+    zapsignSignerUrl: signerUrl || "",
+    zapsignSignedFile:
+      detalheDocumento.signed_file || respostaZapSign.signed_file || "",
+    zapsignOriginalFile:
+      detalheDocumento.original_file || respostaZapSign.original_file || "",
+    zapsignDocumentId: detalheDocumento.token || respostaZapSign.token || "",
+    contratoId,
+    statusContrato: statusInterno,
+    origem: "zapsign",
+    data: formatarDataHoraDocumento(agora),
+    criadoEm: admin.firestore.FieldValue.serverTimestamp(),
+    atualizadoEm: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
 async function chamarZapSign({
   method,
   path,
@@ -741,6 +859,16 @@ async function processarGeracaoContrato({
       contratoZapSignSigners: signatariosFinais,
       contratoErro: "",
       contratoUltimaTentativaEm: new Date().toISOString(),
+    });
+
+    await sincronizarDocumentoContrato({
+      contratoId,
+      pacienteId,
+      payload,
+      statusInterno,
+      detalheDocumento,
+      respostaZapSign,
+      signerUrl: linksAssinatura.signerUrl,
     });
 
     return {
@@ -1128,6 +1256,16 @@ exports.consultarContratoZapSign = onCall(
           contratoZapSignSignedFile: detalhe.signed_file || "",
           contratoErro: "",
           contratoUltimaConsultaEm: new Date().toISOString(),
+        });
+
+        await sincronizarDocumentoContrato({
+          contratoId,
+          pacienteId,
+          payload: dadosContrato.payload || {},
+          statusInterno,
+          detalheDocumento: detalhe,
+          respostaZapSign: detalhe,
+          signerUrl: linksAssinatura.signerUrl,
         });
 
         return {

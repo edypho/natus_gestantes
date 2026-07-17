@@ -27,8 +27,10 @@ class NatusCardGestanteLista extends StatelessWidget {
   String get _iniciais {
     final nome = (gestante['nomeGestante'] ?? '').trim();
     if (nome.isEmpty) return '?';
-    final partes =
-        nome.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    final partes = nome
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
     if (partes.length == 1) {
       return partes.first.substring(0, 1).toUpperCase();
     }
@@ -48,8 +50,9 @@ class NatusCardGestanteLista extends StatelessWidget {
       decoration: BoxDecoration(
         color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(18),
-        border:
-            Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.55)),
+        border: Border.all(
+          color: NatusApp.douradoClaro.withValues(alpha: 0.55),
+        ),
         boxShadow: [
           BoxShadow(
             color: NatusApp.vinhoProfundo.withValues(alpha: 0.04),
@@ -70,8 +73,7 @@ class NatusCardGestanteLista extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor:
-                      NatusApp.marsala.withValues(alpha: 0.12),
+                  backgroundColor: NatusApp.marsala.withValues(alpha: 0.12),
                   child: Text(
                     _iniciais,
                     style: TextStyle(
@@ -154,10 +156,13 @@ class NatusCardGestanteLista extends StatelessWidget {
                       value: 'abrir',
                       child: Row(
                         children: [
-                          Icon(Icons.visibility_outlined,
-                              size: 18, color: NatusApp.vinho),
+                          Icon(
+                            Icons.visibility_outlined,
+                            size: 18,
+                            color: NatusApp.vinho,
+                          ),
                           SizedBox(width: 10),
-                          Text('Abrir ficha'),
+                          Text('Abrir central'),
                         ],
                       ),
                     ),
@@ -165,8 +170,11 @@ class NatusCardGestanteLista extends StatelessWidget {
                       value: 'excluir',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline,
-                              size: 18, color: Color(0xFFB3413B)),
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: Color(0xFFB3413B),
+                          ),
                           SizedBox(width: 10),
                           Text('Excluir'),
                         ],
