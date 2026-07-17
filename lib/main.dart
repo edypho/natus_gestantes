@@ -35,6 +35,7 @@ import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
 import 'features/contratos/contratos.dart';
 import 'navigation/menu_inferior_coracao.dart';
+import 'notificacoes/notificacoes_central_page.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
 import 'services/push_notifications_service.dart';
 import 'uploads/upload_progress_dialog.dart';
@@ -132,6 +133,9 @@ class TelaPrincipal extends StatefulWidget {
 
 class _TelaPrincipalState extends State<TelaPrincipal> {
   bool alertaPushAberto = false;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  notificacoesSubscription;
+  int notificacoesNaoLidas = 0;
 
   Future<void> alterarTipoUsuario(String uid, String tipoAtual) async {
     String novoTipo = tipoAtual;
@@ -387,6 +391,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     carregarPlanosFirestore();
     carregarPerfilUsuarioLogado();
     Future.microtask(inicializarPushOperacional);
+    Future.microtask(iniciarEscutaNotificacoes);
   }
 
   void aoMudarTema() {
@@ -395,9 +400,184 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   @override
   void dispose() {
+    notificacoesSubscription?.cancel();
     NatusTema.atual.removeListener(aoMudarTema);
     buscaBibliotecaController.dispose();
     super.dispose();
+  }
+
+  bool get podeReceberNotificacoesInternas {
+    return widget.tipoUsuario == 'admin' ||
+        widget.tipoUsuario == 'superAdmin' ||
+        widget.tipoUsuario == 'enfermeira' ||
+        widget.tipoUsuario == 'obstetra';
+  }
+
+  String tipoNotificacaoConsulta() {
+    if (widget.tipoUsuario == 'superAdmin') {
+      return 'admin';
+    }
+
+    return widget.tipoUsuario;
+  }
+
+  Future<void> iniciarEscutaNotificacoes() async {
+    notificacoesSubscription?.cancel();
+
+    if (!podeReceberNotificacoesInternas) {
+      if (mounted && notificacoesNaoLidas != 0) {
+        setState(() {
+          notificacoesNaoLidas = 0;
+        });
+      }
+      return;
+    }
+
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    notificacoesSubscription = firestore
+        .collection('notificacoesCentral')
+        .where('destinatariosTipos', arrayContains: tipoNotificacaoConsulta())
+        .orderBy('criadoEm', descending: true)
+        .limit(20)
+        .snapshots()
+        .listen((snapshot) {
+          final totalNaoLidas = snapshot.docs.where((doc) {
+            final dados = doc.data();
+            final lidasPor = ((dados['lidasPor'] as List?) ?? const [])
+                .map((item) => item.toString())
+                .toList();
+            return !lidasPor.contains(uid);
+          }).length;
+
+          if (!mounted) return;
+          setState(() {
+            notificacoesNaoLidas = totalNaoLidas;
+          });
+        });
+  }
+
+  Future<void> abrirPainelNotificacoes() async {
+    if (!podeReceberNotificacoesInternas || !mounted) return;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final media = MediaQuery.of(context);
+    final isMobile = media.size.width < 700;
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Notificações',
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return SafeArea(
+          child: Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, isMobile ? 72 : 22, 16, 16),
+              child: NatusPainelNotificacoesFlutuante(
+                tipoUsuario: widget.tipoUsuario,
+                uidUsuario: uid,
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, _, child) {
+        final curva = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+
+        return FadeTransition(
+          opacity: curva,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1).animate(curva),
+            alignment: Alignment.topRight,
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget botaoSinoNotificacoes() {
+    if (!podeReceberNotificacoesInternas) {
+      return const SizedBox.shrink();
+    }
+
+    final exibirBadge = notificacoesNaoLidas > 0;
+    final textoBadge = notificacoesNaoLidas > 9
+        ? '9+'
+        : '$notificacoesNaoLidas';
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8, right: 12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: abrirPainelNotificacoes,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: NatusApp.offWhite.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.86),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.notifications_none_rounded,
+                    color: NatusApp.vinho,
+                    size: 24,
+                  ),
+                ),
+                if (exibirBadge)
+                  Positioned(
+                    bottom: -4,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 24),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD94A4A),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: Text(
+                        textoBadge,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   double converterValorDinamico(dynamic valor) =>
@@ -2368,6 +2548,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             ),
                           ),
                         ),
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: botaoSinoNotificacoes(),
+                      ),
                     ],
                   );
                 },
@@ -2375,7 +2559,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             : Row(
                 children: [
                   menuLateral(),
-                  Expanded(child: telaConteudo()),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        telaConteudo(),
+                        Align(
+                          alignment: Alignment.topRight,
+                          child: botaoSinoNotificacoes(),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
         bottomNavigationBar: mostrarMenuInferior

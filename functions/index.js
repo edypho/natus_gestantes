@@ -889,6 +889,36 @@ async function enviarPushParaUsuariosOperacionais({
   };
 }
 
+async function registrarNotificacaoCentral({
+  tipo,
+  titulo,
+  mensagem,
+  gestante,
+  intensidade,
+  duracao,
+  intervalo,
+  idGestante,
+  destinatariosTipos,
+}) {
+  await admin.firestore().collection("notificacoesCentral").add({
+    tipo: tipo || "notificacao",
+    titulo: titulo || "Notificação",
+    mensagem: mensagem || "",
+    gestante: gestante || "",
+    intensidade: intensidade || "",
+    duracao: duracao || "",
+    intervalo: intervalo || "",
+    idGestante: idGestante || "",
+    destinatariosTipos: Array.isArray(destinatariosTipos) ?
+      destinatariosTipos :
+      ["admin"],
+    lidasPor: [],
+    criadoEm: admin.firestore.FieldValue.serverTimestamp(),
+    criadoEmIso: new Date().toISOString(),
+    atualizadoEm: new Date().toISOString(),
+  });
+}
+
 async function chamarZapSign({
   method,
   path,
@@ -1253,10 +1283,23 @@ exports.notificarContracaoGestante = onDocumentCreated(
         intensidade ? `Intensidade: ${intensidade}.` : "",
         duracao ? `Duracao: ${duracao}.` : "",
       ].filter(Boolean);
+      const mensagem = partesCorpo.join(" ");
+
+      await registrarNotificacaoCentral({
+        tipo: "alerta_contracao",
+        titulo: "Alerta de contração",
+        mensagem,
+        gestante: nomeGestante,
+        intensidade,
+        duracao,
+        intervalo,
+        idGestante,
+        destinatariosTipos: ["admin", "enfermeira", "obstetra"],
+      });
 
       await enviarPushParaUsuariosOperacionais({
         title: "Alerta de contração",
-        body: partesCorpo.join(" "),
+        body: mensagem,
         data: {
           tipo: "alerta_contracao",
           tag: `contracao_${event.params.idContracao}`,
