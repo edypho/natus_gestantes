@@ -7,6 +7,7 @@ import 'shared/natus_premium_visual.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -35,6 +36,7 @@ import 'auth/tela_login.dart';
 import 'features/contratos/contratos.dart';
 import 'navigation/menu_inferior_coracao.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
+import 'services/push_notifications_service.dart';
 import 'uploads/upload_progress_dialog.dart';
 
 export 'core/firebase_globals.dart';
@@ -42,10 +44,19 @@ export 'core/usuario_tipos.dart';
 export 'auth/tela_login.dart';
 import 'core/usuario_tipos.dart';
 
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  if (PushNotificationsService.plataformaSuportada) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
 
   runApp(const NatusApp(home: AuthGate()));
 }
@@ -120,6 +131,8 @@ class TelaPrincipal extends StatefulWidget {
 }
 
 class _TelaPrincipalState extends State<TelaPrincipal> {
+  bool alertaPushAberto = false;
+
   Future<void> alterarTipoUsuario(String uid, String tipoAtual) async {
     String novoTipo = tipoAtual;
 
@@ -373,6 +386,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     carregarBibliotecaFirestore();
     carregarPlanosFirestore();
     carregarPerfilUsuarioLogado();
+    Future.microtask(inicializarPushOperacional);
   }
 
   void aoMudarTema() {
@@ -792,6 +806,89 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         });
       }
     }
+  }
+
+  Future<void> inicializarPushOperacional() async {
+    try {
+      await PushNotificationsService.instance.inicializarParaUsuario(
+        tipoUsuario: widget.tipoUsuario,
+        nomeUsuario: widget.nomeUsuario,
+        onForegroundMessage: tratarPushForeground,
+      );
+    } catch (e) {
+      debugPrint('❌ Erro ao inicializar push: $e');
+    }
+  }
+
+  void tratarPushForeground(RemoteMessage message) {
+    final tipo = (message.data['tipo'] ?? '').toString().trim();
+
+    if (tipo != 'alerta_contracao') {
+      return;
+    }
+
+    final nomeGestante = (message.data['gestante'] ?? '').toString().trim();
+    final intensidade = (message.data['intensidade'] ?? '').toString().trim();
+    final duracao = (message.data['duracao'] ?? '').toString().trim();
+    final intervalo = (message.data['intervalo'] ?? '').toString().trim();
+
+    SystemSound.play(SystemSoundType.alert);
+    Future.delayed(const Duration(milliseconds: 350), () {
+      SystemSound.play(SystemSoundType.alert);
+    });
+
+    if (!mounted) return;
+
+    mostrarMensagem(
+      nomeGestante.isEmpty
+          ? 'Nova contração registrada agora.'
+          : 'Alerta de contração: $nomeGestante',
+    );
+
+    if (alertaPushAberto) return;
+
+    alertaPushAberto = true;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Alerta de contração'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                nomeGestante.isEmpty
+                    ? 'Uma paciente registrou uma nova contração.'
+                    : '$nomeGestante registrou uma nova contração.',
+              ),
+              if (intensidade.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text('Intensidade: $intensidade'),
+              ],
+              if (duracao.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text('Duração: $duracao'),
+              ],
+              if (intervalo.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text('Intervalo: $intervalo'),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    ).whenComplete(() {
+      alertaPushAberto = false;
+    });
   }
 
   Future<void> abrirPerfilUsuarioMenu() async {
@@ -11064,6 +11161,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       'gestante': contracaoGestanteSelecionada,
                       'idGestante': gestanteSelecionada['id'] ?? '',
                       'uidGestante': gestanteSelecionada['uidGestante'] ?? '',
+                      'origemTipoUsuario': widget.tipoUsuario,
+                      'origemNomeUsuario': widget.nomeUsuario,
                       'inicio': formatarDataHora(inicioContracao!),
                       'inicioISO': inicioContracao!.toIso8601String(),
                       'fim': formatarDataHora(fimContracao),

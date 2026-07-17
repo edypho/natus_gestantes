@@ -709,6 +709,186 @@ async function sincronizarDocumentoContrato({
   }, {merge: true});
 }
 
+function normalizarTipoUsuarioPush(valor) {
+  return String(valor || "").trim().toLowerCase();
+}
+
+async function buscarUsuariosOperacionaisPush() {
+  const db = admin.firestore();
+  const usuariosMap = new Map();
+
+  const consultas = await Promise.all([
+    db.collection("usuarios")
+        .where("tipo", "in", ["enfermeira", "obstetra"])
+        .get()
+        .catch(() => null),
+    db.collection("usuarios")
+        .where("tipoUsuario", "in", ["enfermeira", "obstetra"])
+        .get()
+        .catch(() => null),
+  ]);
+
+  for (const resultado of consultas) {
+    if (!resultado) continue;
+
+    for (const doc of resultado.docs) {
+      usuariosMap.set(doc.id, {
+        id: doc.id,
+        ...doc.data(),
+      });
+    }
+  }
+
+  return Array.from(usuariosMap.values()).filter((usuario) => {
+    const tipo = normalizarTipoUsuarioPush(
+        usuario.tipo || usuario.tipoUsuario || "",
+    );
+    return tipo === "enfermeira" || tipo === "obstetra";
+  });
+}
+
+function extrairTokensUsuariosPush(usuarios) {
+  const tokens = [];
+  const donosPorToken = new Map();
+
+  for (const usuario of usuarios) {
+    const tokensUsuario = Array.isArray(usuario.pushTokens) ?
+      usuario.pushTokens :
+      [];
+
+    for (const token of tokensUsuario) {
+      const tokenNormalizado = String(token || "").trim();
+
+      if (!tokenNormalizado) {
+        continue;
+      }
+
+      if (!donosPorToken.has(tokenNormalizado)) {
+        tokens.push(tokenNormalizado);
+        donosPorToken.set(tokenNormalizado, new Set());
+      }
+
+      donosPorToken.get(tokenNormalizado).add(usuario.id);
+    }
+  }
+
+  return {
+    tokens,
+    donosPorToken,
+  };
+}
+
+async function limparTokensInvalidosPush(tokensInvalidos, donosPorToken) {
+  if (!Array.isArray(tokensInvalidos) || tokensInvalidos.length === 0) {
+    return;
+  }
+
+  const db = admin.firestore();
+  const atualizacoes = [];
+
+  for (const token of tokensInvalidos) {
+    const donos = donosPorToken.get(token);
+    if (!donos || donos.size === 0) {
+      continue;
+    }
+
+    for (const uid of donos) {
+      atualizacoes.push(
+          db.collection("usuarios").doc(uid).set({
+            pushTokens: admin.firestore.FieldValue.arrayRemove(token),
+            pushAtualizadoEm: new Date().toISOString(),
+          }, {merge: true}),
+      );
+    }
+  }
+
+  await Promise.all(atualizacoes);
+}
+
+async function enviarPushParaUsuariosOperacionais({
+  title,
+  body,
+  data,
+}) {
+  const usuarios = await buscarUsuariosOperacionaisPush();
+  const {tokens, donosPorToken} = extrairTokensUsuariosPush(usuarios);
+
+  if (tokens.length === 0) {
+    console.log("Push: nenhum token operacional encontrado.");
+    return {
+      sucesso: 0,
+      falhas: 0,
+    };
+  }
+
+  const resposta = await admin.messaging().sendEachForMulticast({
+    tokens,
+    notification: {
+      title,
+      body,
+    },
+    data,
+    android: {
+      priority: "high",
+      notification: {
+        sound: "default",
+        defaultSound: true,
+        defaultVibrateTimings: true,
+      },
+    },
+    apns: {
+      headers: {
+        "apns-priority": "10",
+      },
+      payload: {
+        aps: {
+          sound: "default",
+        },
+      },
+    },
+    webpush: {
+      headers: {
+        Urgency: "high",
+      },
+      notification: {
+        title,
+        body,
+        icon: "/icons/Icon-192.png",
+        badge: "/icons/Icon-192.png",
+        requireInteraction: data.tipo === "alerta_contracao",
+      },
+    },
+  });
+
+  const tokensInvalidos = [];
+
+  resposta.responses.forEach((resultado, index) => {
+    if (resultado.success) {
+      return;
+    }
+
+    const code = resultado.error && resultado.error.code ?
+      resultado.error.code :
+      "";
+
+    console.error("Push: falha ao enviar notificação:", code, resultado.error);
+
+    if ([
+      "messaging/registration-token-not-registered",
+      "messaging/invalid-registration-token",
+    ].includes(code)) {
+      tokensInvalidos.push(tokens[index]);
+    }
+  });
+
+  await limparTokensInvalidosPush(tokensInvalidos, donosPorToken);
+
+  return {
+    sucesso: resposta.successCount,
+    falhas: resposta.failureCount,
+  };
+}
+
 async function chamarZapSign({
   method,
   path,
@@ -1037,6 +1217,57 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
       });
 
       console.log("Usuária gestante criada com sucesso:", email);
+    },
+);
+
+exports.notificarContracaoGestante = onDocumentCreated(
+    "contracoes/{idContracao}",
+    async (event) => {
+      const snapshot = event.data;
+
+      if (!snapshot) {
+        console.log("Push contracao: documento nao encontrado no evento.");
+        return;
+      }
+
+      const dados = snapshot.data() || {};
+      const origemTipoUsuario = normalizarTipoUsuarioPush(
+          dados.origemTipoUsuario || "",
+      );
+
+      if (origemTipoUsuario !== "gestante") {
+        console.log("Push contracao: origem nao gestante, alerta ignorado.");
+        return;
+      }
+
+      const nomeGestante = String(dados.gestante || dados.nomeGestante || "")
+          .trim();
+      const intensidade = String(dados.intensidade || "").trim();
+      const duracao = String(dados.duracao || "").trim();
+      const intervalo = String(dados.intervalo || "").trim();
+      const idGestante = String(dados.idGestante || "").trim();
+
+      const partesCorpo = [
+        nomeGestante ? `${nomeGestante} registrou uma nova contração.` :
+          "Uma paciente registrou uma nova contração.",
+        intensidade ? `Intensidade: ${intensidade}.` : "",
+        duracao ? `Duracao: ${duracao}.` : "",
+      ].filter(Boolean);
+
+      await enviarPushParaUsuariosOperacionais({
+        title: "Alerta de contração",
+        body: partesCorpo.join(" "),
+        data: {
+          tipo: "alerta_contracao",
+          tag: `contracao_${event.params.idContracao}`,
+          contracaoId: event.params.idContracao,
+          gestante: nomeGestante,
+          intensidade,
+          duracao,
+          intervalo,
+          idGestante,
+        },
+      });
     },
 );
 
