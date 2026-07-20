@@ -21,6 +21,7 @@ class NatusParcelaItem extends StatelessWidget {
   final VoidCallback onGerarCobranca;
   final VoidCallback onSelecionarComprovante;
   final VoidCallback onDarBaixa;
+  final VoidCallback? onAlterarParcelas;
   final VoidCallback? onQuitarPlano;
 
   const NatusParcelaItem({
@@ -40,12 +41,23 @@ class NatusParcelaItem extends StatelessWidget {
     required this.onGerarCobranca,
     required this.onSelecionarComprovante,
     required this.onDarBaixa,
+    this.onAlterarParcelas,
     this.onQuitarPlano,
   });
 
   static const _meses = [
-    'JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN',
-    'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ',
+    'JAN',
+    'FEV',
+    'MAR',
+    'ABR',
+    'MAI',
+    'JUN',
+    'JUL',
+    'AGO',
+    'SET',
+    'OUT',
+    'NOV',
+    'DEZ',
   ];
 
   (String, String) get _diaMes {
@@ -66,13 +78,13 @@ class NatusParcelaItem extends StatelessWidget {
     final corStatus = pago
         ? const Color(0xFF5F7D54)
         : atrasado
-            ? const Color(0xFFB3413B)
-            : const Color(0xFFC07A3D);
+        ? const Color(0xFFB3413B)
+        : const Color(0xFFC07A3D);
     final textoStatus = pago
         ? 'Pago'
         : atrasado
-            ? 'Atrasado'
-            : 'Pendente';
+        ? 'Atrasado'
+        : 'Pendente';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -80,8 +92,9 @@ class NatusParcelaItem extends StatelessWidget {
       decoration: BoxDecoration(
         color: NatusApp.offWhite,
         borderRadius: BorderRadius.circular(16),
-        border:
-            Border.all(color: NatusApp.douradoClaro.withValues(alpha: 0.55)),
+        border: Border.all(
+          color: NatusApp.douradoClaro.withValues(alpha: 0.55),
+        ),
       ),
       child: Row(
         children: [
@@ -90,8 +103,9 @@ class NatusParcelaItem extends StatelessWidget {
             width: 48,
             height: 52,
             decoration: BoxDecoration(
-              color: (atrasado ? corStatus : NatusApp.marsala)
-                  .withValues(alpha: 0.10),
+              color: (atrasado ? corStatus : NatusApp.marsala).withValues(
+                alpha: 0.10,
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -113,8 +127,9 @@ class NatusParcelaItem extends StatelessWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
-                    color: (atrasado ? corStatus : NatusApp.marsala)
-                        .withValues(alpha: 0.8),
+                    color: (atrasado ? corStatus : NatusApp.marsala).withValues(
+                      alpha: 0.8,
+                    ),
                   ),
                 ),
               ],
@@ -150,8 +165,11 @@ class NatusParcelaItem extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.account_balance_wallet_outlined,
-                          size: 13, color: statusAsaasCor),
+                      Icon(
+                        Icons.account_balance_wallet_outlined,
+                        size: 13,
+                        color: statusAsaasCor,
+                      ),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
@@ -185,8 +203,10 @@ class NatusParcelaItem extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
+                ),
                 decoration: BoxDecoration(
                   color: corStatus.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(999),
@@ -206,21 +226,26 @@ class NatusParcelaItem extends StatelessWidget {
           if (!pago)
             IconButton(
               tooltip: 'Dar baixa',
-              icon: const Icon(Icons.check_circle,
-                  color: Color(0xFF5F7D54), size: 22),
+              icon: const Icon(
+                Icons.check_circle,
+                color: Color(0xFF5F7D54),
+                size: 22,
+              ),
               onPressed: onDarBaixa,
             )
           else
             IconButton(
               tooltip: 'Abrir comprovante',
-              icon: Icon(Icons.fact_check_outlined,
-                  color: NatusApp.vinho, size: 21),
+              icon: Icon(
+                Icons.fact_check_outlined,
+                color: NatusApp.vinho,
+                size: 21,
+              ),
               onPressed: onAbrirComprovante,
             ),
           PopupMenuButton<String>(
             tooltip: 'Mais ações',
-            icon: Icon(Icons.more_vert,
-                color: NatusApp.textoSuave, size: 20),
+            icon: Icon(Icons.more_vert, color: NatusApp.textoSuave, size: 20),
             onSelected: (op) {
               switch (op) {
                 case 'abrir':
@@ -237,33 +262,64 @@ class NatusParcelaItem extends StatelessWidget {
                   onSelecionarComprovante();
                 case 'quitar':
                   onQuitarPlano?.call();
+                case 'alterar_parcelas':
+                  onAlterarParcelas?.call();
               }
             },
             itemBuilder: (context) => [
+              if (onAlterarParcelas != null)
+                PopupMenuItem(
+                  value: 'alterar_parcelas',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.edit_calendar_outlined,
+                        size: 18,
+                        color: NatusApp.vinho,
+                      ),
+                      const SizedBox(width: 10),
+                      const Text('Alterar parcelas'),
+                    ],
+                  ),
+                ),
               if (temCobrancaAsaas) ...[
                 const PopupMenuItem(
-                    value: 'abrir', child: Text('Abrir cobrança Asaas')),
+                  value: 'abrir',
+                  child: Text('Abrir cobrança Asaas'),
+                ),
                 const PopupMenuItem(
-                    value: 'consultar', child: Text('Consultar status Asaas')),
+                  value: 'consultar',
+                  child: Text('Consultar status Asaas'),
+                ),
                 const PopupMenuItem(
-                    value: 'pix_copiar', child: Text('Copiar Pix copia e cola')),
+                  value: 'pix_copiar',
+                  child: Text('Copiar Pix copia e cola'),
+                ),
                 const PopupMenuItem(
-                    value: 'boleto', child: Text('Abrir boleto Asaas')),
+                  value: 'boleto',
+                  child: Text('Abrir boleto Asaas'),
+                ),
               ],
               if (!pago) ...[
                 if (!temCobrancaAsaas)
                   const PopupMenuItem(
-                      value: 'gerar', child: Text('Gerar cobrança Asaas')),
+                    value: 'gerar',
+                    child: Text('Gerar cobrança Asaas'),
+                  ),
                 const PopupMenuItem(
-                    value: 'comprovante_sel',
-                    child: Text('Selecionar comprovante')),
+                  value: 'comprovante_sel',
+                  child: Text('Selecionar comprovante'),
+                ),
                 if (onQuitarPlano != null)
                   PopupMenuItem(
                     value: 'quitar',
                     child: Row(
                       children: [
-                        Icon(Icons.workspace_premium_outlined,
-                            size: 18, color: NatusApp.douradoEscuro),
+                        Icon(
+                          Icons.workspace_premium_outlined,
+                          size: 18,
+                          color: NatusApp.douradoEscuro,
+                        ),
                         SizedBox(width: 10),
                         Text('Quitar plano da gestante'),
                       ],

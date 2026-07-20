@@ -4255,6 +4255,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   bool parcelaEhDoMesSelecionado(Map<String, String> parcela) => fincalc
       .parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado);
 
+  bool lancamentoFinanceiroVisivelNoPeriodo(Map<String, String> parcela) =>
+      fincalc.lancamentoFinanceiroVisivelNoPeriodo(
+        parcela,
+        mesSelecionado,
+        anoSelecionado,
+      );
+
   bool parcelaEstaAtrasada(Map<String, String> parcela) =>
       fincalc.parcelaEstaAtrasada(parcela);
 
@@ -10275,7 +10282,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final nomeGestante = g['nomeGestante'] ?? '';
 
     final pendentes = parcelasFinanceiras.where((p) {
-      return p['gestante'] == nomeGestante && p['status'] != 'Pago';
+      return p['gestante'] == nomeGestante &&
+          p['status'] != 'Pago' &&
+          fincalc.lancamentoFinanceiroValido(p);
     }).toList();
 
     if (pendentes.isEmpty) {
@@ -15711,7 +15720,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         {'campo': 'descontoPercentual', 'label': 'Desconto percentual'},
         {'campo': 'valorDesconto', 'label': 'Valor do desconto'},
         {'campo': 'entrada', 'label': 'Entrada'},
-        {'campo': 'parcelas', 'label': 'Parcelas'},
+        {
+          'campo': 'parcelas',
+          'label': 'Total de parcelas (incluindo as já pagas)',
+        },
         {'campo': 'valorParcela', 'label': 'Valor da parcela'},
         {'campo': 'formaPagamento', 'label': 'Forma de pagamento'},
         {'campo': 'consultorio', 'label': 'Consultório'},
@@ -16027,17 +16039,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         if (!numerosPagos.contains(numero)) numerosPendentes.add(numero);
       }
 
-      final saldoCentavos = (saldoPendente.clamp(0, double.infinity) * 100)
-          .round();
-      final centavosBase = quantidadePendentesFinanceiras == 0
-          ? 0
-          : saldoCentavos ~/ quantidadePendentesFinanceiras;
-      final centavosRestantes = quantidadePendentesFinanceiras == 0
-          ? 0
-          : saldoCentavos % quantidadePendentesFinanceiras;
-      final valorParcelaAtual = quantidadePendentesFinanceiras == 0
+      final valoresPendentes = fincalc.distribuirSaldoEmParcelas(
+        saldoPendente,
+        quantidadePendentesFinanceiras,
+      );
+      final valorParcelaAtual = valoresPendentes.isEmpty
           ? 0.0
-          : (centavosBase + (centavosRestantes > 0 ? 1 : 0)) / 100;
+          : valoresPendentes.first;
       dadosAtualizados['valorParcela'] = formatarMoeda(valorParcelaAtual);
 
       batch.update(
@@ -16089,14 +16097,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       for (var indice = 0; indice < numerosPendentes.length; indice++) {
         final numero = numerosPendentes[indice];
-        final centavos = centavosBase + (indice < centavosRestantes ? 1 : 0);
         final dadosParcela = <String, String>{
           'gestante': nome,
           'gestanteId': gestanteId,
           'tipo': 'parcela',
           'numero': numero.toString(),
           'descricao': '$numeroª Parcela',
-          'valor': formatarMoeda(centavos / 100),
+          'valor': formatarMoeda(valoresPendentes[indice]),
           'vencimento': gerarVencimentoParcelaHistorico(
             numero,
             parcelasPagas.length,
@@ -16122,7 +16129,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         gestante.addAll(dadosAtualizados);
         gestanteSelecionada = gestante;
       });
-      mostrarMensagem('Financeiro atualizado e parcelas recalculadas.');
+      mostrarMensagem(
+        'Financeiro atualizado: ${parcelasPagas.length} parcela(s) paga(s) '
+        'preservada(s) e $quantidadePendentesFinanceiras restante(s) '
+        'recalculada(s).',
+      );
       return true;
     } catch (e) {
       debugPrint('❌ Erro ao editar financeiro da paciente: $e');
@@ -17039,8 +17050,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final valorParcela = gestante['valorParcela'] ?? 'R\$ 0,00';
     final valorEntrada = gestante['entrada'] ?? 'R\$ 0,00';
     final parcelasPagas = int.tryParse(gestante['parcelasPagas'] ?? '0') ?? 0;
+    final saldoParcelado =
+        converterValor(gestante['valorPlano'] ?? '0') -
+        converterValor(gestante['valorDesconto'] ?? '0') -
+        converterValor(valorEntrada);
+    final valoresParcelas = saldoParcelado > 0
+        ? fincalc.distribuirSaldoEmParcelas(saldoParcelado, quantidadeParcelas)
+        : List<double>.filled(quantidadeParcelas, converterValor(valorParcela));
 
-    if (converterValor(valorParcela) <= 0 &&
+    if (valoresParcelas.every((valor) => valor <= 0) &&
         converterValor(valorEntrada) <= 0) {
       debugPrint('Lançamento financeiro ignorado: paciente sem valor.');
       return;
@@ -17111,7 +17129,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         tipo: 'parcela',
         numero: i.toString(),
         descricao: '$iª Parcela',
-        valor: valorParcela,
+        valor: formatarMoeda(valoresParcelas[i - 1]),
         vencimento: gerarVencimentoParcelaHistorico(i, parcelasPagas),
         status: i <= parcelasPagas ? 'Pago' : 'Pendente',
       );
@@ -17219,8 +17237,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final parcelaGestante = (p['gestante'] ?? '').trim();
       final parcelaGestanteId = (p['gestanteId'] ?? '').trim();
 
-      return (nomeGestante.isNotEmpty && parcelaGestante == nomeGestante) ||
+      final pertencePaciente =
+          (nomeGestante.isNotEmpty && parcelaGestante == nomeGestante) ||
           (gestanteId.isNotEmpty && parcelaGestanteId == gestanteId);
+      return pertencePaciente && fincalc.lancamentoFinanceiroValido(p);
     }).toList();
 
     lista.sort((a, b) {
@@ -17246,7 +17266,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     double total = 0;
 
     for (final parcela in parcelas) {
-      if (filtro(parcela)) {
+      if (filtro(parcela) && fincalc.lancamentoFinanceiroValido(parcela)) {
         total += converterValor(parcela['valor'] ?? '0');
       }
     }
@@ -17811,6 +17831,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final temCobrancaAsaas = pendentes.any(parcelaTemCobrancaAsaas);
 
     String descontoSelecionado = '0%';
+    DateTime dataQuitacaoSelecionada = DateTime.now();
 
     final confirmou = await showDialog<bool>(
       context: context,
@@ -17846,6 +17867,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: NatusApp.textoSuave,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final dataEscolhida = await showDatePicker(
+                          context: context,
+                          initialDate: dataQuitacaoSelecionada,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime.now(),
+                        );
+
+                        if (dataEscolhida == null) return;
+                        setDialogState(() {
+                          dataQuitacaoSelecionada = dataEscolhida;
+                        });
+                      },
+                      icon: const Icon(Icons.calendar_today_outlined),
+                      label: Text(
+                        'Data da quitação: '
+                        '${dataQuitacaoSelecionada.day.toString().padLeft(2, '0')}/'
+                        '${dataQuitacaoSelecionada.month.toString().padLeft(2, '0')}/'
+                        '${dataQuitacaoSelecionada.year}',
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -17950,6 +17994,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       nomeGestante,
       percentual,
       fincalc.valorQuitacaoComDesconto(total, percentual),
+      dataQuitacaoSelecionada,
     );
   }
 
@@ -17958,24 +18003,51 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String nomeGestante,
     double percentualDesconto,
     double valorFinal,
+    DateTime dataQuitacao,
   ) async {
-    final agora = formatarDataHora(DateTime.now());
+    final horarioAtual = DateTime.now();
+    final dataPagamento = formatarDataHora(
+      DateTime(
+        dataQuitacao.year,
+        dataQuitacao.month,
+        dataQuitacao.day,
+        horarioAtual.hour,
+        horarioAtual.minute,
+      ),
+    );
     final descontoTexto = '${percentualDesconto.toStringAsFixed(0)}%';
 
     final batch = firestore.batch();
     var comId = 0;
+    final totalOriginalCentavos = pendentes.fold<int>(0, (total, parcela) {
+      return total + (converterValor(parcela['valor'] ?? '0') * 100).round();
+    });
+    final valorFinalCentavos = (valorFinal * 100).round();
+    var centavosDistribuidos = 0;
 
-    for (final p in pendentes) {
+    for (var indice = 0; indice < pendentes.length; indice++) {
+      final p = pendentes[indice];
+      final valorParcelaCentavos = (converterValor(p['valor'] ?? '0') * 100)
+          .round();
+      final valorRecebidoCentavos = indice == pendentes.length - 1
+          ? valorFinalCentavos - centavosDistribuidos
+          : totalOriginalCentavos == 0
+          ? 0
+          : valorFinalCentavos * valorParcelaCentavos ~/ totalOriginalCentavos;
+      centavosDistribuidos += valorRecebidoCentavos;
+      final valorRecebido = formatarMoeda(valorRecebidoCentavos / 100);
       final id = p['id'];
       if (id != null && id.isNotEmpty) {
         batch.update(firestore.collection('parcelas').doc(id), {
           'status': 'Pago',
-          'dataPagamento': agora,
+          'dataPagamento': dataPagamento,
           'quitacaoAntecipada': 'true',
           'descontoQuitacao': descontoTexto,
+          'valorRecebido': valorRecebido,
         });
         comId++;
       }
+      p['valorRecebido'] = valorRecebido;
     }
 
     if (comId > 0) {
@@ -17985,7 +18057,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     setState(() {
       for (final p in pendentes) {
         p['status'] = 'Pago';
-        p['dataPagamento'] = agora;
+        p['dataPagamento'] = dataPagamento;
         p['quitacaoAntecipada'] = 'true';
         p['descontoQuitacao'] = descontoTexto;
       }
@@ -18020,6 +18092,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'comprovanteNome': arquivoSelecionado!.name,
       'comprovanteUrl': urlComprovante,
       'dataPagamento': formatarDataHora(DateTime.now()),
+      'valorRecebido': parcela['valor'] ?? 'R\$ 0,00',
     };
 
     if (id != null && id.isNotEmpty) {
@@ -18031,11 +18104,44 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       parcela['comprovanteNome'] = arquivoSelecionado!.name;
       parcela['comprovanteUrl'] = urlComprovante;
       parcela['dataPagamento'] = formatarDataHora(DateTime.now());
+      parcela['valorRecebido'] = parcela['valor'] ?? 'R\$ 0,00';
 
       arquivoSelecionado = null;
     });
 
     mostrarMensagem('Parcela baixada com sucesso!');
+  }
+
+  Map<String, String>? pacienteDaParcelaFinanceira(
+    Map<String, String> parcela,
+  ) {
+    final pacienteId = (parcela['gestanteId'] ?? '').trim();
+    final nomePaciente = (parcela['gestante'] ?? '').trim().toLowerCase();
+
+    for (final paciente in gestantes) {
+      if (pacienteId.isNotEmpty && (paciente['id'] ?? '') == pacienteId) {
+        return paciente;
+      }
+
+      final nomeCadastrado = (paciente['nomeGestante'] ?? '')
+          .trim()
+          .toLowerCase();
+      if (nomePaciente.isNotEmpty && nomeCadastrado == nomePaciente) {
+        return paciente;
+      }
+    }
+
+    return null;
+  }
+
+  void abrirAlteracaoParcelas(Map<String, String> parcela) {
+    final paciente = pacienteDaParcelaFinanceira(parcela);
+    if (paciente == null) {
+      mostrarMensagem('Paciente vinculada à parcela não encontrada.');
+      return;
+    }
+
+    abrirPopupEditarSecaoGestante(paciente, 'Valores');
   }
 
   String nomeMes(int mes) {
@@ -18120,8 +18226,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     ]);
 
     final parcelasDoMes = parcelasFinanceiras.where((p) {
-      return fincalc.lancamentoFinanceiroValido(p) &&
-          parcelaEhDoMesSelecionado(p);
+      return lancamentoFinanceiroVisivelNoPeriodo(p);
     }).toList();
 
     for (var p in parcelasDoMes) {
@@ -18158,8 +18263,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaFinanceiro() {
     final parcelasDoMes = parcelasFinanceiras.where((p) {
-      return fincalc.lancamentoFinanceiroValido(p) &&
-          parcelaEhDoMesSelecionado(p);
+      return lancamentoFinanceiroVisivelNoPeriodo(p);
     }).toList();
 
     return SingleChildScrollView(
@@ -18372,6 +18476,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   },
                   onDarBaixa: () async {
                     await darBaixaParcela(p);
+                  },
+                  onAlterarParcelas: () {
+                    abrirAlteracaoParcelas(p);
                   },
                   onQuitarPlano: () async {
                     await abrirQuitacaoAntecipada(p);
