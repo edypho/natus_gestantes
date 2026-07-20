@@ -38,6 +38,28 @@ void main() {
     });
   });
 
+  group('lancamentoFinanceiroValido', () {
+    test('aceita lançamento com valor positivo', () {
+      expect(lancamentoFinanceiroValido({'valor': 'R\$ 120,50'}), isTrue);
+    });
+
+    test('ignora registros legados sem valor', () {
+      expect(lancamentoFinanceiroValido({'valor': 'R\$ 0,00'}), isFalse);
+      expect(lancamentoFinanceiroValido({'valor': ''}), isFalse);
+      expect(lancamentoFinanceiroValido({}), isFalse);
+    });
+
+    test('ignora lançamento explicitamente cancelado', () {
+      expect(
+        lancamentoFinanceiroValido({
+          'valor': 'R\$ 100,00',
+          'statusRegistro': 'cancelado',
+        }),
+        isFalse,
+      );
+    });
+  });
+
   group('parcelaEstaAtrasada', () {
     test('pendente com vencimento no passado está atrasada', () {
       expect(
@@ -66,6 +88,13 @@ void main() {
       {'vencimento': '05/01/2020', 'status': 'Pago', 'valor': 'R\$ 100,00'},
       {'vencimento': '05/01/2020', 'status': 'Pendente', 'valor': 'R\$ 100,00'},
       {'vencimento': '05/02/2020', 'status': 'Pendente', 'valor': 'R\$ 999,00'},
+      {
+        'vencimento': '05/01/2020',
+        'status': 'Pendente',
+        'statusRegistro': 'cancelado',
+        'valor': 'R\$ 700,00',
+      },
+      {'vencimento': '05/01/2020', 'status': 'Pendente', 'valor': 'R\$ 0,00'},
     ];
 
     test('total previsto considera só o mês selecionado', () {
@@ -84,10 +113,12 @@ void main() {
       expect(calcularPercentualInadimplencia(parcelas, 1, 2020), 50.0);
     });
 
-    test('inadimplência sem parcelas no período é 0 (sem divisão por zero)',
-        () {
-      expect(calcularPercentualInadimplencia(parcelas, 6, 2030), 0);
-    });
+    test(
+      'inadimplência sem parcelas no período é 0 (sem divisão por zero)',
+      () {
+        expect(calcularPercentualInadimplencia(parcelas, 6, 2030), 0);
+      },
+    );
   });
 
   group('calcularQuintoDiaUtil', () {

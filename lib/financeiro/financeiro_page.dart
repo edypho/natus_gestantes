@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../shared/natus_app.dart';
+import 'financeiro_calculos.dart';
 import 'financeiro_widgets.dart';
 
 bool parcelaPagaFinanceiro(Map<String, String> parcela) {
@@ -16,11 +17,8 @@ String textoSeguroFinanceiro(Map<String, String> parcela, String chave) {
   return valor;
 }
 
-typedef CardResumoFinanceiroBuilder = Widget Function(
-  String titulo,
-  String valor,
-  IconData icone,
-);
+typedef CardResumoFinanceiroBuilder =
+    Widget Function(String titulo, String valor, IconData icone);
 
 Widget telaFinanceiroPage({
   required List<Map<String, String>> parcelasFinanceiras,
@@ -45,7 +43,7 @@ Widget telaFinanceiroPage({
   required void Function(String mensagem) mostrarMensagem,
 }) {
   final parcelasDoMes = parcelasFinanceiras.where((p) {
-    return parcelaEhDoMesSelecionado(p);
+    return lancamentoFinanceiroValido(p) && parcelaEhDoMesSelecionado(p);
   }).toList();
 
   return SingleChildScrollView(

@@ -2176,7 +2176,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         novaGestante['id'] = docRef.id;
 
         if (gerarFinanceiro &&
-            (novaGestante['valorPlano'] ?? '').isNotEmpty &&
+            converterValor(novaGestante['valorPlano'] ?? '0') > 0 &&
             (novaGestante['parcelas'] ?? '').isNotEmpty) {
           await gerarParcelasDaGestante(novaGestante);
           parcelasCriadas++;
@@ -2429,7 +2429,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   int mesSelecionado = DateTime.now().month;
   int anoSelecionado = DateTime.now().year;
 
-  String filtroFinanceiro = 'Todos';
+  String filtroFinanceiro = 'Pendentes';
 
   String atendimentoGestante = 'Selecione';
   String atendimentoTipo = 'Pré-natal';
@@ -15755,6 +15755,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   final campo = item['campo'] ?? '';
                   final label = item['label'] ?? campo;
                   final controller = controllers[campo]!;
+                  final campoFinanceiroCalculado =
+                      secao == 'Valores' &&
+                      (campo == 'valorDesconto' || campo == 'valorParcela');
+                  final campoNumerico =
+                      secao == 'Valores' &&
+                      (campo == 'valorPlano' ||
+                          campo == 'descontoPercentual' ||
+                          campo == 'entrada' ||
+                          campo == 'parcelas');
                   final mascara = campo == 'cpfGestante' || campo == 'cpfPai'
                       ? cpfMask
                       : campo == 'telefoneGestante' || campo == 'telefonePai'
@@ -15767,6 +15776,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     width: 260,
                     child: TextField(
                       controller: controller,
+                      enabled: !campoFinanceiroCalculado,
+                      keyboardType: campoNumerico
+                          ? const TextInputType.numberWithOptions(decimal: true)
+                          : null,
                       inputFormatters: mascara == null ? null : [mascara],
                       maxLines:
                           campo == 'descricaoNfse' || campo == 'observacoesBebe'
@@ -15799,9 +15812,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   dadosAtualizados[campo] = controller.text.trim();
                 });
 
-                await salvarEdicaoSecaoGestante(gestante, dadosAtualizados);
+                final salvou = secao == 'Valores'
+                    ? await salvarEdicaoFinanceiraGestante(
+                        gestante,
+                        dadosAtualizados,
+                      )
+                    : await salvarEdicaoSecaoGestante(
+                        gestante,
+                        dadosAtualizados,
+                      );
 
-                if (context.mounted) {
+                if (salvou && context.mounted) {
                   Navigator.of(context).pop();
                 }
               },
@@ -15820,7 +15841,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Future<void> salvarEdicaoSecaoGestante(
+  Future<bool> salvarEdicaoSecaoGestante(
     Map<String, String> gestante,
     Map<String, String> dadosAtualizados,
   ) async {
@@ -15828,7 +15849,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (id == null || id.isEmpty) {
       mostrarMensagem('ID da gestante não encontrado.');
-      return;
+      return false;
     }
 
     try {
@@ -15840,9 +15861,273 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       });
 
       mostrarMensagem('Cadastro atualizado com sucesso.');
+      return true;
     } catch (e) {
       debugPrint('❌ Erro ao editar seção da gestante: $e');
       mostrarMensagem('Erro ao atualizar cadastro.');
+      return false;
+    }
+  }
+
+  Future<bool> salvarEdicaoFinanceiraGestante(
+    Map<String, String> gestante,
+    Map<String, String> dadosInformados,
+  ) async {
+    final gestanteId = (gestante['id'] ?? '').trim();
+    final nome = (gestante['nomeGestante'] ?? '').trim();
+
+    if (gestanteId.isEmpty) {
+      mostrarMensagem('ID da paciente não encontrado.');
+      return false;
+    }
+
+    final valorPlano = converterValor(dadosInformados['valorPlano'] ?? '0');
+    final desconto = converterPercentual(
+      dadosInformados['descontoPercentual'] ?? '0',
+    );
+    final entradaInformada = converterValor(dadosInformados['entrada'] ?? '0');
+    final quantidadeParcelas = int.tryParse(
+      (dadosInformados['parcelas'] ?? '').trim(),
+    );
+
+    if (valorPlano <= 0) {
+      mostrarMensagem('Informe um valor de plano maior que zero.');
+      return false;
+    }
+    if (desconto < 0 || desconto > 1) {
+      mostrarMensagem('O desconto deve estar entre 0% e 100%.');
+      return false;
+    }
+    if (quantidadeParcelas == null ||
+        quantidadeParcelas < 1 ||
+        quantidadeParcelas > 120) {
+      mostrarMensagem('Informe uma quantidade entre 1 e 120 parcelas.');
+      return false;
+    }
+
+    final valorDesconto = valorPlano * desconto;
+    final valorFinal = valorPlano - valorDesconto;
+    if (entradaInformada < 0 || entradaInformada > valorFinal) {
+      mostrarMensagem('A entrada deve ficar entre zero e o valor final.');
+      return false;
+    }
+
+    try {
+      final snapshot = await firestore.collection('parcelas').get();
+      final documentos = snapshot.docs.where((doc) {
+        final dados = doc.data();
+        final idVinculado = (dados['gestanteId'] ?? '').toString().trim();
+        final nomeVinculado = (dados['gestante'] ?? '').toString().trim();
+        return (idVinculado.isNotEmpty && idVinculado == gestanteId) ||
+            (nome.isNotEmpty && nomeVinculado == nome);
+      }).toList();
+
+      bool ehEntrada(Map<String, dynamic> dados) {
+        return (dados['tipo'] ?? '').toString().trim().toLowerCase() ==
+                'entrada' ||
+            (dados['numero'] ?? '').toString().trim() == '0';
+      }
+
+      bool estaPaga(Map<String, dynamic> dados) {
+        final status = (dados['status'] ?? '').toString().trim().toLowerCase();
+        return status == 'pago' || status == 'paga';
+      }
+
+      final entradasPagas = documentos.where((doc) {
+        final dados = doc.data();
+        return ehEntrada(dados) && estaPaga(dados);
+      }).toList();
+      final parcelasPagas = documentos.where((doc) {
+        final dados = doc.data();
+        return !ehEntrada(dados) && estaPaga(dados);
+      }).toList();
+
+      final totalEntradaPaga = entradasPagas.fold<double>(0, (total, doc) {
+        return total + converterValor((doc.data()['valor'] ?? '0').toString());
+      });
+      if (entradasPagas.isNotEmpty &&
+          (entradaInformada - totalEntradaPaga).abs() > 0.009) {
+        mostrarMensagem(
+          'A entrada já foi baixada e não pode ter o valor alterado.',
+        );
+        return false;
+      }
+
+      final numerosPagos = parcelasPagas
+          .map((doc) {
+            return int.tryParse((doc.data()['numero'] ?? '').toString()) ?? 0;
+          })
+          .where((numero) => numero > 0)
+          .toSet();
+      final maiorNumeroPago = numerosPagos.isEmpty
+          ? 0
+          : numerosPagos.reduce((a, b) => a > b ? a : b);
+      if (quantidadeParcelas < parcelasPagas.length ||
+          quantidadeParcelas < maiorNumeroPago) {
+        mostrarMensagem(
+          'Não é possível reduzir para menos parcelas do que as já baixadas.',
+        );
+        return false;
+      }
+
+      final totalParcelasPagas = parcelasPagas.fold<double>(0, (total, doc) {
+        return total + converterValor((doc.data()['valor'] ?? '0').toString());
+      });
+      final saldoParcelado = valorFinal - entradaInformada;
+      final saldoPendente = saldoParcelado - totalParcelasPagas;
+      final quantidadePendentes = quantidadeParcelas - parcelasPagas.length;
+      final quantidadePendentesFinanceiras = saldoPendente > 0.009
+          ? quantidadePendentes
+          : 0;
+
+      if (saldoPendente < -0.009) {
+        mostrarMensagem(
+          'O novo total é menor do que o valor das parcelas já baixadas.',
+        );
+        return false;
+      }
+      if (saldoPendente > 0.009 && quantidadePendentes == 0) {
+        mostrarMensagem(
+          'Aumente o número de parcelas para distribuir o saldo pendente.',
+        );
+        return false;
+      }
+
+      final pendentesComCobranca = documentos.where((doc) {
+        final dados = doc.data();
+        return !estaPaga(dados) &&
+            (dados['asaasPaymentId'] ?? '').toString().trim().isNotEmpty;
+      });
+      if (pendentesComCobranca.isNotEmpty) {
+        mostrarMensagem(
+          'Há cobrança Asaas ativa. Cancele-a antes de alterar o parcelamento.',
+        );
+        return false;
+      }
+
+      final batch = firestore.batch();
+      final agora = formatarDataHora(DateTime.now());
+      final dadosAtualizados = <String, String>{
+        ...dadosInformados,
+        'valorPlano': formatarMoeda(valorPlano),
+        'descontoPercentual': '${(desconto * 100).toStringAsFixed(0)}%',
+        'valorDesconto': formatarMoeda(valorDesconto),
+        'entrada': formatarMoeda(entradaInformada),
+        'parcelas': quantidadeParcelas.toString(),
+        'parcelasPagas': parcelasPagas.length.toString(),
+      };
+
+      final numerosPendentes = <int>[];
+      for (
+        var numero = 1;
+        numero <= quantidadeParcelas &&
+            numerosPendentes.length < quantidadePendentesFinanceiras;
+        numero++
+      ) {
+        if (!numerosPagos.contains(numero)) numerosPendentes.add(numero);
+      }
+
+      final saldoCentavos = (saldoPendente.clamp(0, double.infinity) * 100)
+          .round();
+      final centavosBase = quantidadePendentesFinanceiras == 0
+          ? 0
+          : saldoCentavos ~/ quantidadePendentesFinanceiras;
+      final centavosRestantes = quantidadePendentesFinanceiras == 0
+          ? 0
+          : saldoCentavos % quantidadePendentesFinanceiras;
+      final valorParcelaAtual = quantidadePendentesFinanceiras == 0
+          ? 0.0
+          : (centavosBase + (centavosRestantes > 0 ? 1 : 0)) / 100;
+      dadosAtualizados['valorParcela'] = formatarMoeda(valorParcelaAtual);
+
+      batch.update(
+        firestore.collection('gestantes').doc(gestanteId),
+        dadosAtualizados,
+      );
+
+      final entradasPendentes = documentos.where((doc) {
+        final dados = doc.data();
+        return ehEntrada(dados) && !estaPaga(dados);
+      }).toList();
+      if (entradaInformada > 0 && entradasPagas.isEmpty) {
+        final dadosEntrada = <String, String>{
+          'gestante': nome,
+          'gestanteId': gestanteId,
+          'tipo': 'entrada',
+          'numero': '0',
+          'descricao': 'Entrada',
+          'valor': formatarMoeda(entradaInformada),
+          'vencimento': gerarVencimentoEntrada(),
+          'status': 'Pendente',
+          'editadoEm': agora,
+        };
+        if (entradasPendentes.isEmpty) {
+          batch.set(firestore.collection('parcelas').doc(), dadosEntrada);
+        } else {
+          batch.update(entradasPendentes.first.reference, dadosEntrada);
+          for (final excedente in entradasPendentes.skip(1)) {
+            batch.delete(excedente.reference);
+          }
+        }
+      } else {
+        for (final entrada in entradasPendentes) {
+          batch.delete(entrada.reference);
+        }
+      }
+
+      final parcelasPendentes =
+          documentos.where((doc) {
+            final dados = doc.data();
+            return !ehEntrada(dados) && !estaPaga(dados);
+          }).toList()..sort((a, b) {
+            final numeroA =
+                int.tryParse((a.data()['numero'] ?? '').toString()) ?? 0;
+            final numeroB =
+                int.tryParse((b.data()['numero'] ?? '').toString()) ?? 0;
+            return numeroA.compareTo(numeroB);
+          });
+
+      for (var indice = 0; indice < numerosPendentes.length; indice++) {
+        final numero = numerosPendentes[indice];
+        final centavos = centavosBase + (indice < centavosRestantes ? 1 : 0);
+        final dadosParcela = <String, String>{
+          'gestante': nome,
+          'gestanteId': gestanteId,
+          'tipo': 'parcela',
+          'numero': numero.toString(),
+          'descricao': '$numeroª Parcela',
+          'valor': formatarMoeda(centavos / 100),
+          'vencimento': gerarVencimentoParcelaHistorico(
+            numero,
+            parcelasPagas.length,
+          ),
+          'status': 'Pendente',
+          'editadoEm': agora,
+        };
+
+        if (indice < parcelasPendentes.length) {
+          batch.update(parcelasPendentes[indice].reference, dadosParcela);
+        } else {
+          batch.set(firestore.collection('parcelas').doc(), dadosParcela);
+        }
+      }
+      for (final excedente in parcelasPendentes.skip(numerosPendentes.length)) {
+        batch.delete(excedente.reference);
+      }
+
+      await batch.commit();
+      await carregarParcelasFirestore();
+
+      setState(() {
+        gestante.addAll(dadosAtualizados);
+        gestanteSelecionada = gestante;
+      });
+      mostrarMensagem('Financeiro atualizado e parcelas recalculadas.');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Erro ao editar financeiro da paciente: $e');
+      mostrarMensagem('Erro ao atualizar o financeiro.');
+      return false;
     }
   }
 
@@ -16754,6 +17039,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final valorParcela = gestante['valorParcela'] ?? 'R\$ 0,00';
     final valorEntrada = gestante['entrada'] ?? 'R\$ 0,00';
     final parcelasPagas = int.tryParse(gestante['parcelasPagas'] ?? '0') ?? 0;
+
+    if (converterValor(valorParcela) <= 0 &&
+        converterValor(valorEntrada) <= 0) {
+      debugPrint('Lançamento financeiro ignorado: paciente sem valor.');
+      return;
+    }
 
     Map<String, String> baseFinanceira({
       required String tipo,
@@ -17829,7 +18120,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     ]);
 
     final parcelasDoMes = parcelasFinanceiras.where((p) {
-      return parcelaEhDoMesSelecionado(p);
+      return fincalc.lancamentoFinanceiroValido(p) &&
+          parcelaEhDoMesSelecionado(p);
     }).toList();
 
     for (var p in parcelasDoMes) {
@@ -17866,7 +18158,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaFinanceiro() {
     final parcelasDoMes = parcelasFinanceiras.where((p) {
-      return parcelaEhDoMesSelecionado(p);
+      return fincalc.lancamentoFinanceiroValido(p) &&
+          parcelaEhDoMesSelecionado(p);
     }).toList();
 
     return SingleChildScrollView(

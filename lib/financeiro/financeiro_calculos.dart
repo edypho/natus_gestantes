@@ -38,6 +38,22 @@ double calcularValorRecebido(List<Map<String, String>> gestantes) {
   return total;
 }
 
+/// Indica se o lançamento deve participar do financeiro operacional.
+///
+/// Registros legados sem valor são mantidos no Firestore para auditoria, mas
+/// não devem aparecer na tela nem contaminar os indicadores.
+bool lancamentoFinanceiroValido(Map<String, String> parcela) {
+  final statusRegistro = (parcela['statusRegistro'] ?? '').trim().toLowerCase();
+
+  if (statusRegistro == 'cancelado' ||
+      statusRegistro == 'excluido' ||
+      statusRegistro == 'ignorado') {
+    return false;
+  }
+
+  return converterValor(parcela['valor'] ?? '0') > 0;
+}
+
 double calcularValorAReceberReal(
   List<Map<String, String>> parcelas,
   int mesSelecionado,
@@ -46,7 +62,8 @@ double calcularValorAReceberReal(
   double total = 0;
 
   for (var p in parcelas) {
-    if (parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
         p['status'] == 'Pendente') {
       total += converterValor(p['valor'] ?? '0');
     }
@@ -111,6 +128,7 @@ bool parcelaFoiPagaNoMesSelecionado(
   int mesSelecionado,
   int anoSelecionado,
 ) {
+  if (!lancamentoFinanceiroValido(parcela)) return false;
   if (parcela['status'] != 'Pago') return false;
 
   final dataPagamento = (parcela['dataPagamento'] ?? '').trim();
@@ -181,7 +199,8 @@ double calcularValorAtrasadoMesAtual(
   double total = 0;
 
   for (var p in parcelas) {
-    if (parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
         parcelaEstaAtrasada(p)) {
       total += converterValor(p['valor'] ?? '0');
     }
@@ -198,7 +217,8 @@ int contarParcelasAtrasadasMesSelecionado(
   int total = 0;
 
   for (var p in parcelas) {
-    if (parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
         parcelaEstaAtrasada(p)) {
       total++;
     }
@@ -215,7 +235,8 @@ double calcularTotalPrevistoMesSelecionado(
   double total = 0;
 
   for (var p in parcelas) {
-    if (parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado)) {
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado)) {
       total += converterValor(p['valor'] ?? '0');
     }
   }
