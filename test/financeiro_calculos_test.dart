@@ -76,7 +76,7 @@ void main() {
       );
     });
 
-    test('baixa remove parcela no mês do pagamento e nos seguintes', () {
+    test('parcela paga aparece no mês real do pagamento', () {
       final parcela = {
         'vencimento': '05/08/2026',
         'dataPagamento': '20/07/2026 14:30',
@@ -84,13 +84,24 @@ void main() {
         'valor': 'R\$ 100,00',
       };
 
-      expect(lancamentoFinanceiroVisivelNoPeriodo(parcela, 8, 2026), isFalse);
+      expect(lancamentoFinanceiroVisivelNoPeriodo(parcela, 7, 2026), isTrue);
     });
 
-    test('histórico anterior à baixa é preservado', () {
+    test('parcela paga não aparece fora do mês do pagamento', () {
       final parcela = {
         'vencimento': '05/06/2026',
         'dataPagamento': '20/07/2026 14:30',
+        'status': 'Pago',
+        'valor': 'R\$ 100,00',
+      };
+
+      expect(lancamentoFinanceiroVisivelNoPeriodo(parcela, 6, 2026), isFalse);
+      expect(lancamentoFinanceiroVisivelNoPeriodo(parcela, 8, 2026), isFalse);
+    });
+
+    test('registro legado pago usa o vencimento como fallback', () {
+      final parcela = {
+        'vencimento': '05/06/2026',
         'status': 'Pago',
         'valor': 'R\$ 100,00',
       };

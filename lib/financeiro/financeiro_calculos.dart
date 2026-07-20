@@ -54,51 +54,33 @@ bool lancamentoFinanceiroValido(Map<String, String> parcela) {
   return converterValor(parcela['valor'] ?? '0') > 0;
 }
 
-DateTime? _dataFinanceira(String valor) {
-  final somenteData = valor.trim().split(' ').first;
-  final partes = somenteData.split('/');
-  if (partes.length != 3) return null;
-
-  final dia = int.tryParse(partes[0]);
-  final mes = int.tryParse(partes[1]);
-  final ano = int.tryParse(partes[2]);
-  if (dia == null || mes == null || ano == null) return null;
-
-  final data = DateTime(ano, mes, dia);
-  if (data.day != dia || data.month != mes || data.year != ano) return null;
-  return data;
-}
-
 bool _parcelaPaga(Map<String, String> parcela) {
   final status = (parcela['status'] ?? '').trim().toLowerCase();
   return status == 'pago' || status == 'paga';
 }
 
-/// Regra de competência da tela financeira.
+/// Regra de exibição da lista financeira mensal.
 ///
-/// Uma parcela válida permanece no histórico até o mês anterior à sua baixa.
-/// No mês do pagamento/quitação e nos meses seguintes ela deixa de aparecer e
-/// de compor valores previstos. O recebimento continua sendo contabilizado,
-/// separadamente, no mês real de pagamento.
+/// Parcelas abertas aparecem no mês do vencimento (competência). Parcelas
+/// pagas aparecem no mês em que o valor foi efetivamente recebido (caixa),
+/// usando o vencimento apenas como fallback para registros legados sem
+/// `dataPagamento`.
 bool lancamentoFinanceiroVisivelNoPeriodo(
   Map<String, String> parcela,
   int mesSelecionado,
   int anoSelecionado,
 ) {
-  if (!lancamentoFinanceiroValido(parcela) ||
-      !parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado)) {
-    return false;
+  if (!lancamentoFinanceiroValido(parcela)) return false;
+
+  if (_parcelaPaga(parcela)) {
+    return parcelaFoiPagaNoMesSelecionado(
+      parcela,
+      mesSelecionado,
+      anoSelecionado,
+    );
   }
-  if (!_parcelaPaga(parcela)) return true;
 
-  final dataPagamento =
-      _dataFinanceira(parcela['dataPagamento'] ?? '') ??
-      _dataFinanceira(parcela['vencimento'] ?? '');
-  if (dataPagamento == null) return false;
-
-  final periodoSelecionado = anoSelecionado * 12 + mesSelecionado;
-  final periodoPagamento = dataPagamento.year * 12 + dataPagamento.month;
-  return periodoSelecionado < periodoPagamento;
+  return parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado);
 }
 
 double valorEfetivamenteRecebido(Map<String, String> parcela) {
@@ -140,11 +122,8 @@ double calcularValorAReceberReal(
   double total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroVisivelNoPeriodo(
-          p,
-          mesSelecionado,
-          anoSelecionado,
-        ) &&
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
         p['status'] == 'Pendente') {
       total += converterValor(p['valor'] ?? '0');
     }
@@ -210,7 +189,7 @@ bool parcelaFoiPagaNoMesSelecionado(
   int anoSelecionado,
 ) {
   if (!lancamentoFinanceiroValido(parcela)) return false;
-  if (parcela['status'] != 'Pago') return false;
+  if (!_parcelaPaga(parcela)) return false;
 
   final dataPagamento = (parcela['dataPagamento'] ?? '').trim();
 
@@ -280,11 +259,8 @@ double calcularValorAtrasadoMesAtual(
   double total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroVisivelNoPeriodo(
-          p,
-          mesSelecionado,
-          anoSelecionado,
-        ) &&
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
         parcelaEstaAtrasada(p)) {
       total += converterValor(p['valor'] ?? '0');
     }
@@ -301,11 +277,8 @@ int contarParcelasAtrasadasMesSelecionado(
   int total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroVisivelNoPeriodo(
-          p,
-          mesSelecionado,
-          anoSelecionado,
-        ) &&
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
         parcelaEstaAtrasada(p)) {
       total++;
     }
@@ -322,11 +295,9 @@ double calcularTotalPrevistoMesSelecionado(
   double total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroVisivelNoPeriodo(
-      p,
-      mesSelecionado,
-      anoSelecionado,
-    )) {
+    if (lancamentoFinanceiroValido(p) &&
+        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+        !_parcelaPaga(p)) {
       total += converterValor(p['valor'] ?? '0');
     }
   }
