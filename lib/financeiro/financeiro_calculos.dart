@@ -54,6 +54,84 @@ bool lancamentoFinanceiroValido(Map<String, String> parcela) {
   return converterValor(parcela['valor'] ?? '0') > 0;
 }
 
+DateTime? _dataFinanceira(String valor) {
+  final somenteData = valor.trim().split(' ').first;
+  final partes = somenteData.split('/');
+  if (partes.length != 3) return null;
+
+  final dia = int.tryParse(partes[0]);
+  final mes = int.tryParse(partes[1]);
+  final ano = int.tryParse(partes[2]);
+  if (dia == null || mes == null || ano == null) return null;
+
+  final data = DateTime(ano, mes, dia);
+  if (data.day != dia || data.month != mes || data.year != ano) return null;
+  return data;
+}
+
+bool _parcelaPaga(Map<String, String> parcela) {
+  final status = (parcela['status'] ?? '').trim().toLowerCase();
+  return status == 'pago' || status == 'paga';
+}
+
+/// Regra de competência da tela financeira.
+///
+/// Uma parcela válida permanece no histórico até o mês anterior à sua baixa.
+/// No mês do pagamento/quitação e nos meses seguintes ela deixa de aparecer e
+/// de compor valores previstos. O recebimento continua sendo contabilizado,
+/// separadamente, no mês real de pagamento.
+bool lancamentoFinanceiroVisivelNoPeriodo(
+  Map<String, String> parcela,
+  int mesSelecionado,
+  int anoSelecionado,
+) {
+  if (!lancamentoFinanceiroValido(parcela) ||
+      !parcelaEhDoMesSelecionado(parcela, mesSelecionado, anoSelecionado)) {
+    return false;
+  }
+  if (!_parcelaPaga(parcela)) return true;
+
+  final dataPagamento =
+      _dataFinanceira(parcela['dataPagamento'] ?? '') ??
+      _dataFinanceira(parcela['vencimento'] ?? '');
+  if (dataPagamento == null) return false;
+
+  final periodoSelecionado = anoSelecionado * 12 + mesSelecionado;
+  final periodoPagamento = dataPagamento.year * 12 + dataPagamento.month;
+  return periodoSelecionado < periodoPagamento;
+}
+
+double valorEfetivamenteRecebido(Map<String, String> parcela) {
+  final valorRegistrado = (parcela['valorRecebido'] ?? '').trim();
+  if (valorRegistrado.isNotEmpty) return converterValor(valorRegistrado);
+
+  final valor = converterValor(parcela['valor'] ?? '0');
+  final quitacao =
+      (parcela['quitacaoAntecipada'] ?? '').toLowerCase() == 'true';
+  if (!quitacao) return valor;
+
+  final desconto = converterPercentual(parcela['descontoQuitacao'] ?? '0');
+  return (valor * (1 - desconto)).clamp(0, double.infinity).toDouble();
+}
+
+/// Redistribui um saldo em parcelas, fechando exatamente os centavos.
+///
+/// As parcelas já pagas devem ser descontadas antes desta chamada. Assim, ao
+/// reduzir um acordo de 6x para 4x depois de 2 baixas, a quantidade restante
+/// informada aqui será 2.
+List<double> distribuirSaldoEmParcelas(double saldo, int quantidade) {
+  if (saldo <= 0 || quantidade <= 0) return const [];
+
+  final saldoCentavos = (saldo * 100).round();
+  final centavosBase = saldoCentavos ~/ quantidade;
+  final centavosRestantes = saldoCentavos % quantidade;
+
+  return List<double>.generate(quantidade, (indice) {
+    final centavos = centavosBase + (indice < centavosRestantes ? 1 : 0);
+    return centavos / 100;
+  });
+}
+
 double calcularValorAReceberReal(
   List<Map<String, String>> parcelas,
   int mesSelecionado,
@@ -62,8 +140,11 @@ double calcularValorAReceberReal(
   double total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroValido(p) &&
-        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+    if (lancamentoFinanceiroVisivelNoPeriodo(
+          p,
+          mesSelecionado,
+          anoSelecionado,
+        ) &&
         p['status'] == 'Pendente') {
       total += converterValor(p['valor'] ?? '0');
     }
@@ -184,7 +265,7 @@ double calcularValorRecebidoMesAtual(
 
   for (var p in parcelas) {
     if (parcelaFoiPagaNoMesSelecionado(p, mesSelecionado, anoSelecionado)) {
-      total += converterValor(p['valor'] ?? '0');
+      total += valorEfetivamenteRecebido(p);
     }
   }
 
@@ -199,8 +280,11 @@ double calcularValorAtrasadoMesAtual(
   double total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroValido(p) &&
-        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+    if (lancamentoFinanceiroVisivelNoPeriodo(
+          p,
+          mesSelecionado,
+          anoSelecionado,
+        ) &&
         parcelaEstaAtrasada(p)) {
       total += converterValor(p['valor'] ?? '0');
     }
@@ -217,8 +301,11 @@ int contarParcelasAtrasadasMesSelecionado(
   int total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroValido(p) &&
-        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado) &&
+    if (lancamentoFinanceiroVisivelNoPeriodo(
+          p,
+          mesSelecionado,
+          anoSelecionado,
+        ) &&
         parcelaEstaAtrasada(p)) {
       total++;
     }
@@ -235,8 +322,11 @@ double calcularTotalPrevistoMesSelecionado(
   double total = 0;
 
   for (var p in parcelas) {
-    if (lancamentoFinanceiroValido(p) &&
-        parcelaEhDoMesSelecionado(p, mesSelecionado, anoSelecionado)) {
+    if (lancamentoFinanceiroVisivelNoPeriodo(
+      p,
+      mesSelecionado,
+      anoSelecionado,
+    )) {
       total += converterValor(p['valor'] ?? '0');
     }
   }
@@ -422,7 +512,9 @@ List<Map<String, String>> parcelasPendentesDaGestante(
 
   return parcelas.where((p) {
     final mesmaGestante = (p['gestante'] ?? '').trim().toLowerCase() == nome;
-    return mesmaGestante && p['status'] != 'Pago';
+    return mesmaGestante &&
+        p['status'] != 'Pago' &&
+        lancamentoFinanceiroValido(p);
   }).toList();
 }
 

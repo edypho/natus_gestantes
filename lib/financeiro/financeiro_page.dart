@@ -43,7 +43,11 @@ Widget telaFinanceiroPage({
   required void Function(String mensagem) mostrarMensagem,
 }) {
   final parcelasDoMes = parcelasFinanceiras.where((p) {
-    return lancamentoFinanceiroValido(p) && parcelaEhDoMesSelecionado(p);
+    return lancamentoFinanceiroVisivelNoPeriodo(
+      p,
+      mesSelecionado,
+      anoSelecionado,
+    );
   }).toList();
 
   return SingleChildScrollView(
