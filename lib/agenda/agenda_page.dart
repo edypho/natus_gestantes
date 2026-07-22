@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../shared/natus_app.dart';
+import '../saas/tenant_access_scope.dart';
 import 'agenda_model.dart';
 import 'agenda_service.dart';
 
@@ -9,12 +10,14 @@ class AgendaPage extends StatefulWidget {
   final List<Map<String, String>> gestantes;
   final List<Map<String, String>> enfermeiras;
   final String tipoUsuario;
+  final TenantAccessScope escopoTenant;
 
   const AgendaPage({
     super.key,
     required this.gestantes,
     required this.enfermeiras,
     required this.tipoUsuario,
+    required this.escopoTenant,
   });
 
   @override
@@ -22,7 +25,7 @@ class AgendaPage extends StatefulWidget {
 }
 
 class _AgendaPageState extends State<AgendaPage> {
-  final AgendaService _service = AgendaService();
+  late final AgendaService _service;
   final TextEditingController _buscaController = TextEditingController();
 
   DateTime _mesExibido = DateTime(DateTime.now().year, DateTime.now().month);
@@ -54,17 +57,25 @@ class _AgendaPageState extends State<AgendaPage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _service = AgendaService(escopo: widget.escopoTenant);
+  }
+
+  @override
   void dispose() {
     _buscaController.dispose();
     super.dispose();
   }
 
   bool get _usuarioGestante => widget.tipoUsuario == 'gestante';
+  bool get _usuarioAdmin => widget.tipoUsuario == 'admin';
 
   bool get _usuarioAdminOuEnfermeira =>
       widget.tipoUsuario == 'admin' ||
       widget.tipoUsuario == 'enfermeira' ||
-      widget.tipoUsuario == 'obstetra';
+      widget.tipoUsuario == 'obstetra' ||
+      widget.tipoUsuario == 'profissional';
 
   @override
   Widget build(BuildContext context) {
@@ -646,9 +657,10 @@ class _AgendaPageState extends State<AgendaPage> {
                   _confirmarExclusao(evento);
                 }
               },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'editar', child: Text('Editar')),
-                PopupMenuItem(value: 'excluir', child: Text('Excluir')),
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'editar', child: Text('Editar')),
+                if (_usuarioAdmin)
+                  const PopupMenuItem(value: 'excluir', child: Text('Excluir')),
               ],
             ),
         ],
@@ -764,6 +776,28 @@ class _AgendaPageState extends State<AgendaPage> {
         : '09:00';
 
     final gestantesDisponiveis = _gestantesDisponiveisParaAgenda();
+    final pacienteDoEventoId = (evento?.gestanteId ?? '').trim();
+    if (editando &&
+        pacienteDoEventoId.isNotEmpty &&
+        !gestantesDisponiveis.any(
+          (gestante) => _idGestante(gestante) == pacienteDoEventoId,
+        )) {
+      final pacienteCadastrada = widget.gestantes.firstWhere(
+        (gestante) => _idGestante(gestante) == pacienteDoEventoId,
+        orElse: () => <String, String>{},
+      );
+      gestantesDisponiveis.add(
+        pacienteCadastrada.isNotEmpty
+            ? pacienteCadastrada
+            : <String, String>{
+                'id': pacienteDoEventoId,
+                'uidGestante': evento.gestanteUid,
+                'nomeGestante': evento.gestanteNome.isEmpty
+                    ? 'Paciente vinculada'
+                    : evento.gestanteNome,
+              },
+      );
+    }
     final enfermeirasDisponiveis = widget.enfermeiras
         .where((e) => (e['nome'] ?? '').trim().isNotEmpty)
         .toList();
@@ -976,13 +1010,22 @@ class _AgendaPageState extends State<AgendaPage> {
                       (e) => _idEnfermeira(e) == enfermeiraSelecionadaId,
                       orElse: () => {},
                     );
+                    final gestanteUid =
+                        (gestante['uidGestante'] ?? '').trim().isNotEmpty
+                        ? (gestante['uidGestante'] ?? '').trim()
+                        : evento?.gestanteUid ?? '';
+                    final gestanteNome =
+                        (gestante['nomeGestante'] ?? '').trim().isNotEmpty
+                        ? (gestante['nomeGestante'] ?? '').trim()
+                        : evento?.gestanteNome ?? '';
 
                     final eventoSalvar = AgendaEvento(
                       id: evento?.id ?? '',
                       titulo: titulo,
                       tipo: tipo,
                       gestanteId: gestanteSelecionadaId,
-                      gestanteNome: gestante['nomeGestante'] ?? '',
+                      gestanteUid: gestanteUid,
+                      gestanteNome: gestanteNome,
                       enfermeiraId: enfermeiraSelecionadaId,
                       enfermeiraNome: enfermeira['nome'] ?? '',
                       data: _formatarDataIso(dataSelecionada),
@@ -1060,8 +1103,8 @@ class _AgendaPageState extends State<AgendaPage> {
   }
 
   Future<void> _confirmarExclusao(AgendaEvento evento) async {
-    if (_usuarioGestante) {
-      _mensagem('A agenda da gestante é somente para visualização.');
+    if (!_usuarioAdmin) {
+      _mensagem('Somente o administrador pode excluir compromissos.');
       return;
     }
 
@@ -1110,12 +1153,9 @@ class _AgendaPageState extends State<AgendaPage> {
       return _service.ouvirEventosDoPeriodo(inicioBusca, fimBusca);
     }
 
-    final idGestante = _idGestante(_gestanteLogada());
-
-    // Para gestante, a consulta segue por ID da ficha. Como o volume de eventos
-    // de uma única paciente é pequeno, evitamos criar uma exigência extra de
-    // índice composto no Firestore neste primeiro refinamento mobile.
-    return _service.ouvirEventosDaGestante(idGestante);
+    // A identidade da paciente vem do escopo autenticado, não de um valor
+    // livre recebido pela interface.
+    return _service.ouvirEventosDaPaciente();
   }
 
   Map<String, String> _gestanteLogada() {

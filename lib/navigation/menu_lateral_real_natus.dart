@@ -55,7 +55,9 @@ Widget menuLateralRealNatus({
       ];
     }
 
-    if (tipoUsuario == 'enfermeira' || tipoUsuario == 'obstetra') {
+    if (tipoUsuario == 'enfermeira' ||
+        tipoUsuario == 'obstetra' ||
+        tipoUsuario == 'profissional') {
       return const [
         _NatusMenuItem('Dashboard', Icons.dashboard_rounded),
         _NatusMenuItem('Mapa', Icons.map_rounded),

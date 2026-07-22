@@ -2,16 +2,20 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../core/firebase_globals.dart';
+import '../saas/tenant_access_scope.dart';
+import '../services/tenant_firestore_service.dart';
 import '../shared/natus_app.dart';
 
 class NatusPainelNotificacoesFlutuante extends StatelessWidget {
   final String tipoUsuario;
   final String uidUsuario;
+  final TenantAccessScope escopoTenant;
 
   const NatusPainelNotificacoesFlutuante({
     super.key,
     required this.tipoUsuario,
     required this.uidUsuario,
+    required this.escopoTenant,
   });
 
   String get tipoConsulta {
@@ -109,8 +113,12 @@ class NatusPainelNotificacoesFlutuante extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stream = firestore
-        .collection('notificacoesCentral')
+    final tenantFirestore = TenantFirestoreService(
+      firestore: firestore,
+      escopo: escopoTenant,
+    );
+    final stream = tenantFirestore
+        .consultaClinica('notificacoesCentral')
         .where('destinatariosTipos', arrayContains: tipoConsulta)
         .orderBy('criadoEm', descending: true)
         .limit(20)

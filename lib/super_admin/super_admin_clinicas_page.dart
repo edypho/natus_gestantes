@@ -20,9 +20,7 @@ class SuperAdminClinicasPage extends StatelessWidget {
         children: [
           const Text(
             'Listagem e acompanhamento das clínicas SaaS cadastradas.',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
           SuperAdminFirestoreList(
@@ -101,9 +99,9 @@ class SuperAdminClinicasPage extends StatelessWidget {
                           : () async {
                               final ok = await confirmarAcaoSuperAdmin(
                                 context: context,
-                                titulo: 'Excluir clínica definitivamente',
+                                titulo: 'Desativar clínica',
                                 mensagem:
-                                    'ATENÇÃO: a clínica $nome será apagada diretamente do Firebase, junto com usuários SaaS e assinaturas vinculadas. Essa ação não pode ser desfeita.',
+                                    'A clínica $nome será marcada como excluída e perderá o acesso. Os dados serão preservados para auditoria e possível reativação.',
                               );
 
                               if (!ok) return;
@@ -112,7 +110,7 @@ class SuperAdminClinicasPage extends StatelessWidget {
                                 clinicaId: doc.id,
                               );
                             },
-                      child: const Text('Excluir definitivo'),
+                      child: const Text('Desativar'),
                     ),
                   ],
                 ),

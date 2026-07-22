@@ -12,7 +12,7 @@ class NatusCardGestanteLista extends StatelessWidget {
   final String statusNormalizado;
   final bool mostrarFinanceiro;
   final VoidCallback onAbrir;
-  final VoidCallback onExcluir;
+  final VoidCallback? onExcluir;
 
   const NatusCardGestanteLista({
     super.key,
@@ -149,7 +149,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                   ),
                   onSelected: (opcao) {
                     if (opcao == 'abrir') onAbrir();
-                    if (opcao == 'excluir') onExcluir();
+                    if (opcao == 'excluir') onExcluir?.call();
                   },
                   itemBuilder: (context) => [
                     PopupMenuItem(
@@ -166,20 +166,21 @@ class NatusCardGestanteLista extends StatelessWidget {
                         ],
                       ),
                     ),
-                    PopupMenuItem(
-                      value: 'excluir',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.delete_outline,
-                            size: 18,
-                            color: Color(0xFFB3413B),
-                          ),
-                          SizedBox(width: 10),
-                          Text('Excluir'),
-                        ],
+                    if (onExcluir != null)
+                      PopupMenuItem(
+                        value: 'excluir',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: Color(0xFFB3413B),
+                            ),
+                            SizedBox(width: 10),
+                            Text('Excluir'),
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ],

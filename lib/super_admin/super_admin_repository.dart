@@ -1,14 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import 'super_admin_auth_config.dart';
-import 'super_admin_auth_service.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class SuperAdminRepository {
   final FirebaseFirestore firestore;
 
-  SuperAdminRepository({
-    FirebaseFirestore? firestore,
-  }) : firestore = firestore ?? FirebaseFirestore.instance;
+  SuperAdminRepository({FirebaseFirestore? firestore})
+    : firestore = firestore ?? FirebaseFirestore.instance;
 
   CollectionReference<Map<String, dynamic>> get clinicas {
     return firestore.collection('clinicasSaaS');
@@ -48,105 +46,66 @@ class SuperAdminRepository {
         .snapshots();
   }
 
-  Future<DocumentReference<Map<String, dynamic>>> criarClinicaComAdmin({
+  Future<void> _validarUsuarioSaaSMutavel(String usuarioId) async {
+    final uid = usuarioId.trim();
+    if (uid.isEmpty) {
+      throw ArgumentError('Usuário não identificado.');
+    }
+    if (FirebaseAuth.instance.currentUser?.uid == uid) {
+      throw StateError('Você não pode alterar o próprio acesso Super Admin.');
+    }
+
+    final documentos = await Future.wait([
+      usuariosApp.doc(uid).get(),
+      usuariosSaaS.doc(uid).get(),
+    ]);
+    final dados = documentos.first.data() ?? documentos.last.data();
+    if (dados == null) {
+      throw StateError('Usuário não encontrado.');
+    }
+
+    String perfil(dynamic valor) =>
+        (valor ?? '').toString().trim().replaceAll('_', '').toLowerCase();
+    final tipo = perfil(dados['tipo']);
+    final tipoUsuario = perfil(dados['tipoUsuario']);
+    if (tipo == 'superadmin' || tipoUsuario == 'superadmin') {
+      throw StateError(
+        'Contas Super Admin exigem um fluxo administrativo externo.',
+      );
+    }
+  }
+
+  Future<bool> criarClinicaComAdmin({
     required String nomeClinica,
     required String nomeAdmin,
     required String emailAdmin,
     required String plano,
     required double valorAssinatura,
-    required String senhaTemporaria,
   }) async {
-    final senhaSegura = senhaTemporaria.trim().isEmpty
-        ? SuperAdminAuthConfig.senhaTemporariaPadrao
-        : senhaTemporaria.trim();
-
-    if (senhaSegura.length < SuperAdminAuthConfig.tamanhoMinimoSenha) {
-      throw Exception(
-        'A senha temporária precisa ter pelo menos '
-        '${SuperAdminAuthConfig.tamanhoMinimoSenha} caracteres.',
-      );
+    final emailNormalizado = emailAdmin.trim().toLowerCase();
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'criarClinicaComAdminSaaS',
+    );
+    final resposta = await callable.call({
+      'nomeClinica': nomeClinica.trim(),
+      'nomeAdmin': nomeAdmin.trim(),
+      'emailAdmin': emailNormalizado,
+      'plano': plano.trim(),
+      'valorAssinatura': valorAssinatura,
+    });
+    final resultado = Map<String, dynamic>.from(resposta.data as Map);
+    if (resultado['sucesso'] != true) {
+      throw StateError('O servidor não confirmou a criação da clínica.');
     }
 
-    final authService = SuperAdminAuthService();
-
-    final credencial = await authService.criarAdminClinicaAuth(
-      email: emailAdmin,
-      senhaTemporaria: senhaSegura,
-    );
-
-    final uidAuth = credencial.user?.uid ?? '';
-
-    final batch = firestore.batch();
-
-    final clinicaRef = clinicas.doc();
-    final usuarioSaaSRef = usuariosSaaS.doc(uidAuth);
-    final usuarioAppRef = usuariosApp.doc(uidAuth);
-    final assinaturaRef = assinaturas.doc();
-    final logRef = logs.doc();
-
-    batch.set(clinicaRef, {
-      'id': clinicaRef.id,
-      'nome': nomeClinica,
-      'emailAdmin': emailAdmin,
-      'plano': plano,
-      'status': 'teste',
-      'adminDonoId': clinicaRef.id,
-      'adminUid': uidAuth,
-      'criadoEm': FieldValue.serverTimestamp(),
-    });
-
-    final usuarioBase = {
-      'id': uidAuth,
-      'uid': uidAuth,
-      'nome': nomeAdmin,
-      'email': emailAdmin,
-      'tipo': 'admin',
-      'tipoUsuario': 'admin',
-      'clinicaId': clinicaRef.id,
-      'adminDonoId': clinicaRef.id,
-      'status': 'ativo',
-      'senhaTemporaria': senhaSegura,
-      'primeiroLogin': SuperAdminAuthConfig.primeiroLoginObrigatorio,
-      'authCriado': true,
-      'criadoViaSuperAdmin': true,
-      'criadoEm': FieldValue.serverTimestamp(),
-    };
-
-    batch.set(usuarioSaaSRef, usuarioBase);
-    batch.set(usuarioAppRef, usuarioBase);
-
-    batch.set(assinaturaRef, {
-      'id': assinaturaRef.id,
-      'clinicaId': clinicaRef.id,
-      'clinicaNome': nomeClinica,
-      'emailAdmin': emailAdmin,
-      'plano': plano,
-      'status': 'ativa',
-      'valor': valorAssinatura,
-      'vencimento': Timestamp.fromDate(
-        DateTime.now().add(const Duration(days: 30)),
-      ),
-      'criadoEm': FieldValue.serverTimestamp(),
-    });
-
-    batch.set(logRef, {
-      'acao': 'criar_clinica_com_admin_saas_auth_real',
-      'dados': {
-        'clinicaId': clinicaRef.id,
-        'adminUid': uidAuth,
-        'nomeClinica': nomeClinica,
-        'nomeAdmin': nomeAdmin,
-        'emailAdmin': emailAdmin,
-        'plano': plano,
-        'authCriado': true,
-        'senhaTemporariaDefinida': true,
-      },
-      'criadoEm': FieldValue.serverTimestamp(),
-    });
-
-    await batch.commit();
-
-    return clinicaRef;
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(
+        email: emailNormalizado,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> alterarStatusAssinatura({
@@ -160,10 +119,7 @@ class SuperAdminRepository {
 
     await registrarLog(
       acao: 'alterar_status_assinatura',
-      dados: {
-        'assinaturaId': assinaturaId,
-        'status': status,
-      },
+      dados: {'assinaturaId': assinaturaId, 'status': status},
     );
   }
 
@@ -171,9 +127,24 @@ class SuperAdminRepository {
     required String clinicaId,
     required String status,
   }) async {
+    if (clinicaId.trim().isEmpty) {
+      throw ArgumentError('Clínica não identificada.');
+    }
+    if (!const {
+      'ativa',
+      'teste',
+      'pausada',
+      'bloqueada',
+      'excluida',
+    }.contains(status)) {
+      throw ArgumentError('Status de clínica inválido.');
+    }
+
     final agora = FieldValue.serverTimestamp();
 
     final dados = <String, dynamic>{
+      'clinicaId': clinicaId,
+      'adminDonoId': clinicaId,
       'status': status,
       'atualizadoEm': agora,
     };
@@ -190,17 +161,26 @@ class SuperAdminRepository {
       dados['reativadaEm'] = agora;
     }
 
-    await clinicas.doc(clinicaId).set(
-          dados,
-          SetOptions(merge: true),
-        );
+    if (status == 'excluida') {
+      dados['excluidaEm'] = agora;
+    }
+
+    final legadoRef = clinicas.doc(clinicaId);
+    final canonicoRef = firestore.collection('clinicas').doc(clinicaId);
+    final resultados = await Future.wait([legadoRef.get(), canonicoRef.get()]);
+    final dadosLegados = resultados.first.data() ?? <String, dynamic>{};
+    final dadosCanonicos = resultados.last.exists
+        ? dados
+        : <String, dynamic>{...dadosLegados, 'id': clinicaId, ...dados};
+
+    final batch = firestore.batch();
+    batch.set(legadoRef, dados, SetOptions(merge: true));
+    batch.set(canonicoRef, dadosCanonicos, SetOptions(merge: true));
+    await batch.commit();
 
     await registrarLog(
       acao: 'alterar_status_clinica_saas',
-      dados: {
-        'clinicaId': clinicaId,
-        'status': status,
-      },
+      dados: {'clinicaId': clinicaId, 'status': status},
     );
   }
 
@@ -208,12 +188,14 @@ class SuperAdminRepository {
     required String usuarioId,
     required String status,
   }) async {
+    await _validarUsuarioSaaSMutavel(usuarioId);
+    if (!const {'ativo', 'inativo', 'bloqueado'}.contains(status)) {
+      throw ArgumentError('Status de usuário inválido.');
+    }
+
     final agora = FieldValue.serverTimestamp();
 
-    final dados = <String, dynamic>{
-      'status': status,
-      'atualizadoEm': agora,
-    };
+    final dados = <String, dynamic>{'status': status, 'atualizadoEm': agora};
 
     if (status == 'bloqueado') {
       dados['bloqueadoEm'] = agora;
@@ -221,87 +203,56 @@ class SuperAdminRepository {
 
     if (status == 'ativo') {
       dados['reativadoEm'] = agora;
+      dados['excluidoLogicamente'] = false;
+      dados['excluidoEm'] = FieldValue.delete();
     }
 
-    await usuariosSaaS.doc(usuarioId).set(
-          dados,
-          SetOptions(merge: true),
-        );
+    await usuariosSaaS.doc(usuarioId).set(dados, SetOptions(merge: true));
 
-    await usuariosApp.doc(usuarioId).set(
-          dados,
-          SetOptions(merge: true),
-        );
+    await usuariosApp.doc(usuarioId).set(dados, SetOptions(merge: true));
 
     await registrarLog(
       acao: 'alterar_status_usuario_saas',
-      dados: {
-        'usuarioId': usuarioId,
-        'status': status,
-      },
+      dados: {'usuarioId': usuarioId, 'status': status},
     );
   }
 
-  Future<void> excluirClinicaLogicamente({
-    required String clinicaId,
-  }) async {
-    final usuariosDaClinica = await usuariosSaaS
-        .where('clinicaId', isEqualTo: clinicaId)
-        .get();
-
-    final usuariosAppDaClinica = await usuariosApp
-        .where('clinicaId', isEqualTo: clinicaId)
-        .get();
-
-    final assinaturasDaClinica = await assinaturas
-        .where('clinicaId', isEqualTo: clinicaId)
-        .get();
+  Future<void> excluirClinicaLogicamente({required String clinicaId}) async {
+    await alterarStatusClinica(clinicaId: clinicaId, status: 'excluida');
 
     await registrarLog(
-      acao: 'excluir_clinica_saas_fisicamente',
-      dados: {
-        'clinicaId': clinicaId,
-        'usuariosSaaSExcluidos': usuariosDaClinica.docs.length,
-        'usuariosAppExcluidos': usuariosAppDaClinica.docs.length,
-        'assinaturasExcluidas': assinaturasDaClinica.docs.length,
-      },
+      acao: 'excluir_clinica_saas_logicamente',
+      dados: {'clinicaId': clinicaId},
     );
-
-    final batch = firestore.batch();
-
-    for (final usuario in usuariosDaClinica.docs) {
-      batch.delete(usuario.reference);
-    }
-
-    for (final usuario in usuariosAppDaClinica.docs) {
-      batch.delete(usuario.reference);
-    }
-
-    for (final assinatura in assinaturasDaClinica.docs) {
-      batch.delete(assinatura.reference);
-    }
-
-    batch.delete(clinicas.doc(clinicaId));
-
-    await batch.commit();
   }
 
   Future<void> excluirUsuarioSaaSLogicamente({
     required String usuarioId,
   }) async {
-    await registrarLog(
-      acao: 'excluir_usuario_saas_fisicamente',
-      dados: {
-        'usuarioId': usuarioId,
-      },
-    );
+    await alterarStatusUsuarioSaaS(usuarioId: usuarioId, status: 'bloqueado');
 
+    final dadosExclusao = <String, dynamic>{
+      'excluidoLogicamente': true,
+      'excluidoEm': FieldValue.serverTimestamp(),
+      'atualizadoEm': FieldValue.serverTimestamp(),
+    };
     final batch = firestore.batch();
-
-    batch.delete(usuariosSaaS.doc(usuarioId));
-    batch.delete(usuariosApp.doc(usuarioId));
-
+    batch.set(
+      usuariosSaaS.doc(usuarioId),
+      dadosExclusao,
+      SetOptions(merge: true),
+    );
+    batch.set(
+      usuariosApp.doc(usuarioId),
+      dadosExclusao,
+      SetOptions(merge: true),
+    );
     await batch.commit();
+
+    await registrarLog(
+      acao: 'excluir_usuario_saas_logicamente',
+      dados: {'usuarioId': usuarioId},
+    );
   }
 
   Future<void> registrarLog({

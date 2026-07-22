@@ -1,40 +1,17 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-
-import '../firebase_options.dart';
-
+/// Compatibilidade temporária para código legado.
+///
+/// A criação de usuários no cliente foi desativada. Novas clínicas e seus
+/// administradores devem ser criados exclusivamente pela Cloud Function
+/// autenticada `criarClinicaComAdminSaaS`.
+@Deprecated('Use SuperAdminRepository.criarClinicaComAdmin.')
 class SuperAdminAuthService {
-  static const String appSecundarioNome = 'superAdminCriacaoUsuarioSaaS';
-
-  Future<UserCredential> criarAdminClinicaAuth({
+  @Deprecated('A criação direta no Firebase Auth foi desativada.')
+  Future<Never> criarAdminClinicaAuth({
     required String email,
     required String senhaTemporaria,
   }) async {
-    FirebaseApp appSecundario;
-
-    try {
-      appSecundario = Firebase.app(appSecundarioNome);
-    } catch (_) {
-      appSecundario = await Firebase.initializeApp(
-        name: appSecundarioNome,
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    }
-
-    final authSecundario = FirebaseAuth.instanceFor(app: appSecundario);
-
-    try {
-      final credencial = await authSecundario.createUserWithEmailAndPassword(
-        email: email,
-        password: senhaTemporaria,
-      );
-
-      await authSecundario.signOut();
-
-      return credencial;
-    } catch (_) {
-      await authSecundario.signOut();
-      rethrow;
-    }
+    throw UnsupportedError(
+      'Criação direta de usuário desativada. Use o backend autenticado.',
+    );
   }
 }

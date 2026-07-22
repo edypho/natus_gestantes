@@ -1,4 +1,6 @@
 import '../core/firebase_globals.dart';
+import '../saas/tenant_access_scope.dart';
+import '../services/tenant_firestore_service.dart';
 
 /// Fonte de dados do Natus — buscas no Firestore isoladas da UI.
 ///
@@ -7,8 +9,17 @@ import '../core/firebase_globals.dart';
 /// Isso permite testar a UI sem Firestore e reutilizar as buscas em
 /// outros módulos (relatórios, app da gestante).
 
-Future<List<Map<String, String>>> buscarContracoes() async {
-  final resultado = await firestore.collection('contracoes').get();
+TenantFirestoreService _tenant(TenantAccessScope escopo) {
+  return TenantFirestoreService(firestore: firestore, escopo: escopo);
+}
+
+Future<List<Map<String, String>>> buscarContracoes(
+  TenantAccessScope escopo,
+) async {
+  final service = _tenant(escopo);
+  final resultado = await service
+      .consultaDoPaciente('contracoes', campoUid: 'uidGestante')
+      .get();
 
   return resultado.docs.map((doc) {
     final dados = doc.data();
@@ -19,20 +30,29 @@ Future<List<Map<String, String>>> buscarContracoes() async {
   }).toList();
 }
 
-Future<List<Map<String, dynamic>>> buscarPlanos() async {
-  final resultado = await firestore
-      .collection('planos')
-      .orderBy('nomePlano')
-      .get();
+Future<List<Map<String, dynamic>>> buscarPlanos(
+  TenantAccessScope escopo,
+) async {
+  final resultado = await _tenant(escopo).consultaClinica('planos').get();
 
-  return resultado.docs.map((doc) {
+  final lista = resultado.docs.map((doc) {
     final dados = doc.data();
     return {'id': doc.id, ...dados};
   }).toList();
+
+  lista.sort(
+    (a, b) => (a['nomePlano'] ?? '').toString().compareTo(
+      (b['nomePlano'] ?? '').toString(),
+    ),
+  );
+
+  return lista;
 }
 
-Future<List<Map<String, String>>> buscarEnfermeiras() async {
-  final resultado = await firestore.collection('enfermeiras').get();
+Future<List<Map<String, String>>> buscarEnfermeiras(
+  TenantAccessScope escopo,
+) async {
+  final resultado = await _tenant(escopo).consultaClinica('enfermeiras').get();
 
   return resultado.docs.map((doc) {
     final dados = doc.data();
@@ -48,8 +68,10 @@ Future<List<Map<String, String>>> buscarEnfermeiras() async {
   }).toList();
 }
 
-Future<List<Map<String, String>>> buscarObstetras() async {
-  final resultado = await firestore.collection('obstetras').get();
+Future<List<Map<String, String>>> buscarObstetras(
+  TenantAccessScope escopo,
+) async {
+  final resultado = await _tenant(escopo).consultaClinica('obstetras').get();
 
   return resultado.docs.map((doc) {
     final dados = doc.data();
@@ -65,8 +87,10 @@ Future<List<Map<String, String>>> buscarObstetras() async {
   }).toList();
 }
 
-Future<List<Map<String, String>>> buscarBiblioteca() async {
-  final resultado = await firestore.collection('biblioteca').get();
+Future<List<Map<String, String>>> buscarBiblioteca(
+  TenantAccessScope escopo,
+) async {
+  final resultado = await _tenant(escopo).consultaClinica('biblioteca').get();
 
   final lista = resultado.docs.map((doc) {
     final dados = doc.data();
@@ -89,8 +113,12 @@ Future<List<Map<String, String>>> buscarBiblioteca() async {
   return lista;
 }
 
-Future<List<Map<String, String>>> buscarAtendimentos() async {
-  final resultado = await firestore.collection('atendimentos').get();
+Future<List<Map<String, String>>> buscarAtendimentos(
+  TenantAccessScope escopo,
+) async {
+  if (escopo.ehPaciente) return const <Map<String, String>>[];
+
+  final resultado = await _tenant(escopo).consultaClinica('atendimentos').get();
 
   return resultado.docs.map((doc) {
     final dados = doc.data();
@@ -101,8 +129,12 @@ Future<List<Map<String, String>>> buscarAtendimentos() async {
   }).toList();
 }
 
-Future<List<Map<String, String>>> buscarGestantes() async {
-  final resultado = await firestore.collection('gestantes').get();
+Future<List<Map<String, String>>> buscarGestantes(
+  TenantAccessScope escopo,
+) async {
+  final resultado = await _tenant(
+    escopo,
+  ).consultaDoPaciente('gestantes', campoUid: 'uidGestante').get();
 
   return resultado.docs.map((doc) {
     final dados = doc.data();

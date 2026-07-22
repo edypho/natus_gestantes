@@ -1,54 +1,144 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+import '../core/usuario_tipos.dart';
 
 class SuperAdminAccessGuard {
+  static const Set<String> _perfisClinicaPermitidos = {
+    'admin',
+    'enfermeira',
+    'obstetra',
+    'profissional',
+    'gestante',
+  };
+
   static bool statusClinicaPermiteAcesso(String? status) {
-    return status == 'ativa' || status == 'teste';
+    final statusNormalizado = status?.trim().toLowerCase() ?? '';
+    return statusNormalizado == 'ativa' || statusNormalizado == 'teste';
   }
 
   static bool statusUsuarioPermiteAcesso(String? status) {
-    return status == 'ativo';
+    return status?.trim().toLowerCase() == 'ativo';
+  }
+
+  static bool clinicaCorrespondeAoTenant(
+    Map<String, dynamic> clinica,
+    String tenantId,
+  ) {
+    final tenantNormalizado = tenantId.trim();
+    return tenantNormalizado.isNotEmpty &&
+        _tenantId(clinica) == tenantNormalizado;
   }
 
   static Future<bool> usuarioPodeAcessar({
     required String uid,
+    bool? superAdminVerificado,
   }) async {
-    final usuarioDoc = await FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(uid)
-        .get();
-
-    final usuario = usuarioDoc.data();
-
-    if (usuario == null) {
+    final uidNormalizado = uid.trim();
+    if (uidNormalizado.isEmpty) {
       return false;
     }
 
-    final statusUsuario = usuario['status']?.toString() ?? 'ativo';
+    try {
+      final usuarioDoc = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(uidNormalizado)
+          .get();
+      final usuario = usuarioDoc.data();
 
-    if (!statusUsuarioPermiteAcesso(statusUsuario)) {
+      if (usuario == null ||
+          !statusUsuarioPermiteAcesso(usuario['status']?.toString())) {
+        return false;
+      }
+
+      final perfil = _perfilNormalizado(usuario);
+      if (perfil == null) {
+        return false;
+      }
+
+      if (perfil == 'superAdmin') {
+        if (superAdminVerificado != null) {
+          return superAdminVerificado;
+        }
+
+        final usuarioAuth = FirebaseAuth.instance.currentUser;
+        if (usuarioAuth == null || usuarioAuth.uid != uidNormalizado) {
+          return false;
+        }
+
+        final token = await usuarioAuth.getIdTokenResult(true);
+        return token.claims?['superAdmin'] == true;
+      }
+
+      final tenantId = _tenantId(usuario);
+      if (tenantId.isEmpty) {
+        return false;
+      }
+
+      final clinicas = await Future.wait([
+        FirebaseFirestore.instance.collection('clinicas').doc(tenantId).get(),
+        FirebaseFirestore.instance
+            .collection('clinicasSaaS')
+            .doc(tenantId)
+            .get(),
+      ]);
+      final clinica = clinicas.first.exists
+          ? clinicas.first.data()
+          : clinicas.last.data();
+
+      if (clinica == null) {
+        return false;
+      }
+
+      return clinicaCorrespondeAoTenant(clinica, tenantId) &&
+          statusClinicaPermiteAcesso(clinica['status']?.toString());
+    } catch (_) {
       return false;
     }
+  }
 
-    final adminDonoId = usuario['adminDonoId']?.toString() ?? '';
+  static String? _perfilNormalizado(Map<String, dynamic> usuario) {
+    final tipo = usuario['tipo']?.toString().trim() ?? '';
+    final tipoUsuario = usuario['tipoUsuario']?.toString().trim() ?? '';
 
-    if (adminDonoId.isEmpty) {
-      return true;
+    if (tipo.isEmpty && tipoUsuario.isEmpty) {
+      return null;
     }
 
-    final clinicaDoc = await FirebaseFirestore.instance
-        .collection('clinicasSaaS')
-        .doc(adminDonoId)
-        .get();
+    final perfilTipo = tipo.isEmpty ? '' : normalizarTipoUsuarioNatus(tipo);
+    final perfilTipoUsuario = tipoUsuario.isEmpty
+        ? ''
+        : normalizarTipoUsuarioNatus(tipoUsuario);
 
-    final clinica = clinicaDoc.data();
-
-    if (clinica == null) {
-      return true;
+    if (perfilTipo.isNotEmpty &&
+        perfilTipoUsuario.isNotEmpty &&
+        perfilTipo != perfilTipoUsuario) {
+      return null;
     }
 
-    final statusClinica = clinica['status']?.toString() ?? 'ativa';
+    final perfil = perfilTipo.isNotEmpty ? perfilTipo : perfilTipoUsuario;
+    if (perfil == 'superAdmin' || _perfisClinicaPermitidos.contains(perfil)) {
+      return perfil;
+    }
 
-    return statusClinicaPermiteAcesso(statusClinica);
+    return null;
+  }
+
+  static String _tenantId(Map<String, dynamic> usuario) {
+    final adminDonoId = usuario['adminDonoId']?.toString().trim() ?? '';
+    final clinicaId = usuario['clinicaId']?.toString().trim() ?? '';
+
+    if (adminDonoId.isNotEmpty &&
+        clinicaId.isNotEmpty &&
+        adminDonoId != clinicaId) {
+      return '';
+    }
+
+    if (adminDonoId.isNotEmpty) {
+      return adminDonoId;
+    }
+
+    return clinicaId;
   }
 
   static const String mensagemAcessoBloqueado =

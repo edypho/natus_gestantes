@@ -31,7 +31,7 @@ class SuperAdminDashboard extends StatelessWidget {
           const SuperAdminStatsGrid(),
           const SizedBox(height: 28),
           const Text(
-            'Gestantes Ativas Por Plano',
+            'Clínicas ativas por plano',
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w700,
@@ -40,13 +40,13 @@ class SuperAdminDashboard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Resumo rápido dos planos ativos cadastrados nas pacientes.',
+            'Distribuição comercial da base SaaS sem expor dados clínicos.',
             style: TextStyle(color: Colors.grey.shade700),
           ),
           const SizedBox(height: 18),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
-                .collection('gestantes')
+                .collection('clinicasSaaS')
                 .snapshots(),
             builder: (context, snapshot) {
               final docs = snapshot.data?.docs ?? [];
@@ -54,28 +54,12 @@ class SuperAdminDashboard extends StatelessWidget {
 
               for (final doc in docs) {
                 final dados = doc.data();
-                final status = (dados['statusGestante'] ?? '')
-                    .toString()
-                    .trim()
-                    .toLowerCase();
-                final historico = (dados['historico'] ?? '')
+                final status = (dados['status'] ?? '')
                     .toString()
                     .trim()
                     .toLowerCase();
 
-                final ativa =
-                    status == 'gestante' ||
-                    status == 'puérpera' ||
-                    status == 'puerpera';
-                final encerrada =
-                    status == 'encerrada' ||
-                    status == 'histórico' ||
-                    status == 'historico' ||
-                    historico == 'true' ||
-                    historico == 'sim' ||
-                    historico == '1';
-
-                if (!ativa || encerrada) continue;
+                if (status != 'ativa' && status != 'teste') continue;
 
                 var plano = (dados['plano'] ?? '').toString().trim();
                 if (plano.isEmpty) plano = 'Plano não informado';
@@ -106,7 +90,7 @@ class SuperAdminDashboard extends StatelessWidget {
                     ],
                   ),
                   child: Text(
-                    'Nenhuma gestante ativa com plano identificado no momento.',
+                    'Nenhuma clínica ativa com plano identificado no momento.',
                     style: TextStyle(color: Colors.grey.shade700),
                   ),
                 );

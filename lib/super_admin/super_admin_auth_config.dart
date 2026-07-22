@@ -1,5 +1,5 @@
 class SuperAdminAuthConfig {
-  static const String senhaTemporariaPadrao = 'Natus@123';
-  static const int tamanhoMinimoSenha = 6;
+  static const String senhaTemporariaPadrao = '';
+  static const int tamanhoMinimoSenha = 12;
   static const bool primeiroLoginObrigatorio = true;
 }

@@ -5,6 +5,7 @@ class AgendaEvento {
   final String titulo;
   final String tipo;
   final String gestanteId;
+  final String gestanteUid;
   final String gestanteNome;
   final String enfermeiraId;
   final String enfermeiraNome;
@@ -22,6 +23,7 @@ class AgendaEvento {
     required this.titulo,
     required this.tipo,
     required this.gestanteId,
+    this.gestanteUid = '',
     required this.gestanteNome,
     required this.enfermeiraId,
     required this.enfermeiraNome,
@@ -35,7 +37,9 @@ class AgendaEvento {
     required this.dataHoraFim,
   });
 
-  factory AgendaEvento.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory AgendaEvento.fromFirestore(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
     final dados = doc.data() ?? <String, dynamic>{};
 
     DateTime? lerTimestamp(dynamic valor) {
@@ -54,6 +58,9 @@ class AgendaEvento {
       titulo: texto(dados['titulo']),
       tipo: texto(dados['tipo']).isEmpty ? 'Outro' : texto(dados['tipo']),
       gestanteId: texto(dados['gestanteId']),
+      gestanteUid: texto(dados['gestanteUid']).isNotEmpty
+          ? texto(dados['gestanteUid'])
+          : texto(dados['uidGestante']),
       gestanteNome: texto(dados['gestanteNome']),
       enfermeiraId: texto(dados['enfermeiraId']),
       enfermeiraNome: texto(dados['enfermeiraNome']),
@@ -62,20 +69,26 @@ class AgendaEvento {
       horaFim: texto(dados['horaFim']),
       local: texto(dados['local']),
       observacoes: texto(dados['observacoes']),
-      status: texto(dados['status']).isEmpty ? 'Agendado' : texto(dados['status']),
+      status: texto(dados['status']).isEmpty
+          ? 'Agendado'
+          : texto(dados['status']),
       dataHoraInicio: lerTimestamp(dados['dataHoraInicio']),
       dataHoraFim: lerTimestamp(dados['dataHoraFim']),
     );
   }
 
-  Map<String, dynamic> toFirestore({required String usuarioUid}) {
+  Map<String, dynamic> toFirestore({
+    required String usuarioUid,
+    bool incluirCriador = false,
+  }) {
     final inicio = montarDataHora(data, horaInicio);
     final fim = montarDataHora(data, horaFim);
 
-    return {
+    final dados = <String, dynamic>{
       'titulo': titulo.trim(),
       'tipo': tipo.trim(),
       'gestanteId': gestanteId.trim(),
+      'gestanteUid': gestanteUid.trim(),
       'gestanteNome': gestanteNome.trim(),
       'enfermeiraId': enfermeiraId.trim(),
       'enfermeiraNome': enfermeiraNome.trim(),
@@ -87,9 +100,15 @@ class AgendaEvento {
       'status': status.trim(),
       'dataHoraInicio': inicio == null ? null : Timestamp.fromDate(inicio),
       'dataHoraFim': fim == null ? null : Timestamp.fromDate(fim),
-      'criadoPorUid': usuarioUid,
+      'atualizadoPorUid': usuarioUid,
       'atualizadoEm': FieldValue.serverTimestamp(),
     };
+
+    if (incluirCriador) {
+      dados['criadoPorUid'] = usuarioUid;
+    }
+
+    return dados;
   }
 
   static DateTime? montarDataHora(String dataIso, String hora) {
@@ -110,6 +129,7 @@ class AgendaEvento {
     String? titulo,
     String? tipo,
     String? gestanteId,
+    String? gestanteUid,
     String? gestanteNome,
     String? enfermeiraId,
     String? enfermeiraNome,
@@ -127,6 +147,7 @@ class AgendaEvento {
       titulo: titulo ?? this.titulo,
       tipo: tipo ?? this.tipo,
       gestanteId: gestanteId ?? this.gestanteId,
+      gestanteUid: gestanteUid ?? this.gestanteUid,
       gestanteNome: gestanteNome ?? this.gestanteNome,
       enfermeiraId: enfermeiraId ?? this.enfermeiraId,
       enfermeiraNome: enfermeiraNome ?? this.enfermeiraNome,

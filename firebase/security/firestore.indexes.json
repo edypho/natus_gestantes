@@ -1,0 +1,566 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "usuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "tipoUsuario", "order": "ASCENDING" },
+        { "fieldPath": "nome", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "usuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "tipo", "order": "ASCENDING" },
+        { "fieldPath": "nome", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "profissionais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nome", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pacientes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "statusPaciente", "order": "ASCENDING" },
+        { "fieldPath": "nomePaciente", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pacientes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "statusGestante", "order": "ASCENDING" },
+        { "fieldPath": "nomeGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agenda",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "dataHoraInicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agenda",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "dataHoraInicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agenda",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dataHoraInicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "atendimentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuario",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "documentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "contratos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "atualizadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "financeiro",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "vencimento", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "financeiro",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "vencimento", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificacoes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "destinatariosUids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "parcelas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "vencimento", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "parcelas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "vencimento", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notas_fiscais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notas_fiscais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gestantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "statusGestante", "order": "ASCENDING" },
+        { "fieldPath": "nomeGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gestantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "statusGestante", "order": "ASCENDING" },
+        { "fieldPath": "nomeGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "atendimentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "gestanteId", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "documentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuario_atendimentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuario_atendimentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "contratos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "pacienteId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "atualizadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificacoesCentral",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "destinatariosTipos", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificacoesCentral",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "destinatariosTipos", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "enfermeiras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "nome", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "obstetras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "nome", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gestantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "contracoes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "documentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "parcelas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "parcelas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "gestanteId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuario_atendimentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prontuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "idGestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agenda",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "gestanteUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "planos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "biblioteca",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "enfermeiras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "obstetras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "atendimentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gestantes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "contracoes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "documentos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "parcelas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "usuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notas_fiscais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "materiais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "agenda",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "dataHoraInicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificacoesCentral",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "destinatariosTipos", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "enfermeiras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidEnfermeira", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "obstetras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "uidObstetra", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "parcelas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
+        { "fieldPath": "clinicaId", "order": "ASCENDING" },
+        { "fieldPath": "gestante", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificacoesCentral",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "destinatariosTipos", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "criadoEm", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

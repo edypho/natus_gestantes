@@ -13,6 +13,7 @@ void main() {
       expect(normalizarTipoUsuarioNatus('admin'), 'admin');
       expect(normalizarTipoUsuarioNatus('enfermeira'), 'enfermeira');
       expect(normalizarTipoUsuarioNatus('gestante'), 'gestante');
+      expect(normalizarTipoUsuarioNatus('paciente'), 'gestante');
       expect(normalizarTipoUsuarioNatus('obstetra'), 'obstetra');
       expect(normalizarTipoUsuarioNatus('OBSTETRA'), 'obstetra');
     });
@@ -20,6 +21,7 @@ void main() {
     test('profissional da clínica: enfermeira e obstetra', () {
       expect(tipoEhProfissionalClinica('enfermeira'), isTrue);
       expect(tipoEhProfissionalClinica('obstetra'), isTrue);
+      expect(tipoEhProfissionalClinica('profissional'), isTrue);
       expect(tipoEhProfissionalClinica('Obstetra '), isTrue);
       expect(tipoEhProfissionalClinica('admin'), isFalse);
       expect(tipoEhProfissionalClinica('gestante'), isFalse);

@@ -2,23 +2,30 @@ class TenantFilterService {
   static bool deveFiltrarPorAdmin({
     required String perfil,
     required String adminDonoId,
+    bool superAdminVerificado = false,
   }) {
-    if (perfil == 'superAdmin') {
+    if (perfil == 'superAdmin' && superAdminVerificado) {
       return false;
     }
 
-    return adminDonoId.trim().isNotEmpty;
+    // Um tenant ausente não pode transformar um perfil comum em acesso global.
+    return true;
   }
 
   static bool pertenceAoAdmin({
     required String? itemAdminDonoId,
     required String adminDonoId,
     required String perfil,
+    bool superAdminVerificado = false,
   }) {
-    if (perfil == 'superAdmin') {
+    if (perfil == 'superAdmin' && superAdminVerificado) {
       return true;
     }
 
-    return itemAdminDonoId == adminDonoId;
+    final item = itemAdminDonoId?.trim() ?? '';
+    final admin = adminDonoId.trim();
+
+    if (item.isEmpty || admin.isEmpty) return false;
+    return item == admin;
   }
 }

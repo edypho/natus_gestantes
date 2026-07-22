@@ -13,7 +13,8 @@ String normalizarTipoUsuarioNatus(String? tipo) {
   if (lower == 'admin') return 'admin';
   if (lower == 'enfermeira') return 'enfermeira';
   if (lower == 'obstetra') return 'obstetra';
-  if (lower == 'gestante') return 'gestante';
+  if (lower == 'profissional') return 'profissional';
+  if (lower == 'gestante' || lower == 'paciente') return 'gestante';
 
   return valor;
 }
@@ -22,5 +23,5 @@ String normalizarTipoUsuarioNatus(String? tipo) {
 /// operacionais (enfermeira e obstetra).
 bool tipoEhProfissionalClinica(String tipo) {
   final t = tipo.trim().toLowerCase();
-  return t == 'enfermeira' || t == 'obstetra';
+  return t == 'enfermeira' || t == 'obstetra' || t == 'profissional';
 }

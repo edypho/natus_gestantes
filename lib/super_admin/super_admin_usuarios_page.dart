@@ -20,9 +20,7 @@ class SuperAdminUsuariosPage extends StatelessWidget {
         children: [
           const Text(
             'Listagem e acompanhamento dos usuários SaaS cadastrados.',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
           SuperAdminFirestoreList(
@@ -32,6 +30,7 @@ class SuperAdminUsuariosPage extends StatelessWidget {
               final data = doc.data();
               final status = data['status']?.toString() ?? 'ativo';
               final nome = data['nome']?.toString() ?? 'Usuário sem nome';
+              final excluidoLogicamente = data['excluidoLogicamente'] == true;
 
               return superAdminListTile(
                 titulo: nome,
@@ -51,8 +50,7 @@ class SuperAdminUsuariosPage extends StatelessWidget {
                               final ok = await confirmarAcaoSuperAdmin(
                                 context: context,
                                 titulo: 'Bloquear usuário',
-                                mensagem:
-                                    'Deseja bloquear o acesso de $nome?',
+                                mensagem: 'Deseja bloquear o acesso de $nome?',
                               );
 
                               if (!ok) return;
@@ -76,14 +74,14 @@ class SuperAdminUsuariosPage extends StatelessWidget {
                       child: const Text('Reativar'),
                     ),
                     TextButton(
-                      onPressed: status == 'excluido'
+                      onPressed: excluidoLogicamente
                           ? null
                           : () async {
                               final ok = await confirmarAcaoSuperAdmin(
                                 context: context,
-                                titulo: 'Excluir usuário definitivamente',
+                                titulo: 'Arquivar usuário',
                                 mensagem:
-                                    'ATENÇÃO: o usuário $nome será apagado diretamente do Firebase. Essa ação não pode ser desfeita.',
+                                    'O acesso de $nome será bloqueado e o cadastro ficará preservado para auditoria ou reativação.',
                               );
 
                               if (!ok) return;
@@ -92,7 +90,7 @@ class SuperAdminUsuariosPage extends StatelessWidget {
                                 usuarioId: doc.id,
                               );
                             },
-                      child: const Text('Excluir definitivo'),
+                      child: const Text('Arquivar'),
                     ),
                   ],
                 ),

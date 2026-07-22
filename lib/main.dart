@@ -18,7 +18,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'super_admin/super_admin_router.dart';
+import 'super_admin/super_admin_access_guard.dart';
+import 'super_admin/primeiro_login_saas_dialog.dart';
+import 'super_admin/primeiro_login_saas_guard.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'agenda/agenda_page.dart';
@@ -38,6 +42,9 @@ import 'navigation/menu_inferior_coracao.dart';
 import 'notificacoes/notificacoes_central_page.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
 import 'services/push_notifications_service.dart';
+import 'services/tenant_firestore_service.dart';
+import 'saas/contexto_saas.dart';
+import 'saas/tenant_access_scope.dart';
 import 'uploads/upload_progress_dialog.dart';
 
 export 'core/firebase_globals.dart';
@@ -79,8 +86,11 @@ class AuthGate extends StatelessWidget {
         if (snapshot.hasData) {
           final user = snapshot.data!;
 
-          return FutureBuilder<DocumentSnapshot>(
-            future: firestore.collection('usuarios').doc(user.uid).get(),
+          return FutureBuilder<List<dynamic>>(
+            future: Future.wait<dynamic>([
+              firestore.collection('usuarios').doc(user.uid).get(),
+              user.getIdTokenResult(true),
+            ]),
             builder: (context, snapshotUser) {
               if (snapshotUser.connectionState == ConnectionState.waiting) {
                 return const Scaffold(
@@ -88,7 +98,20 @@ class AuthGate extends StatelessWidget {
                 );
               }
 
-              if (!snapshotUser.hasData || !snapshotUser.data!.exists) {
+              if (snapshotUser.hasError) {
+                return const Scaffold(
+                  body: Center(
+                    child: Text('Não foi possível validar o acesso.'),
+                  ),
+                );
+              }
+
+              final dadosSessao = snapshotUser.data;
+              final usuarioDoc = dadosSessao == null
+                  ? null
+                  : dadosSessao[0] as DocumentSnapshot;
+
+              if (usuarioDoc == null || !usuarioDoc.exists) {
                 return const Scaffold(
                   body: Center(
                     child: Text('Usuário não configurado no sistema'),
@@ -96,16 +119,72 @@ class AuthGate extends StatelessWidget {
                 );
               }
 
-              final dados = snapshotUser.data!.data() as Map<String, dynamic>;
-              final tipo = normalizarTipoUsuarioNatus(
-                dados['tipo']?.toString() ??
-                    dados['tipoUsuario']?.toString() ??
-                    'gestante',
+              final token = dadosSessao![1] as IdTokenResult;
+              final dados = usuarioDoc.data() as Map<String, dynamic>;
+              final contextoSaaS = ContextoSaaS.fromUsuario(
+                uidUsuario: user.uid,
+                emailUsuario: user.email ?? '',
+                dados: dados,
+                superAdminVerificado: token.claims?['superAdmin'] == true,
               );
 
-              return TelaPrincipal(
-                tipoUsuario: tipo,
-                nomeUsuario: dados['nome']?.toString() ?? '',
+              late final TenantAccessScope escopoTenant;
+              try {
+                escopoTenant = TenantAccessScope.fromContexto(contextoSaaS);
+              } on TenantScopeException catch (e) {
+                return Scaffold(
+                  body: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(e.message, textAlign: TextAlign.center),
+                    ),
+                  ),
+                );
+              }
+
+              return FutureBuilder<bool>(
+                future: SuperAdminAccessGuard.usuarioPodeAcessar(
+                  uid: user.uid,
+                  superAdminVerificado: contextoSaaS.superAdmin,
+                ),
+                builder: (context, snapshotAcesso) {
+                  if (snapshotAcesso.connectionState ==
+                      ConnectionState.waiting) {
+                    return const Scaffold(
+                      body: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  if (snapshotAcesso.data != true) {
+                    return const Scaffold(
+                      body: Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Text(
+                            SuperAdminAccessGuard.mensagemAcessoBloqueado,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  final telaPrincipal = TelaPrincipal(
+                    tipoUsuario: contextoSaaS.perfil,
+                    nomeUsuario: contextoSaaS.nomeUsuario,
+                    contextoSaaS: contextoSaaS,
+                    escopoTenant: escopoTenant,
+                  );
+
+                  if (PrimeiroLoginSaaSGuard.deveTrocarSenha(dados)) {
+                    return PrimeiroLoginSaaSGate(
+                      uid: user.uid,
+                      child: telaPrincipal,
+                    );
+                  }
+
+                  return telaPrincipal;
+                },
               );
             },
           );
@@ -117,14 +196,113 @@ class AuthGate extends StatelessWidget {
   }
 }
 
+class PrimeiroLoginSaaSGate extends StatefulWidget {
+  const PrimeiroLoginSaaSGate({
+    super.key,
+    required this.uid,
+    required this.child,
+  });
+
+  final String uid;
+  final Widget child;
+
+  @override
+  State<PrimeiroLoginSaaSGate> createState() => _PrimeiroLoginSaaSGateState();
+}
+
+class _PrimeiroLoginSaaSGateState extends State<PrimeiroLoginSaaSGate> {
+  bool _alterando = false;
+  bool _concluido = false;
+
+  Future<void> _alterarSenha() async {
+    if (_alterando) return;
+    setState(() => _alterando = true);
+
+    try {
+      final senhaAlterada = await abrirTrocaSenhaPrimeiroLoginSaaS(
+        context: context,
+        uid: widget.uid,
+      );
+      if (!senhaAlterada) return;
+      if (!mounted) return;
+      setState(() => _concluido = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível alterar a senha: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _alterando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_concluido) return widget.child;
+
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.lock_reset_rounded, size: 48),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Proteja seu acesso',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Antes de continuar, substitua a senha temporária por '
+                      'uma senha pessoal e exclusiva.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 22),
+                    FilledButton.icon(
+                      onPressed: _alterando ? null : _alterarSenha,
+                      icon: _alterando
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.password_rounded),
+                      label: Text(
+                        _alterando ? 'Alterando...' : 'Definir nova senha',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class TelaPrincipal extends StatefulWidget {
   final String tipoUsuario;
   final String nomeUsuario;
+  final ContextoSaaS contextoSaaS;
+  final TenantAccessScope escopoTenant;
 
   const TelaPrincipal({
     super.key,
     required this.tipoUsuario,
     this.nomeUsuario = '',
+    required this.contextoSaaS,
+    required this.escopoTenant,
   });
 
   @override
@@ -132,27 +310,117 @@ class TelaPrincipal extends StatefulWidget {
 }
 
 class _TelaPrincipalState extends State<TelaPrincipal> {
+  late final TenantFirestoreService tenantFirestore;
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
   int notificacoesNaoLidas = 0;
 
+  String nomeArquivoSeguro(String nome) {
+    final sanitizado = nome.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+    return sanitizado.isEmpty ? 'arquivo' : sanitizado;
+  }
+
+  String? tipoMimeArquivo(PlatformFile arquivo) {
+    final extensao = (arquivo.extension ?? arquivo.name.split('.').last)
+        .trim()
+        .toLowerCase();
+
+    return switch (extensao) {
+      'pdf' => 'application/pdf',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'mp4' => 'video/mp4',
+      _ => null,
+    };
+  }
+
+  SettableMetadata metadadosUpload(
+    PlatformFile arquivo, {
+    String? pacienteId,
+    bool permitirVideo = false,
+    int limiteBytes = 25 * 1024 * 1024,
+  }) {
+    final contentType = tipoMimeArquivo(arquivo);
+    if (contentType == null) {
+      throw const FormatException(
+        'Tipo de arquivo não permitido. Use PDF, JPG, PNG, WebP ou MP4.',
+      );
+    }
+    if (contentType == 'video/mp4' && !permitirVideo) {
+      throw const FormatException(
+        'Vídeos em MP4 são aceitos apenas na biblioteca.',
+      );
+    }
+
+    final limiteEfetivoBytes = contentType == 'video/mp4' && permitirVideo
+        ? 250 * 1024 * 1024
+        : limiteBytes;
+    if (arquivo.size >= limiteEfetivoBytes) {
+      final limiteMegabytes = limiteEfetivoBytes ~/ (1024 * 1024);
+      throw FormatException(
+        'O arquivo excede o limite de $limiteMegabytes MB.',
+      );
+    }
+
+    final tenantId = widget.escopoTenant.clinicaId;
+    if (tenantId.isEmpty) {
+      throw const TenantScopeException(
+        'O upload exige uma clínica de destino.',
+      );
+    }
+
+    final idPaciente = (pacienteId ?? '').trim();
+    return SettableMetadata(
+      contentType: contentType,
+      customMetadata: <String, String>{
+        'clinicaId': tenantId,
+        'adminDonoId': tenantId,
+        'enviadoPorUid': widget.escopoTenant.uidUsuario,
+        if (idPaciente.isNotEmpty) 'pacienteId': idPaciente,
+      },
+    );
+  }
+
   Future<void> alterarTipoUsuario(String uid, String tipoAtual) async {
-    String novoTipo = tipoAtual;
+    const tiposAlteraveis = <String>[
+      'admin',
+      'enfermeira',
+      'obstetra',
+      'profissional',
+      'gestante',
+    ];
+    final tipoInicial = tiposAlteraveis.contains(tipoAtual) ? tipoAtual : null;
+    String novoTipo = tipoInicial ?? '';
 
     await showDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Alterar tipo de usuário'),
-          content: DropdownButtonFormField<String>(
-            initialValue: tipoAtual,
-            items: ['admin', 'enfermeira', 'obstetra', 'gestante']
-                .map((tipo) => DropdownMenuItem(value: tipo, child: Text(tipo)))
-                .toList(),
-            onChanged: (value) {
-              novoTipo = value!;
-            },
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Mudanças que exigem outro vínculo de paciente ou profissional '
+                'são bloqueadas por segurança.',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: tipoInicial,
+                items: tiposAlteraveis
+                    .map(
+                      (tipo) =>
+                          DropdownMenuItem(value: tipo, child: Text(tipo)),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  novoTipo = value!;
+                },
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -161,13 +429,33 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             ElevatedButton(
               onPressed: () async {
-                await firestore.collection('usuarios').doc(uid).update({
-                  'tipo': novoTipo,
-                });
+                if (novoTipo.isEmpty) {
+                  mostrarMensagem('Selecione um tipo de usuário válido.');
+                  return;
+                }
 
-                if (!dialogContext.mounted) return;
-                Navigator.pop(dialogContext);
-                mostrarMensagem('Tipo de usuário atualizado.');
+                if (novoTipo == tipoAtual) {
+                  Navigator.pop(dialogContext);
+                  return;
+                }
+
+                try {
+                  final callable = FirebaseFunctions.instance.httpsCallable(
+                    'alterarTipoUsuarioClinica',
+                  );
+                  await callable.call({
+                    'uidUsuario': uid,
+                    'tipoUsuario': novoTipo,
+                  });
+
+                  if (!dialogContext.mounted) return;
+                  Navigator.pop(dialogContext);
+                  mostrarMensagem('Tipo de usuário atualizado.');
+                } on FirebaseFunctionsException catch (e) {
+                  mostrarMensagem(
+                    e.message ?? 'Não foi possível alterar o tipo de usuário.',
+                  );
+                }
               },
               child: const Text('Salvar'),
             ),
@@ -177,9 +465,26 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  Future<void> reenviarConviteUsuario(String email) async {
+    final emailNormalizado = email.trim().toLowerCase();
+    if (emailNormalizado.isEmpty || !emailNormalizado.contains('@')) {
+      mostrarMensagem('Usuário sem e-mail válido para redefinição de senha.');
+      return;
+    }
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(
+        email: emailNormalizado,
+      );
+      mostrarMensagem('E-mail de definição de senha enviado.');
+    } catch (e) {
+      mostrarMensagem('Não foi possível enviar o e-mail de acesso: $e');
+    }
+  }
+
   Future<void> carregarContracoesFirestore() async {
     try {
-      final listaFirebase = await dados.buscarContracoes();
+      final listaFirebase = await dados.buscarContracoes(widget.escopoTenant);
 
       setState(() {
         contracoes.clear();
@@ -200,15 +505,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('enfermeiras').add({
-        'nome': eoNomeController.text.trim(),
-        'telefone': eoTelefoneController.text.trim(),
-        'email': eoEmailController.text.trim(),
-        'coren': eoCorenController.text.trim(),
-        'especialidade': eoEspecialidadeController.text.trim(),
-        'uidEnfermeira': '',
-        'criadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('enfermeiras')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'nome': eoNomeController.text.trim(),
+              'telefone': eoTelefoneController.text.trim(),
+              'email': eoEmailController.text.trim(),
+              'coren': eoCorenController.text.trim(),
+              'especialidade': eoEspecialidadeController.text.trim(),
+              'uidEnfermeira': '',
+              'criadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       eoNomeController.clear();
       eoTelefoneController.clear();
@@ -231,15 +540,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('obstetras').add({
-        'nome': obNomeController.text.trim(),
-        'telefone': obTelefoneController.text.trim(),
-        'email': obEmailController.text.trim(),
-        'crm': obCrmController.text.trim(),
-        'especialidade': obEspecialidadeController.text.trim(),
-        'uidObstetra': '',
-        'criadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('obstetras')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'nome': obNomeController.text.trim(),
+              'telefone': obTelefoneController.text.trim(),
+              'email': obEmailController.text.trim(),
+              'crm': obCrmController.text.trim(),
+              'especialidade': obEspecialidadeController.text.trim(),
+              'uidObstetra': '',
+              'criadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       obNomeController.clear();
       obTelefoneController.clear();
@@ -313,6 +626,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return 'EO';
       case 'obstetra':
         return 'Obstetra';
+      case 'profissional':
+        return 'Profissional';
       case 'gestante':
         return 'Gestante';
       case 'superAdmin':
@@ -370,10 +685,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void initState() {
     super.initState();
 
+    tenantFirestore = TenantFirestoreService(
+      firestore: firestore,
+      escopo: widget.escopoTenant,
+    );
+
     NatusTema.atual.addListener(aoMudarTema);
 
     if (widget.tipoUsuario == 'superAdmin') {
       telaAtual = 'Dashboard SaaS';
+      carregarTemaUsuario();
+      carregarPerfilUsuarioLogado();
+      return;
     } else if (widget.tipoUsuario == 'gestante') {
       telaAtual = 'Área da gestante';
     }
@@ -436,8 +759,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     if (uid.isEmpty) return;
 
-    notificacoesSubscription = firestore
-        .collection('notificacoesCentral')
+    notificacoesSubscription = tenantFirestore
+        .consultaClinica('notificacoesCentral')
         .where('destinatariosTipos', arrayContains: tipoNotificacaoConsulta())
         .orderBy('criadoEm', descending: true)
         .limit(20)
@@ -479,6 +802,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               child: NatusPainelNotificacoesFlutuante(
                 tipoUsuario: widget.tipoUsuario,
                 uidUsuario: uid,
+                escopoTenant: widget.escopoTenant,
               ),
             ),
           ),
@@ -601,7 +925,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarPlanosFirestore() async {
     try {
-      final lista = await dados.buscarPlanos();
+      final lista = await dados.buscarPlanos(widget.escopoTenant);
 
       setState(() {
         planosCadastrados
@@ -659,17 +983,22 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('planos').add({
-        'nomePlano': nome,
-        'valor': valor,
-        'valorFormatado': formatarMoeda(valor),
-        'parcelas': qtdParcelas.toString(),
-        'descricaoComercial': planoDescricaoComercialController.text.trim(),
-        'descricaoNfse': planoDescricaoNfseController.text.trim(),
-        'ativo': true,
-        'criadoEm': DateTime.now().toIso8601String(),
-        'atualizadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('planos')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'nomePlano': nome,
+              'valor': valor,
+              'valorFormatado': formatarMoeda(valor),
+              'parcelas': qtdParcelas.toString(),
+              'descricaoComercial': planoDescricaoComercialController.text
+                  .trim(),
+              'descricaoNfse': planoDescricaoNfseController.text.trim(),
+              'ativo': true,
+              'criadoEm': DateTime.now().toIso8601String(),
+              'atualizadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       planoNomeController.clear();
       planoValorController.clear();
@@ -823,7 +1152,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarEnfermeirasFirestore() async {
     try {
-      final listaFirebase = await dados.buscarEnfermeiras();
+      final listaFirebase = await dados.buscarEnfermeiras(widget.escopoTenant);
 
       setState(() {
         enfermeiras.clear();
@@ -836,7 +1165,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarObstetrasFirestore() async {
     try {
-      final listaFirebase = await dados.buscarObstetras();
+      final listaFirebase = await dados.buscarObstetras(widget.escopoTenant);
 
       setState(() {
         obstetras.clear();
@@ -878,8 +1207,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<String> buscarFotoPerfilVinculada(String uid) async {
     Future<String> buscarEmColecao(String colecao, String campoUid) async {
-      final resultado = await firestore
-          .collection(colecao)
+      final resultado = await tenantFirestore
+          .consultaClinica(colecao)
           .where(campoUid, isEqualTo: uid)
           .limit(1)
           .get();
@@ -906,8 +1235,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> atualizarFotoPerfilVinculada(String uid, String fotoUrl) async {
     Future<void> atualizarColecao(String colecao, String campoUid) async {
-      final resultado = await firestore
-          .collection(colecao)
+      final resultado = await tenantFirestore
+          .consultaClinica(colecao)
           .where(campoUid, isEqualTo: uid)
           .limit(1)
           .get();
@@ -952,21 +1281,21 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     try {
       final nomeArquivo =
-          '${DateTime.now().millisecondsSinceEpoch}_${arquivo.name}';
-      final ref = storage.ref().child('perfis/$uid/$nomeArquivo');
+          '${DateTime.now().millisecondsSinceEpoch}_${nomeArquivoSeguro(arquivo.name)}';
+      final ref = storage.ref().child(
+        tenantFirestore.caminhoStorage('usuarios/$uid/perfil/$nomeArquivo'),
+      );
 
-      await ref.putData(arquivo.bytes!);
+      await ref.putData(
+        arquivo.bytes!,
+        metadadosUpload(arquivo, limiteBytes: 10 * 1024 * 1024),
+      );
       final url = await ref.getDownloadURL();
 
-      await firestore.collection('usuarios').doc(uid).set({
-        'uid': uid,
-        'nome': widget.nomeUsuario,
-        'tipo': widget.tipoUsuario,
-        'tipoUsuario': widget.tipoUsuario,
-        'email': emailPerfilLogado,
+      await firestore.collection('usuarios').doc(uid).update({
         'fotoUrl': url,
         'fotoAtualizadaEm': DateTime.now().toIso8601String(),
-      }, SetOptions(merge: true));
+      });
 
       await atualizarFotoPerfilVinculada(uid, url);
 
@@ -1272,7 +1601,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarBibliotecaFirestore() async {
     try {
-      final listaFirebase = await dados.buscarBiblioteca();
+      final listaFirebase = await dados.buscarBiblioteca(widget.escopoTenant);
 
       setState(() {
         biblioteca.clear();
@@ -1292,7 +1621,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     Map<String, String> material,
   ) async {
     try {
-      final docRef = await firestore.collection('biblioteca').add(material);
+      final docRef = await firestore
+          .collection('biblioteca')
+          .add(tenantFirestore.prepararCriacaoTexto(material));
       material['id'] = docRef.id;
 
       await carregarBibliotecaFirestore();
@@ -1378,7 +1709,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarAtendimentosFirestore() async {
     try {
-      final listaFirebase = await dados.buscarAtendimentos();
+      final listaFirebase = await dados.buscarAtendimentos(widget.escopoTenant);
 
       setState(() {
         atendimentos.clear();
@@ -2172,7 +2503,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
         final docRef = await firestore
             .collection('gestantes')
-            .add(novaGestante);
+            .add(tenantFirestore.prepararCriacaoTexto(novaGestante));
         novaGestante['id'] = docRef.id;
 
         if (gerarFinanceiro &&
@@ -3728,6 +4059,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           gestantes: gestantes,
           enfermeiras: enfermeiras,
           tipoUsuario: widget.tipoUsuario,
+          escopoTenant: widget.escopoTenant,
         );
 
       case 'Mapa':
@@ -3906,11 +4238,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           StreamBuilder<QuerySnapshot>(
             stream: usuarioGestante
-                ? firestore
-                      .collection('exames')
-                      .where('idGestante', isEqualTo: idGestante)
+                ? tenantFirestore
+                      .consultaDoPaciente('exames', campoUid: 'uidGestante')
                       .snapshots()
-                : firestore.collection('exames').snapshots(),
+                : tenantFirestore.consultaClinica('exames').snapshots(),
 
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
@@ -4029,7 +4360,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                   onPressed: () => abrirArquivo(url),
                                 ),
 
-                                if (!usuarioGestante)
+                                if (usuarioEhAdmin())
                                   IconButton(
                                     tooltip: 'Excluir exame',
                                     icon: const Icon(
@@ -4057,13 +4388,22 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> excluirExame(String idExame, String urlArquivo) async {
+    if (!usuarioEhAdmin()) {
+      mostrarMensagem('Somente o administrador pode excluir exames.');
+      return;
+    }
+
     try {
+      await firestore.collection('exames').doc(idExame).delete();
+
       if (urlArquivo.isNotEmpty) {
         final ref = storage.refFromURL(urlArquivo);
-        await ref.delete();
+        try {
+          await ref.delete();
+        } catch (e) {
+          debugPrint('Falha ao remover arquivo órfão do exame: $e');
+        }
       }
-
-      await firestore.collection('exames').doc(idExame).delete();
 
       setState(() {});
 
@@ -4111,14 +4451,26 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
     final idGestante = (gestante['id'] ?? '').trim();
     final nomeGestante = (gestante['nomeGestante'] ?? '').trim();
-    final uidGestante = (gestante['uidGestante'] ?? '').trim();
+    final uidGestante = widget.escopoTenant.ehPaciente
+        ? widget.escopoTenant.uidUsuario
+        : (gestante['uidGestante'] ?? '').trim();
 
     if (idGestante.isEmpty) {
       mostrarMensagem('Erro: gestante não identificada.');
       return;
     }
 
-    final resultado = await FilePicker.platform.pickFiles();
+    if (widget.escopoTenant.ehPaciente &&
+        idGestante != widget.escopoTenant.pacienteId) {
+      mostrarMensagem('Cadastro fora do contexto autenticado.');
+      return;
+    }
+
+    final resultado = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
 
     if (resultado == null) return;
 
@@ -4133,22 +4485,35 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      final nomeFinal = '${DateTime.now().millisecondsSinceEpoch}_$nomeArquivo';
+      final nomeFinal =
+          '${DateTime.now().millisecondsSinceEpoch}_${nomeArquivoSeguro(nomeArquivo)}';
 
-      final ref = storage.ref().child('exames/$idGestante/$nomeFinal');
+      final ref = storage.ref().child(
+        tenantFirestore.caminhoStorage(
+          'pacientes/$idGestante/exames/$nomeFinal',
+        ),
+      );
 
-      await ref.putData(bytes);
+      await ref.putData(
+        bytes,
+        metadadosUpload(arquivo, pacienteId: idGestante),
+      );
 
       final url = await ref.getDownloadURL();
 
-      await firestore.collection('exames').add({
-        'idGestante': idGestante,
-        'uidGestante': uidGestante,
-        'nomeGestante': nomeGestante,
-        'nomeArquivo': nomeArquivo,
-        'url': url,
-        'criadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('exames')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'idGestante': idGestante,
+              'pacienteId': idGestante,
+              'uidGestante': uidGestante,
+              'nomeGestante': nomeGestante,
+              'nomeArquivo': nomeArquivo,
+              'url': url,
+              'criadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       mostrarMensagem('Exame enviado com sucesso!');
     } catch (e) {
@@ -6993,9 +7358,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         '_',
       );
       final nomeFinal = '${DateTime.now().millisecondsSinceEpoch}_$nomeSeguro';
-      final ref = storage.ref().child('$pasta/$nomeFinal');
+      final ref = storage.ref().child(
+        tenantFirestore.caminhoStorage('$pasta/$nomeFinal'),
+      );
 
-      final task = ref.putData(bytes);
+      final task = ref.putData(
+        bytes,
+        metadadosUpload(arquivo, permitirVideo: true),
+      );
 
       final subscription = task.snapshotEvents.listen((snapshot) {
         final total = snapshot.totalBytes;
@@ -7120,7 +7490,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           borderRadius: BorderRadius.circular(18),
                           onTap: () async {
                             final resultado = await FilePicker.platform
-                                .pickFiles(withData: true);
+                                .pickFiles(
+                                  type: FileType.custom,
+                                  allowedExtensions: [
+                                    'pdf',
+                                    'jpg',
+                                    'jpeg',
+                                    'png',
+                                    'webp',
+                                    'mp4',
+                                  ],
+                                  withData: true,
+                                );
 
                             if (resultado == null) return;
 
@@ -7168,7 +7549,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'PDF, imagem, vídeo ou outro arquivo para a biblioteca.',
+                                        'PDF, JPG, PNG, WebP ou vídeo MP4.',
                                         style: TextStyle(
                                           color: NatusApp.textoSuave,
                                           fontSize: 12,
@@ -8099,17 +8480,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       final dados = doc.data() ?? {};
 
+      if (!widget.escopoTenant.pertenceAoTenant(dados)) {
+        mostrarMensagem('Cadastro fora da clínica autenticada.');
+        return;
+      }
+
       final telefone = dados['telefoneGestante']?.toString() ?? '';
       final nome = dados['nomeGestante']?.toString() ?? '';
       final email = dados['emailGestante']?.toString() ?? '';
 
       if (email.trim().isEmpty) {
         mostrarMensagem('E-mail da gestante não informado.');
-        return;
-      }
-
-      if (telefone.trim().isEmpty) {
-        mostrarMensagem('Telefone da gestante não informado.');
         return;
       }
 
@@ -8120,7 +8501,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
-      mostrarMensagem('Gerando novo link de acesso...');
+      mostrarMensagem('Solicitando redefinição de senha...');
 
       final idToken = await usuarioAtual.getIdToken();
 
@@ -8132,12 +8513,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $idToken',
         },
-        body: jsonEncode({
-          'gestanteId': idGestante,
-          'nomeGestante': nome,
-          'emailGestante': email.trim().toLowerCase(),
-          'telefoneGestante': telefone,
-        }),
+        body: jsonEncode({'gestanteId': idGestante}),
       );
 
       final dadosResposta = jsonDecode(resposta.body);
@@ -8145,26 +8521,38 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (resposta.statusCode != 200 || dadosResposta['sucesso'] != true) {
         mostrarMensagem(
           dadosResposta['mensagem']?.toString() ??
-              'Não foi possível gerar um novo link de acesso.',
+              'Não foi possível solicitar a redefinição de senha.',
         );
         return;
       }
 
-      final linkNovo = dadosResposta['link']?.toString() ?? '';
-
-      if (linkNovo.trim().isEmpty) {
-        mostrarMensagem('O Firebase não retornou um novo link de acesso.');
+      final emailValidado =
+          dadosResposta['emailGestante']?.toString().trim().toLowerCase() ?? '';
+      if (emailValidado.isEmpty) {
+        mostrarMensagem('O cadastro não possui um e-mail válido.');
         return;
       }
 
-      final telefoneLimpo = telefone.replaceAll(RegExp(r'[^0-9]'), '');
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: emailValidado);
+
+      final nomeValidado =
+          dadosResposta['nomeGestante']?.toString().trim() ?? nome;
+      final telefoneValidado =
+          dadosResposta['telefoneGestante']?.toString().trim() ?? telefone;
+
+      if (telefoneValidado.isEmpty) {
+        mostrarMensagem('E-mail de redefinição enviado com sucesso.');
+        return;
+      }
+
+      final telefoneLimpo = telefoneValidado.replaceAll(RegExp(r'[^0-9]'), '');
 
       final mensagem = Uri.encodeComponent(
-        'Olá, $nome! 🤍\n\n'
-        'Segue um novo link para criar ou trocar sua senha de acesso ao Portal Natus:\n\n'
-        '$linkNovo\n\n'
-        'Use este link mais recente. Os links anteriores podem ter expirado.\n\n'
-        'Depois disso, você poderá acessar o app com seu e-mail e senha.\n\n'
+        'Olá, $nomeValidado! 🤍\n\n'
+        'Enviamos para $emailValidado um e-mail seguro para criar ou trocar '
+        'sua senha de acesso ao Portal Natus.\n\n'
+        'Confira também a caixa de spam. Por segurança, o link não é enviado '
+        'pelo WhatsApp.\n\n'
         'Com carinho,\n'
         'Equipe Natus',
       );
@@ -8173,7 +8561,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (e) {
-      mostrarMensagem('Erro ao gerar novo link de acesso: $e');
+      mostrarMensagem('Erro ao solicitar redefinição de senha: $e');
     }
   }
 
@@ -8196,6 +8584,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         }
 
         final dados = snapshot.data!.data() as Map<String, dynamic>;
+        if (!widget.escopoTenant.pertenceAoTenant(dados) ||
+            (widget.escopoTenant.ehPaciente &&
+                snapshot.data!.id != widget.escopoTenant.pacienteId)) {
+          return const Center(child: Text('Acesso ao cadastro bloqueado.'));
+        }
 
         final gestanteAtualizada = dados.map((chave, valor) {
           return MapEntry(chave, valor.toString());
@@ -8268,19 +8661,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 10),
 
-          ElevatedButton.icon(
-            onPressed: () {
-              enviarAcessoGestante(g);
-            },
-            icon: const Icon(Icons.lock_reset),
-            label: const Text('Reenviar acesso da gestante'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: NatusApp.vinho,
-              foregroundColor: (NatusApp.escuro
-                  ? NatusApp.fundo
-                  : NatusApp.offWhite),
+          if (usuarioEhAdmin() || widget.escopoTenant.ehPaciente)
+            ElevatedButton.icon(
+              onPressed: () {
+                enviarAcessoGestante(g);
+              },
+              icon: const Icon(Icons.lock_reset),
+              label: const Text('Reenviar acesso da gestante'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: NatusApp.vinho,
+                foregroundColor: (NatusApp.escuro
+                    ? NatusApp.fundo
+                    : NatusApp.offWhite),
+              ),
             ),
-          ),
 
           const SizedBox(height: 10),
 
@@ -8542,15 +8936,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   foregroundColor: NatusApp.vinho,
                 ),
               ),
-              ElevatedButton.icon(
-                onPressed: () => enviarAcessoGestante(g),
-                icon: const Icon(Icons.lock_reset),
-                label: const Text('Reenviar acesso'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: NatusApp.rose,
-                  foregroundColor: NatusApp.vinho,
+              if (usuarioEhAdmin() || widget.escopoTenant.ehPaciente)
+                ElevatedButton.icon(
+                  onPressed: () => enviarAcessoGestante(g),
+                  icon: const Icon(Icons.lock_reset),
+                  label: const Text('Reenviar acesso'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: NatusApp.rose,
+                    foregroundColor: NatusApp.vinho,
+                  ),
                 ),
-              ),
               ElevatedButton.icon(
                 onPressed: () => atualizarStatusGestante(g),
                 icon: const Icon(Icons.swap_horiz),
@@ -9240,9 +9635,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     return StreamBuilder<QuerySnapshot>(
-      stream: firestore
-          .collection('exames')
-          .where('idGestante', isEqualTo: idGestante)
+      stream: tenantFirestore
+          .consultaRegistrosDoPaciente('exames', pacienteId: idGestante)
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
@@ -9292,9 +9686,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     return StreamBuilder<QuerySnapshot>(
-      stream: firestore
-          .collection('exames')
-          .where('idGestante', isEqualTo: idGestante)
+      stream: tenantFirestore
+          .consultaRegistrosDoPaciente('exames', pacienteId: idGestante)
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
@@ -10771,14 +11164,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     String gestanteSelecionadaNome = '';
+    Map<String, String> gestanteSelecionada = <String, String>{};
 
     if (widget.tipoUsuario == 'gestante') {
       final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
-      final gestanteLogada = gestantes.firstWhere(
+      gestanteSelecionada = gestantes.firstWhere(
         (g) => g['uidGestante'] == uidLogado,
         orElse: () => {},
       );
-      gestanteSelecionadaNome = gestanteLogada['nomeGestante'] ?? '';
+      gestanteSelecionadaNome = gestanteSelecionada['nomeGestante'] ?? '';
     } else {
       if (documentoGestanteSelecionada.isEmpty ||
           documentoGestanteSelecionada == 'Selecione') {
@@ -10786,7 +11180,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
-      final gestanteSelecionada = gestantesAtivasParaDocumentos().firstWhere(
+      gestanteSelecionada = gestantesAtivasParaDocumentos().firstWhere(
         (g) => g['nomeGestante'] == documentoGestanteSelecionada,
         orElse: () => {},
       );
@@ -10806,9 +11200,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
+    if ((gestanteSelecionada['id'] ?? '').trim().isEmpty) {
+      mostrarMensagem('Não foi possível identificar o cadastro da paciente.');
+      return;
+    }
+
+    final pacienteId = (gestanteSelecionada['id'] ?? '').trim();
+    if (widget.escopoTenant.ehPaciente &&
+        pacienteId != widget.escopoTenant.pacienteId) {
+      mostrarMensagem('Cadastro fora do contexto autenticado.');
+      return;
+    }
+
+    final uidPaciente = widget.escopoTenant.ehPaciente
+        ? widget.escopoTenant.uidUsuario
+        : (gestanteSelecionada['uidGestante'] ?? '').trim();
+
     mostrarMensagem('Enviando arquivo...');
 
-    final urlArquivo = await uploadArquivo(arquivoSelecionado!);
+    final urlArquivo = await uploadArquivo(
+      arquivoSelecionado!,
+      pasta: 'pacientes/$pacienteId/documentos',
+      pacienteId: pacienteId,
+    );
 
     if (urlArquivo == null) {
       mostrarMensagem('Não foi possível enviar o arquivo');
@@ -10819,6 +11233,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'nome': arquivoSelecionado!.name,
       'tipo': documentoTipoSelecionado,
       'gestante': gestanteSelecionadaNome,
+      'gestanteId': pacienteId,
+      'pacienteId': pacienteId,
+      'uidGestante': uidPaciente,
       'arquivoNome': arquivoSelecionado!.name,
       'arquivoUrl': urlArquivo,
       'data': formatarDataHora(DateTime.now()),
@@ -10831,7 +11248,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       arquivoSelecionado = null;
     });
 
-    await firestore.collection('documentos').add(novoDocumento);
+    await firestore
+        .collection('documentos')
+        .add(tenantFirestore.prepararCriacaoTexto(novoDocumento));
 
     mostrarMensagem('Documento salvo com arquivo!');
   }
@@ -10960,7 +11379,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             }
                           },
                         ),
-                        if (widget.tipoUsuario != 'gestante')
+                        if (usuarioEhAdmin())
                           IconButton(
                             tooltip: 'Excluir documento',
                             icon: const Icon(Icons.delete, color: Colors.red),
@@ -11686,7 +12105,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaUsuarios() {
     return StreamBuilder<QuerySnapshot>(
-      stream: firestore.collection('usuarios').snapshots(),
+      stream: tenantFirestore.consultaClinica('usuarios').snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -11794,48 +12213,65 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text('$email • Tipo de acesso: $tipo'),
-                    trailing: IconButton(
-                      tooltip: 'Excluir usuário',
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () async {
-                        final confirmar = await showDialog<bool>(
-                          context: context,
-                          builder: (context) {
-                            return AlertDialog(
-                              title: const Text('Excluir usuário'),
-                              content: Text(
-                                'Deseja realmente excluir o usuário $nome?',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, false),
-                                  child: const Text('Cancelar'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: (NatusApp.escuro
-                                        ? NatusApp.fundo
-                                        : NatusApp.offWhite),
+                    trailing: Wrap(
+                      spacing: 2,
+                      children: [
+                        IconButton(
+                          tooltip: 'Reenviar acesso por e-mail',
+                          icon: const Icon(Icons.mark_email_unread_outlined),
+                          onPressed: () =>
+                              reenviarConviteUsuario(email.toString()),
+                        ),
+                        IconButton(
+                          tooltip: 'Excluir usuário',
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () async {
+                            final confirmar = await showDialog<bool>(
+                              context: context,
+                              builder: (context) {
+                                return AlertDialog(
+                                  title: const Text('Excluir usuário'),
+                                  content: Text(
+                                    'Deseja realmente excluir o usuário $nome?',
                                   ),
-                                  child: const Text('Excluir'),
-                                ),
-                              ],
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancelar'),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: (NatusApp.escuro
+                                            ? NatusApp.fundo
+                                            : NatusApp.offWhite),
+                                      ),
+                                      child: const Text('Excluir'),
+                                    ),
+                                  ],
+                                );
+                              },
                             );
+
+                            if (confirmar == true) {
+                              try {
+                                final callable = FirebaseFunctions.instance
+                                    .httpsCallable('excluirUsuarioAuth');
+                                await callable.call({'uidUsuario': doc.id});
+                                mostrarMensagem('Usuário excluído.');
+                              } on FirebaseFunctionsException catch (e) {
+                                mostrarMensagem(
+                                  e.message ??
+                                      'Não foi possível excluir o usuário.',
+                                );
+                              }
+                            }
                           },
-                        );
-
-                        if (confirmar == true) {
-                          await firestore
-                              .collection('usuarios')
-                              .doc(doc.id)
-                              .delete();
-
-                          mostrarMensagem('Usuário excluído.');
-                        }
-                      },
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -12129,24 +12565,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('prontuario_atendimentos').add({
-        'idGestante': idGestante,
-        'nomeGestante': g['nomeGestante'] ?? '',
-        'tipo': 'Anamnese',
-        'queixaPrincipal': anamneseQueixaController.text.trim(),
-        'historicoObstetrico': anamneseHistoricoObstetricoController.text
-            .trim(),
-        'historicoSaude': anamneseHistoricoSaudeController.text.trim(),
-        'alergias': anamneseAlergiasController.text.trim(),
-        'medicamentos': anamneseMedicamentosController.text.trim(),
-        'habitos': anamneseHabitosController.text.trim(),
-        'aspectosEmocionais': anamneseEmocionalController.text.trim(),
-        'planejamentoParto': anamnesePartoController.text.trim(),
-        'amamentacao': anamneseAmamentacaoController.text.trim(),
-        'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
-        'data': formatarDataHora(DateTime.now()),
-        'criadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('prontuario_atendimentos')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'idGestante': idGestante,
+              'uidGestante': g['uidGestante'] ?? '',
+              'nomeGestante': g['nomeGestante'] ?? '',
+              'tipo': 'Anamnese',
+              'queixaPrincipal': anamneseQueixaController.text.trim(),
+              'historicoObstetrico': anamneseHistoricoObstetricoController.text
+                  .trim(),
+              'historicoSaude': anamneseHistoricoSaudeController.text.trim(),
+              'alergias': anamneseAlergiasController.text.trim(),
+              'medicamentos': anamneseMedicamentosController.text.trim(),
+              'habitos': anamneseHabitosController.text.trim(),
+              'aspectosEmocionais': anamneseEmocionalController.text.trim(),
+              'planejamentoParto': anamnesePartoController.text.trim(),
+              'amamentacao': anamneseAmamentacaoController.text.trim(),
+              'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
+              'data': formatarDataHora(DateTime.now()),
+              'criadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       anamneseQueixaController.clear();
       anamneseHistoricoObstetricoController.clear();
@@ -12175,26 +12616,31 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('prontuario_atendimentos').add({
-        'idGestante': idGestante,
-        'nomeGestante': g['nomeGestante'] ?? '',
-        'tipo': 'Exame físico',
-        'pa': examePaController.text.trim(),
-        'fc': exameFcController.text.trim(),
-        'temperatura': exameTemperaturaController.text.trim(),
-        'peso': examePesoController.text.trim(),
-        'altura': exameAlturaController.text.trim(),
-        'imc': exameImcController.text.trim(),
-        'alturaUterina': exameAlturaUterinaController.text.trim(),
-        'bcf': exameBcfController.text.trim(),
-        'edema': exameEdemaController.text.trim(),
-        'mamas': exameMamasController.text.trim(),
-        'abdome': exameAbdomeController.text.trim(),
-        'observacoes': exameObservacoesController.text.trim(),
-        'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
-        'data': formatarDataHora(DateTime.now()),
-        'criadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('prontuario_atendimentos')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'idGestante': idGestante,
+              'uidGestante': g['uidGestante'] ?? '',
+              'nomeGestante': g['nomeGestante'] ?? '',
+              'tipo': 'Exame físico',
+              'pa': examePaController.text.trim(),
+              'fc': exameFcController.text.trim(),
+              'temperatura': exameTemperaturaController.text.trim(),
+              'peso': examePesoController.text.trim(),
+              'altura': exameAlturaController.text.trim(),
+              'imc': exameImcController.text.trim(),
+              'alturaUterina': exameAlturaUterinaController.text.trim(),
+              'bcf': exameBcfController.text.trim(),
+              'edema': exameEdemaController.text.trim(),
+              'mamas': exameMamasController.text.trim(),
+              'abdome': exameAbdomeController.text.trim(),
+              'observacoes': exameObservacoesController.text.trim(),
+              'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
+              'data': formatarDataHora(DateTime.now()),
+              'criadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       examePaController.clear();
       exameFcController.clear();
@@ -12226,19 +12672,24 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('prontuario_atendimentos').add({
-        'idGestante': idGestante,
-        'nomeGestante': g['nomeGestante'] ?? '',
-        'tipo': 'Plano de cuidado',
-        'condutas': planoCondutasController.text.trim(),
-        'orientacoes': planoOrientacoesController.text.trim(),
-        'encaminhamentos': planoEncaminhamentosController.text.trim(),
-        'retorno': planoRetornoController.text.trim(),
-        'observacoes': planoObservacoesController.text.trim(),
-        'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
-        'data': formatarDataHora(DateTime.now()),
-        'criadoEm': DateTime.now().toIso8601String(),
-      });
+      await firestore
+          .collection('prontuario_atendimentos')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'idGestante': idGestante,
+              'uidGestante': g['uidGestante'] ?? '',
+              'nomeGestante': g['nomeGestante'] ?? '',
+              'tipo': 'Plano de cuidado',
+              'condutas': planoCondutasController.text.trim(),
+              'orientacoes': planoOrientacoesController.text.trim(),
+              'encaminhamentos': planoEncaminhamentosController.text.trim(),
+              'retorno': planoRetornoController.text.trim(),
+              'observacoes': planoObservacoesController.text.trim(),
+              'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
+              'data': formatarDataHora(DateTime.now()),
+              'criadoEm': DateTime.now().toIso8601String(),
+            }),
+          );
 
       planoCondutasController.clear();
       planoOrientacoesController.clear();
@@ -12270,16 +12721,21 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      await firestore.collection('prontuarios').add({
-        'idGestante': idGestante,
-        'nomeGestante': nomeGestante,
-        'texto': texto,
-        'data': formatarDataHora(DateTime.now()),
-        'criadoEm': DateTime.now().toIso8601String(),
-        'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
-        'tipo': tipoObservacaoProntuario,
-        'anexo': nomeArquivoSelecionado,
-      });
+      await firestore
+          .collection('prontuarios')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'idGestante': idGestante,
+              'uidGestante': g['uidGestante'] ?? '',
+              'nomeGestante': nomeGestante,
+              'texto': texto,
+              'data': formatarDataHora(DateTime.now()),
+              'criadoEm': DateTime.now().toIso8601String(),
+              'eo': usuarioEhAdmin() ? eoResponsavelProntuario : nomeEoLogada(),
+              'tipo': tipoObservacaoProntuario,
+              'anexo': nomeArquivoSelecionado,
+            }),
+          );
 
       observacaoProntuarioController.clear();
       nomeArquivoSelecionado = '';
@@ -12560,9 +13016,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget timelineProntuario(Map<String, String> g) {
     return StreamBuilder<QuerySnapshot>(
-      stream: firestore
-          .collection('prontuario_atendimentos')
-          .where('idGestante', isEqualTo: g['id'])
+      stream: tenantFirestore
+          .consultaRegistrosDoPaciente(
+            'prontuario_atendimentos',
+            pacienteId: g['id'] ?? '',
+          )
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
@@ -12747,9 +13205,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       const SizedBox(height: 15),
 
       StreamBuilder<QuerySnapshot>(
-        stream: firestore
-            .collection('prontuarios')
-            .where('idGestante', isEqualTo: g['id'])
+        stream: tenantFirestore
+            .consultaRegistrosDoPaciente(
+              'prontuarios',
+              pacienteId: g['id'] ?? '',
+            )
             .snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
@@ -13434,7 +13894,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<List<Map<String, String>>> carregarNotasFiscaisNfse() async {
-    final resultado = await firestore.collection('notas_fiscais').get();
+    final resultado = await tenantFirestore
+        .consultaClinica('notas_fiscais')
+        .get();
 
     return resultado.docs.map((doc) {
       final dados = doc.data();
@@ -13816,34 +14278,38 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     try {
       mostrarMensagem('Enviando NFS-e para a Focus...');
 
-      final notaRef = await firestore.collection('notas_fiscais').add({
-        'empresaId': 'natus',
-        'gestanteId': gestanteId,
-        'gestante': g['nomeGestante'] ?? '',
-        'nomeTomador': g['nomeGestante'] ?? '',
-        'cpfCnpjTomador': g['cpfGestante'] ?? '',
-        'emailTomador': g['emailGestante'] ?? '',
-        'telefoneTomador': g['telefoneGestante'] ?? '',
-        'endereco': g['enderecoGestante'] ?? '',
-        'numero': g['numeroGestante'] ?? '',
-        'complemento': g['complementoGestante'] ?? '',
-        'bairro': g['bairroGestante'] ?? '',
-        'cidade': g['cidadeGestante'] ?? '',
-        'estado': g['estadoGestante'] ?? 'PR',
-        'cep': g['cepGestante'] ?? '',
-        'planoId': g['planoId'] ?? '',
-        'plano': g['plano'] ?? '',
-        'valorTotal': valorTotal,
-        'descricaoServico': descricaoNfseGestante(g),
-        'status': 'PROCESSANDO',
-        'ambiente': 'homologacao',
-        'focusRef': '',
-        'pdfUrl': '',
-        'xmlUrl': '',
-        'criadoEm': formatarDataHora(DateTime.now()),
-        'emitidoEm': '',
-        'origem': 'central_nfse_manual',
-      });
+      final notaRef = await firestore
+          .collection('notas_fiscais')
+          .add(
+            tenantFirestore.prepararCriacao({
+              'empresaId': 'natus',
+              'gestanteId': gestanteId,
+              'gestante': g['nomeGestante'] ?? '',
+              'nomeTomador': g['nomeGestante'] ?? '',
+              'cpfCnpjTomador': g['cpfGestante'] ?? '',
+              'emailTomador': g['emailGestante'] ?? '',
+              'telefoneTomador': g['telefoneGestante'] ?? '',
+              'endereco': g['enderecoGestante'] ?? '',
+              'numero': g['numeroGestante'] ?? '',
+              'complemento': g['complementoGestante'] ?? '',
+              'bairro': g['bairroGestante'] ?? '',
+              'cidade': g['cidadeGestante'] ?? '',
+              'estado': g['estadoGestante'] ?? 'PR',
+              'cep': g['cepGestante'] ?? '',
+              'planoId': g['planoId'] ?? '',
+              'plano': g['plano'] ?? '',
+              'valorTotal': valorTotal,
+              'descricaoServico': descricaoNfseGestante(g),
+              'status': 'PROCESSANDO',
+              'ambiente': 'homologacao',
+              'focusRef': '',
+              'pdfUrl': '',
+              'xmlUrl': '',
+              'criadoEm': formatarDataHora(DateTime.now()),
+              'emitidoEm': '',
+              'origem': 'central_nfse_manual',
+            }),
+          );
 
       final callable = FirebaseFunctions.instance.httpsCallable(
         'gerarNfseFocus',
@@ -13888,7 +14354,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<List<Map<String, String>>> carregarHistoricoFiscalNfse() async {
-    final resultado = await firestore.collection('notas_fiscais').get();
+    final resultado = await tenantFirestore
+        .consultaClinica('notas_fiscais')
+        .get();
 
     final notas = resultado.docs.map((doc) {
       final dados = doc.data();
@@ -14722,13 +15190,34 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               gestanteSelecionada = g;
             });
           },
-          onExcluir: () => confirmarExcluirGestante(g),
+          onExcluir: usuarioEhAdmin()
+              ? () => confirmarExcluirGestante(g)
+              : null,
         );
       }).toList(),
     );
   }
 
   Future<void> confirmarExcluirGestante(Map<String, String> g) async {
+    if (!usuarioEhAdmin()) {
+      mostrarMensagem('Somente o administrador pode excluir pacientes.');
+      return;
+    }
+
+    final possuiAcessoVinculado = [
+      g['uidPaciente'],
+      g['pacienteUid'],
+      g['uidGestante'],
+      g['gestanteUid'],
+    ].any((uid) => (uid ?? '').trim().isNotEmpty);
+    if (possuiAcessoVinculado) {
+      mostrarMensagem(
+        'Revogue primeiro o acesso da paciente na tela Usuários. '
+        'Isso evita deixar uma conta sem cadastro vinculado.',
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (dialogContext) {
@@ -14752,30 +15241,58 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 Navigator.of(context).pop();
 
                 final id = g['id'];
-                final nome = g['nomeGestante'];
-
                 if (id == null || id.isEmpty) {
                   mostrarMensagem('ID não encontrado.');
                   return;
                 }
 
                 try {
-                  final parcelas = await firestore
-                      .collection('parcelas')
-                      .where('gestante', isEqualTo: nome)
-                      .get();
-
-                  for (var doc in parcelas.docs) {
-                    await doc.reference.delete();
+                  final pacienteAtual = await firestore
+                      .collection('gestantes')
+                      .doc(id)
+                      .get(const GetOptions(source: Source.server));
+                  final dadosPacienteAtual = pacienteAtual.data();
+                  if (dadosPacienteAtual == null ||
+                      !widget.escopoTenant.pertenceAoTenant(
+                        dadosPacienteAtual,
+                      )) {
+                    mostrarMensagem(
+                      'O cadastro não existe mais ou saiu da clínica atual.',
+                    );
+                    return;
+                  }
+                  final acessoCriadoDuranteConfirmacao = [
+                    dadosPacienteAtual['uidPaciente'],
+                    dadosPacienteAtual['pacienteUid'],
+                    dadosPacienteAtual['uidGestante'],
+                    dadosPacienteAtual['gestanteUid'],
+                  ].any((uid) => (uid ?? '').toString().trim().isNotEmpty);
+                  if (acessoCriadoDuranteConfirmacao) {
+                    mostrarMensagem(
+                      'A paciente possui acesso ativo. Revogue-o antes de excluir.',
+                    );
+                    return;
                   }
 
-                  await firestore.collection('gestantes').doc(id).delete();
+                  final parcelas = await tenantFirestore
+                      .consultaClinica('parcelas')
+                      .where('gestanteId', isEqualTo: id)
+                      .get();
+                  final batch = firestore.batch();
+                  for (final doc in parcelas.docs) {
+                    batch.delete(doc.reference);
+                  }
+                  batch.delete(firestore.collection('gestantes').doc(id));
+                  await batch.commit();
 
                   setState(() {
                     gestantes.removeWhere((item) => item['id'] == id);
 
                     parcelasFinanceiras.removeWhere(
-                      (p) => p['gestante'] == nome,
+                      (p) =>
+                          p['gestanteId'] == id ||
+                          p['pacienteId'] == id ||
+                          p['idGestante'] == id,
                     );
 
                     marcadores.removeWhere((m) => m.markerId.value == id);
@@ -14839,42 +15356,23 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<LatLng?> buscarCoordenada(String endereco) async {
     try {
-      const apiKey = 'AIzaSyAL3dKPODz98P9UEhlzW1YM4JTRiCBvesI';
-
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/geocode/json'
-        '?address=${Uri.encodeComponent(endereco)}'
-        '&region=br'
-        '&key=$apiKey',
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'buscarCoordenadaEndereco',
       );
+      final resposta = await callable.call(<String, dynamic>{
+        'endereco': endereco.trim(),
+      });
+      final dados = Map<String, dynamic>.from(resposta.data as Map);
+      final latitude = dados['latitude'];
+      final longitude = dados['longitude'];
 
-      final resposta = await http.get(url);
-
-      if (resposta.statusCode != 200) {
-        debugPrint('❌ Erro HTTP Geocoding: ${resposta.statusCode}');
+      if (latitude is! num || longitude is! num) {
         return null;
       }
 
-      final dados = jsonDecode(resposta.body);
-
-      if (dados['status'] != 'OK') {
-        debugPrint('❌ Geocoding status: ${dados['status']} - $endereco');
-        return null;
-      }
-
-      final location = dados['results'][0]['geometry']['location'];
-
-      final lat = location['lat'];
-      final lng = location['lng'];
-
-      if (lat == null || lng == null) {
-        debugPrint('❌ Latitude/longitude nulas para: $endereco');
-        return null;
-      }
-
-      return LatLng((lat as num).toDouble(), (lng as num).toDouble());
+      return LatLng(latitude.toDouble(), longitude.toDouble());
     } catch (e) {
-      debugPrint('Erro ao converter endereço via API: $e');
+      debugPrint('Erro ao converter endereço: $e');
       return null;
     }
   }
@@ -14948,7 +15446,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   PlatformFile? arquivoSelecionado;
 
   Future<void> selecionarArquivo() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
 
     if (result != null && result.files.isNotEmpty) {
       setState(() {
@@ -14985,7 +15487,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       }
 
       final listaFirebase = gregras.filtrarGestantesPorPerfil(
-        await dados.buscarGestantes(),
+        await dados.buscarGestantes(widget.escopoTenant),
         tipoUsuario: widget.tipoUsuario,
         nomeUsuario: nomeFiltroCarteira,
       );
@@ -15887,6 +16389,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   ) async {
     final gestanteId = (gestante['id'] ?? '').trim();
     final nome = (gestante['nomeGestante'] ?? '').trim();
+    final uidGestante = (gestante['uidGestante'] ?? '').trim();
 
     if (gestanteId.isEmpty) {
       mostrarMensagem('ID da paciente não encontrado.');
@@ -15925,7 +16428,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      final snapshot = await firestore.collection('parcelas').get();
+      final snapshot = await tenantFirestore.consultaClinica('parcelas').get();
       final documentos = snapshot.docs.where((doc) {
         final dados = doc.data();
         final idVinculado = (dados['gestanteId'] ?? '').toString().trim();
@@ -16050,7 +16553,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       batch.update(
         firestore.collection('gestantes').doc(gestanteId),
-        dadosAtualizados,
+        tenantFirestore.prepararAtualizacaoTexto(dadosAtualizados),
       );
 
       final entradasPendentes = documentos.where((doc) {
@@ -16061,6 +16564,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         final dadosEntrada = <String, String>{
           'gestante': nome,
           'gestanteId': gestanteId,
+          'uidGestante': uidGestante,
           'tipo': 'entrada',
           'numero': '0',
           'descricao': 'Entrada',
@@ -16070,9 +16574,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           'editadoEm': agora,
         };
         if (entradasPendentes.isEmpty) {
-          batch.set(firestore.collection('parcelas').doc(), dadosEntrada);
+          batch.set(
+            firestore.collection('parcelas').doc(),
+            tenantFirestore.prepararCriacaoTexto(dadosEntrada),
+          );
         } else {
-          batch.update(entradasPendentes.first.reference, dadosEntrada);
+          batch.update(
+            entradasPendentes.first.reference,
+            tenantFirestore.prepararAtualizacaoTexto(dadosEntrada),
+          );
           for (final excedente in entradasPendentes.skip(1)) {
             batch.delete(excedente.reference);
           }
@@ -16100,6 +16610,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         final dadosParcela = <String, String>{
           'gestante': nome,
           'gestanteId': gestanteId,
+          'uidGestante': uidGestante,
           'tipo': 'parcela',
           'numero': numero.toString(),
           'descricao': '$numeroª Parcela',
@@ -16113,9 +16624,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         };
 
         if (indice < parcelasPendentes.length) {
-          batch.update(parcelasPendentes[indice].reference, dadosParcela);
+          batch.update(
+            parcelasPendentes[indice].reference,
+            tenantFirestore.prepararAtualizacaoTexto(dadosParcela),
+          );
         } else {
-          batch.set(firestore.collection('parcelas').doc(), dadosParcela);
+          batch.set(
+            firestore.collection('parcelas').doc(),
+            tenantFirestore.prepararCriacaoTexto(dadosParcela),
+          );
         }
       }
       for (final excedente in parcelasPendentes.skip(numerosPendentes.length)) {
@@ -16164,9 +16681,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                     TextField(
                       enabled: false,
-                      controller: TextEditingController(text: 'N@tus2026!'),
+                      controller: TextEditingController(
+                        text: 'Link seguro enviado por e-mail',
+                      ),
                       decoration: const InputDecoration(
-                        labelText: 'Senha padrão',
+                        labelText: 'Definição da senha',
                         floatingLabelBehavior: FloatingLabelBehavior.always,
                         border: OutlineInputBorder(),
                       ),
@@ -16337,52 +16856,37 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     try {
-      const senhaPadrao = 'N@tus2026!';
+      final emailNovoUsuario = novoEmailController.text.trim().toLowerCase();
+      final idVinculo = switch (novoTipoUsuario) {
+        'gestante' => gestanteSelecionadaLogin ?? '',
+        'enfermeira' => enfermeiraSelecionadaLogin ?? '',
+        'obstetra' => obstetraSelecionadoLogin ?? '',
+        _ => '',
+      };
 
-      final secondaryApp = await Firebase.initializeApp(
-        name: 'Secondary',
-        options: Firebase.app().options,
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'criarUsuarioClinica',
       );
-
-      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-
-      final userCredential = await secondaryAuth.createUserWithEmailAndPassword(
-        email: novoEmailController.text.trim(),
-        password: senhaPadrao,
-      );
-
-      final uid = userCredential.user!.uid;
-
-      await firestore.collection('usuarios').doc(uid).set({
+      final resposta = await callable.call({
         'nome': novoNomeController.text.trim(),
-        'email': novoEmailController.text.trim(),
+        'email': emailNovoUsuario,
         'tipo': novoTipoUsuario,
-        'uid': uid,
+        'idVinculo': idVinculo,
       });
-
-      if (novoTipoUsuario == 'gestante') {
-        await firestore
-            .collection('gestantes')
-            .doc(gestanteSelecionadaLogin)
-            .update({'uidGestante': uid});
+      final resultado = Map<String, dynamic>.from(resposta.data as Map);
+      if (resultado['sucesso'] != true) {
+        throw StateError('O servidor não confirmou a criação do usuário.');
       }
 
-      if (novoTipoUsuario == 'enfermeira') {
-        await firestore
-            .collection('enfermeiras')
-            .doc(enfermeiraSelecionadaLogin)
-            .update({'uidEnfermeira': uid});
+      var conviteEnviado = false;
+      try {
+        await FirebaseAuth.instance.sendPasswordResetEmail(
+          email: emailNovoUsuario,
+        );
+        conviteEnviado = true;
+      } catch (e) {
+        debugPrint('Usuário criado, mas o convite não foi enviado: $e');
       }
-
-      if (novoTipoUsuario == 'obstetra') {
-        await firestore
-            .collection('obstetras')
-            .doc(obstetraSelecionadoLogin)
-            .update({'uidObstetra': uid});
-      }
-
-      await secondaryAuth.signOut();
-      await secondaryApp.delete();
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -16398,7 +16902,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await carregarObstetrasFirestore();
       await carregarGestantesFirestore();
 
-      mostrarMensagem('Usuário criado com sucesso!');
+      mostrarMensagem(
+        conviteEnviado
+            ? 'Usuário criado. O link para definir a senha foi enviado.'
+            : 'Usuário criado, mas o e-mail de acesso ficou pendente.',
+      );
+    } on FirebaseFunctionsException catch (e) {
+      mostrarMensagem(e.message ?? 'Erro ao criar usuário.');
     } catch (e) {
       mostrarMensagem('Erro ao criar usuário: $e');
     }
@@ -16777,7 +17287,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     debugPrint('🔥 TENTANDO SALVAR NO FIREBASE');
 
     try {
-      final docRef = await firestore.collection('gestantes').add(gestante);
+      final docRef = await firestore
+          .collection('gestantes')
+          .add(tenantFirestore.prepararCriacao(gestante));
 
       gestante['id'] = docRef.id;
 
@@ -16797,7 +17309,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     Map<String, String> atendimento,
   ) async {
     try {
-      await firestore.collection('atendimentos').add(atendimento);
+      await firestore
+          .collection('atendimentos')
+          .add(tenantFirestore.prepararCriacaoTexto(atendimento));
       debugPrint('✅ Atendimento salvo no Firebase');
     } catch (e) {
       debugPrint('❌ Erro ao salvar atendimento: $e');
@@ -16807,7 +17321,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> salvarMaterialFirestore(Map<String, String> material) async {
     try {
-      await firestore.collection('materiais').add(material);
+      await firestore
+          .collection('materiais')
+          .add(tenantFirestore.prepararCriacaoTexto(material));
       debugPrint('✅ Material salvo no Firebase');
     } catch (e) {
       debugPrint('❌ Erro ao salvar material: $e');
@@ -16817,7 +17333,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarMateriaisFirestore() async {
     try {
-      final resultado = await firestore.collection('materiais').get();
+      if (widget.escopoTenant.ehPaciente) {
+        setState(materiais.clear);
+        return;
+      }
+
+      final resultado = await tenantFirestore
+          .consultaClinica('materiais')
+          .get();
 
       final listaFirebase = resultado.docs.map((doc) {
         final dados = doc.data();
@@ -16839,7 +17362,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<String?> uploadArquivo(PlatformFile arquivo) async {
+  Future<String?> uploadArquivo(
+    PlatformFile arquivo, {
+    String pasta = 'arquivos',
+    String? pacienteId,
+  }) async {
     final controller = UploadProgressController(
       titulo: 'Enviando arquivo',
       mensagem: 'Preparando arquivo para envio...',
@@ -16857,16 +17384,21 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       dialogoAberto = true;
 
       final nomeArquivo =
-          '${DateTime.now().millisecondsSinceEpoch}_${arquivo.name}';
+          '${DateTime.now().millisecondsSinceEpoch}_${nomeArquivoSeguro(arquivo.name)}';
 
-      final ref = storage.ref().child('documentos/$nomeArquivo');
+      final ref = storage.ref().child(
+        tenantFirestore.caminhoStorage('$pasta/$nomeArquivo'),
+      );
 
       controller.preparing(
         titulo: 'Enviando arquivo',
         mensagem: 'Iniciando envio de ${arquivo.name}...',
       );
 
-      final task = ref.putData(arquivo.bytes!);
+      final task = ref.putData(
+        arquivo.bytes!,
+        metadadosUpload(arquivo, pacienteId: pacienteId),
+      );
 
       final subscription = task.snapshotEvents.listen((snapshot) {
         final total = snapshot.totalBytes;
@@ -16979,7 +17511,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> carregarDocumentosFirestore() async {
     try {
-      final resultado = await firestore.collection('documentos').get();
+      final resultado = await tenantFirestore
+          .consultaDoPaciente('documentos', campoUid: 'uidGestante')
+          .get();
 
       final listaFirebase = resultado.docs.map((doc) {
         final dados = doc.data();
@@ -17006,22 +17540,28 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> excluirDocumento(Map<String, String> doc) async {
+    if (!usuarioEhAdmin()) {
+      mostrarMensagem('Somente o administrador pode excluir documentos.');
+      return;
+    }
+
     try {
       final id = doc['id'];
       final url = doc['arquivoUrl'];
 
-      // 🔥 1. Excluir do Storage
-      if (url != null && url.isNotEmpty) {
-        final ref = storage.refFromURL(url);
-        await ref.delete();
-      }
-
-      // 🔥 2. Excluir do Firestore
       if (id != null && id.isNotEmpty) {
         await firestore.collection('documentos').doc(id).delete();
       }
 
-      // 🔥 3. Atualizar tela
+      if (url != null && url.isNotEmpty) {
+        final ref = storage.refFromURL(url);
+        try {
+          await ref.delete();
+        } catch (e) {
+          debugPrint('Falha ao remover arquivo órfão do documento: $e');
+        }
+      }
+
       setState(() {
         documentos.removeWhere((d) => d['id'] == id);
       });
@@ -17035,10 +17575,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> gerarParcelasDaGestante(Map<String, String> gestante) async {
     final nome = gestante['nomeGestante'] ?? '';
+    final gestanteId = (gestante['id'] ?? '').trim();
+    final uidGestante = (gestante['uidGestante'] ?? '').trim();
 
-    final parcelasExistentes = await firestore
-        .collection('parcelas')
-        .where('gestante', isEqualTo: nome)
+    final parcelasExistentes = await tenantFirestore
+        .consultaRegistrosDoPaciente(
+          'parcelas',
+          pacienteId: gestanteId,
+          campoId: 'gestanteId',
+        )
         .get();
 
     if (parcelasExistentes.docs.isNotEmpty) {
@@ -17074,6 +17619,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }) {
       return {
         'gestante': nome,
+        'gestanteId': gestanteId,
+        'uidGestante': uidGestante,
         'tipo': tipo,
         'numero': numero,
         'descricao': descricao,
@@ -17121,7 +17668,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         parcelasFinanceiras.add(entradaFinanceira);
       });
 
-      await firestore.collection('parcelas').add(entradaFinanceira);
+      await firestore
+          .collection('parcelas')
+          .add(tenantFirestore.prepararCriacaoTexto(entradaFinanceira));
     }
 
     for (int i = 1; i <= quantidadeParcelas; i++) {
@@ -17138,13 +17687,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         parcelasFinanceiras.add(novaParcela);
       });
 
-      await firestore.collection('parcelas').add(novaParcela);
+      await firestore
+          .collection('parcelas')
+          .add(tenantFirestore.prepararCriacaoTexto(novaParcela));
     }
   }
 
   Future<void> carregarParcelasFirestore() async {
     try {
-      final resultado = await firestore.collection('parcelas').get();
+      final resultado = await tenantFirestore
+          .consultaDoPaciente('parcelas', campoUid: 'uidGestante')
+          .get();
 
       final listaFirebase = resultado.docs.map((doc) {
         final dados = doc.data();
@@ -17805,7 +18358,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> salvarContracaoFirestore(Map<String, String> contracao) async {
     try {
-      await firestore.collection('contracoes').add(contracao);
+      await firestore
+          .collection('contracoes')
+          .add(tenantFirestore.prepararCriacaoTexto(contracao));
 
       debugPrint('✅ Contração salva no Firebase');
     } catch (e) {
@@ -18078,7 +18633,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     mostrarMensagem('Enviando comprovante...');
 
-    final urlComprovante = await uploadArquivo(arquivoSelecionado!);
+    final urlComprovante = await uploadArquivo(
+      arquivoSelecionado!,
+      pasta: 'financeiro/comprovantes',
+    );
 
     if (urlComprovante == null) {
       mostrarMensagem('Erro ao enviar comprovante.');

@@ -46,9 +46,11 @@ Future<void> abrirPopupCriarUsuarioDialog({
 
                   TextField(
                     enabled: false,
-                    controller: TextEditingController(text: 'N@tus2026!'),
+                    controller: TextEditingController(
+                      text: 'Link seguro enviado por e-mail',
+                    ),
                     decoration: const InputDecoration(
-                      labelText: 'Senha padrão',
+                      labelText: 'Definição da senha',
                       floatingLabelBehavior: FloatingLabelBehavior.always,
                       border: OutlineInputBorder(),
                     ),

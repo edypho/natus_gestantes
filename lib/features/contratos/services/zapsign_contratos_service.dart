@@ -1,14 +1,16 @@
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../../../saas/tenant_access_scope.dart';
 import '../models/contrato_registro.dart';
 import '../models/contrato_solicitacao.dart';
 import '../repositories/contratos_repository.dart';
 
 class ZapSignContratosService {
   ZapSignContratosService({
+    required TenantAccessScope escopo,
     ContratosRepository? repository,
     FirebaseFunctions? functions,
-  }) : _repository = repository ?? ContratosRepository(),
+  }) : _repository = repository ?? ContratosRepository(escopo: escopo),
        _functions = functions ?? FirebaseFunctions.instance;
 
   final ContratosRepository _repository;

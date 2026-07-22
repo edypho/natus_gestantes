@@ -7,7 +7,6 @@ class PrimeiroLoginSaaSGuard {
     return usuario['primeiroLogin'] == true;
   }
 
-  static String senhaTemporaria(Map<String, dynamic>? usuario) {
-    return usuario?['senhaTemporaria']?.toString() ?? '';
-  }
+  @Deprecated('Senhas temporárias não são armazenadas nem exibidas.')
+  static String senhaTemporaria(Map<String, dynamic>? _) => '';
 }

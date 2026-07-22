@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'super_admin_auth_config.dart';
 import 'super_admin_repository.dart';
 
 Future<void> superAdminCriarClinicaComAdminDialog({
@@ -11,12 +10,10 @@ Future<void> superAdminCriarClinicaComAdminDialog({
   final nomeClinicaController = TextEditingController();
   final nomeAdminController = TextEditingController();
   final emailAdminController = TextEditingController();
-  final senhaTemporariaController = TextEditingController(
-    text: SuperAdminAuthConfig.senhaTemporariaPadrao,
-  );
   final valorController = TextEditingController(text: '597');
 
   String planoSelecionado = 'Clínica Start';
+  var salvando = false;
 
   await showDialog<void>(
     context: context,
@@ -51,16 +48,6 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                       controller: emailAdminController,
                       decoration: const InputDecoration(
                         labelText: 'E-mail do admin',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: senhaTemporariaController,
-                      decoration: const InputDecoration(
-                        labelText: 'Senha temporária do primeiro acesso',
-                        helperText:
-                            'Essa senha será criada no Firebase Auth e o admin troca no primeiro login.',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -119,11 +106,9 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Text(
-                        'O admin da clínica será criado no Firebase Auth '
-                        'com a senha temporária informada acima.',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        'O admin definirá a própria senha por um link seguro '
+                        'enviado ao e-mail informado.',
+                        style: TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
@@ -136,79 +121,76 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                 child: const Text('Cancelar'),
               ),
               ElevatedButton(
-                onPressed: () async {
-                  final nomeClinica = nomeClinicaController.text.trim();
-                  final nomeAdmin = nomeAdminController.text.trim();
-                  final emailAdmin = emailAdminController.text.trim();
-                  final senhaTemporaria =
-                      senhaTemporariaController.text.trim();
-                  final valor = double.tryParse(
-                        valorController.text.replaceAll(',', '.'),
-                      ) ??
-                      0;
+                onPressed: salvando
+                    ? null
+                    : () async {
+                        final nomeClinica = nomeClinicaController.text.trim();
+                        final nomeAdmin = nomeAdminController.text.trim();
+                        final emailAdmin = emailAdminController.text.trim();
+                        final valor =
+                            double.tryParse(
+                              valorController.text.replaceAll(',', '.'),
+                            ) ??
+                            0;
 
-                  if (nomeClinica.isEmpty ||
-                      nomeAdmin.isEmpty ||
-                      emailAdmin.isEmpty ||
-                      senhaTemporaria.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Preencha clínica, nome, e-mail e senha temporária.',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-
-                  if (senhaTemporaria.length <
-                      SuperAdminAuthConfig.tamanhoMinimoSenha) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'A senha precisa ter pelo menos '
-                          '${SuperAdminAuthConfig.tamanhoMinimoSenha} caracteres.',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-
-                  await repo.criarClinicaComAdmin(
-                    nomeClinica: nomeClinica,
-                    nomeAdmin: nomeAdmin,
-                    emailAdmin: emailAdmin,
-                    plano: planoSelecionado,
-                    valorAssinatura: valor,
-                    senhaTemporaria: senhaTemporaria,
-                  );
-
-                  if (context.mounted) {
-                    Navigator.pop(context);
-
-                    await showDialog<void>(
-                      context: context,
-                      builder: (context) {
-                        return AlertDialog(
-                          title: const Text('Clínica e login criados'),
-                          content: Text(
-                            'Clínica: $nomeClinica\n'
-                            'Admin: $nomeAdmin\n'
-                            'E-mail: $emailAdmin\n'
-                            'Senha temporária: $senhaTemporaria\n\n'
-                            'O cliente deve trocar a senha no primeiro acesso.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('OK'),
+                        if (nomeClinica.isEmpty ||
+                            nomeAdmin.isEmpty ||
+                            emailAdmin.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Preencha clínica, nome e e-mail.'),
                             ),
-                          ],
-                        );
+                          );
+                          return;
+                        }
+
+                        setStateDialog(() => salvando = true);
+                        late final bool conviteEnviado;
+                        try {
+                          conviteEnviado = await repo.criarClinicaComAdmin(
+                            nomeClinica: nomeClinica,
+                            nomeAdmin: nomeAdmin,
+                            emailAdmin: emailAdmin,
+                            plano: planoSelecionado,
+                            valorAssinatura: valor,
+                          );
+                        } catch (e) {
+                          if (context.mounted) {
+                            setStateDialog(() => salvando = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Erro ao criar clínica: $e'),
+                              ),
+                            );
+                          }
+                          return;
+                        }
+
+                        if (context.mounted) {
+                          Navigator.pop(context);
+
+                          await showDialog<void>(
+                            context: context,
+                            builder: (context) {
+                              return AlertDialog(
+                                title: const Text('Clínica e login criados'),
+                                content: Text(
+                                  'Clínica: $nomeClinica\n'
+                                  'Admin: $nomeAdmin\n'
+                                  'E-mail: $emailAdmin\n\n'
+                                  '${conviteEnviado ? 'O link seguro para definir a senha foi enviado.' : 'A clínica foi criada, mas o envio do e-mail ficou pendente.'}',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('OK'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        }
                       },
-                    );
-                  }
-                },
                 child: const Text('Criar clínica + admin'),
               ),
             ],

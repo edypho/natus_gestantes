@@ -20,6 +20,7 @@ class PushNotificationsService {
     'superAdmin',
     'enfermeira',
     'obstetra',
+    'profissional',
     'gestante',
   ];
 

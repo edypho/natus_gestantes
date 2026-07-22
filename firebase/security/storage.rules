@@ -1,0 +1,388 @@
+rules_version = '2';
+
+// STAGED ONLY — este arquivo não está referenciado por firebase.json.
+// Antes da ativação, conclua o roteiro em docs/MIGRACAO_MULTI_CLINICA.md.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userExists() {
+      return signedIn() && firestore.exists(
+        /databases/(default)/documents/usuarios/$(request.auth.uid)
+      );
+    }
+
+    function userData() {
+      return firestore.get(
+        /databases/(default)/documents/usuarios/$(request.auth.uid)
+      ).data;
+    }
+
+    function activeUser() {
+      return userExists() && userData().get('status', '') == 'ativo';
+    }
+
+    function hasClinicaId(data) {
+      return data.get('clinicaId', '') is string &&
+        data.get('clinicaId', '').size() > 0;
+    }
+
+    function hasAdminDonoId(data) {
+      return data.get('adminDonoId', '') is string &&
+        data.get('adminDonoId', '').size() > 0;
+    }
+
+    function aliasesCompatible(data) {
+      return (!hasClinicaId(data) || !hasAdminDonoId(data)) ||
+        data.clinicaId == data.adminDonoId;
+    }
+
+    function tenantFrom(data) {
+      return hasClinicaId(data)
+        ? data.clinicaId
+        : (hasAdminDonoId(data) ? data.adminDonoId : '');
+    }
+
+    function normalizeRole(value) {
+      return value == 'superAdmin' ||
+          value == 'superadmin' ||
+          value == 'super_admin'
+        ? 'superAdmin'
+        : (value == 'admin'
+          ? 'admin'
+          : (value == 'profissional'
+            ? 'profissional'
+            : (value == 'enfermeira'
+              ? 'enfermeira'
+              : (value == 'obstetra'
+                ? 'obstetra'
+                : (value == 'paciente' || value == 'gestante'
+                  ? 'paciente'
+                  : '')))));
+    }
+
+    function roleFrom(data) {
+      return data.get('tipo', '') != ''
+        ? normalizeRole(data.get('tipo', ''))
+        : normalizeRole(data.get('tipoUsuario', ''));
+    }
+
+    function rolesCompatible(data) {
+      return data.get('tipo', '') == '' ||
+        data.get('tipoUsuario', '') == '' ||
+        normalizeRole(data.get('tipo', '')) ==
+          normalizeRole(data.get('tipoUsuario', ''));
+    }
+
+    function canonicalTenantActive(tenantId) {
+      return firestore.exists(
+          /databases/(default)/documents/clinicas/$(tenantId)
+        ) &&
+        aliasesCompatible(firestore.get(
+          /databases/(default)/documents/clinicas/$(tenantId)
+        ).data) &&
+        tenantFrom(firestore.get(
+          /databases/(default)/documents/clinicas/$(tenantId)
+        ).data) == tenantId &&
+        firestore.get(
+          /databases/(default)/documents/clinicas/$(tenantId)
+        ).data.get('status', '') in ['ativa', 'teste'];
+    }
+
+    function tenantActive(tenantId) {
+      return tenantId is string &&
+        tenantId.size() > 0 &&
+        canonicalTenantActive(tenantId);
+    }
+
+    function superAdmin() {
+      return activeUser() &&
+        request.auth.token.get('superAdmin', false) == true &&
+        rolesCompatible(userData()) &&
+        roleFrom(userData()) == 'superAdmin';
+    }
+
+    function member(tenantId) {
+      return activeUser() &&
+        aliasesCompatible(userData()) &&
+        tenantFrom(userData()) == tenantId &&
+        rolesCompatible(userData()) &&
+        roleFrom(userData()) in [
+          'admin',
+          'profissional',
+          'enfermeira',
+          'obstetra',
+          'paciente'
+        ] &&
+        tenantActive(tenantId);
+    }
+
+    function adminMember(tenantId) {
+      return member(tenantId) && roleFrom(userData()) == 'admin';
+    }
+
+    function staffMember(tenantId) {
+      return member(tenantId) && roleFrom(userData()) in [
+        'admin',
+        'profissional',
+        'enfermeira',
+        'obstetra'
+      ];
+    }
+
+    function patientMember(tenantId) {
+      return member(tenantId) && roleFrom(userData()) == 'paciente';
+    }
+
+    function optionalPatientAliasIsString(data, field) {
+      return data.get(field, '') is string;
+    }
+
+    function patientAliasPairCompatible(data, first, second) {
+      return optionalPatientAliasIsString(data, first) &&
+        optionalPatientAliasIsString(data, second) &&
+        (data.get(first, '') == '' ||
+          data.get(second, '') == '' ||
+          data.get(first, '') == data.get(second, ''));
+    }
+
+    function patientIdAliasesCompatible(data) {
+      return patientAliasPairCompatible(data, 'pacienteId', 'gestanteId') &&
+        patientAliasPairCompatible(data, 'pacienteId', 'idGestante') &&
+        patientAliasPairCompatible(data, 'gestanteId', 'idGestante');
+    }
+
+    function patientUidAliasesCompatible(data) {
+      return patientAliasPairCompatible(data, 'uidPaciente', 'pacienteUid') &&
+        patientAliasPairCompatible(data, 'uidPaciente', 'uidGestante') &&
+        patientAliasPairCompatible(data, 'uidPaciente', 'gestanteUid') &&
+        patientAliasPairCompatible(data, 'pacienteUid', 'uidGestante') &&
+        patientAliasPairCompatible(data, 'pacienteUid', 'gestanteUid') &&
+        patientAliasPairCompatible(data, 'uidGestante', 'gestanteUid');
+    }
+
+    function currentPatientUidAliasesValid(data) {
+      return patientUidAliasesCompatible(data) &&
+        (data.get('uidPaciente', '') == '' ||
+          data.get('uidPaciente', '') == request.auth.uid) &&
+        (data.get('pacienteUid', '') == '' ||
+          data.get('pacienteUid', '') == request.auth.uid) &&
+        (data.get('uidGestante', '') == '' ||
+          data.get('uidGestante', '') == request.auth.uid) &&
+        (data.get('gestanteUid', '') == '' ||
+          data.get('gestanteUid', '') == request.auth.uid);
+    }
+
+    function activeTenantMembership() {
+      return activeUser() &&
+        aliasesCompatible(userData()) &&
+        tenantActive(tenantFrom(userData())) &&
+        rolesCompatible(userData()) &&
+        roleFrom(userData()) in [
+          'admin',
+          'profissional',
+          'enfermeira',
+          'obstetra',
+          'paciente'
+        ];
+    }
+
+    function currentPatientIdMatches(patientId) {
+      return signedIn() &&
+        patientId is string &&
+        patientId.size() > 0 &&
+        patientIdAliasesCompatible(userData()) &&
+        currentPatientUidAliasesValid(userData()) &&
+        (userData().get('pacienteId', '') == patientId ||
+          userData().get('gestanteId', '') == patientId ||
+          userData().get('idGestante', '') == patientId);
+    }
+
+    function patientDocumentOwned(tenantId, patientId) {
+      return patientMember(tenantId) &&
+        currentPatientIdMatches(patientId);
+    }
+
+    function validClinicalUpload() {
+      return request.resource != null &&
+        request.resource.size < 25 * 1024 * 1024 &&
+        request.resource.contentType in [
+          'application/pdf',
+          'image/jpeg',
+          'image/png',
+          'image/webp'
+        ];
+    }
+
+    function validImageUpload() {
+      return request.resource != null &&
+        request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType in [
+          'image/jpeg',
+          'image/png',
+          'image/webp'
+        ];
+    }
+
+    function validLibraryUpload() {
+      return request.resource != null &&
+        ((request.resource.size < 25 * 1024 * 1024 &&
+            request.resource.contentType in [
+              'application/pdf',
+              'image/jpeg',
+              'image/png',
+              'image/webp'
+            ]) ||
+          (request.resource.size < 250 * 1024 * 1024 &&
+            request.resource.contentType == 'video/mp4'));
+    }
+
+    function canonicalTenantMetadata(tenantId) {
+      return request.resource != null &&
+        request.resource.metadata.get('clinicaId', '') == tenantId &&
+        request.resource.metadata.get('adminDonoId', '') == tenantId;
+    }
+
+    function canonicalPatientMetadata(patientId) {
+      return request.resource != null &&
+        request.resource.metadata.get('pacienteId', '') == patientId;
+    }
+
+    function uploaderMetadataMatchesAuth() {
+      return signedIn() &&
+        request.resource != null &&
+        request.resource.metadata.get('enviadoPorUid', '') == request.auth.uid;
+    }
+
+    // Nova hierarquia canônica de arquivos.
+    match /clinicas/{tenantId}/pacientes/{patientId}/contratos/{allPaths=**} {
+      allow read: if superAdmin() ||
+        staffMember(tenantId) ||
+        patientDocumentOwned(tenantId, patientId);
+      allow create, update: if (superAdmin() || adminMember(tenantId)) &&
+        validClinicalUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        canonicalPatientMetadata(patientId) &&
+        uploaderMetadataMatchesAuth();
+      allow delete: if superAdmin() || adminMember(tenantId);
+    }
+
+    match /clinicas/{tenantId}/pacientes/{patientId}/{patientArea}/{allPaths=**} {
+      allow read: if patientArea in ['exames', 'documentos'] &&
+        (superAdmin() ||
+          staffMember(tenantId) ||
+          patientDocumentOwned(tenantId, patientId));
+      allow create: if patientArea in ['exames', 'documentos'] &&
+        (superAdmin() ||
+          staffMember(tenantId) ||
+          patientDocumentOwned(tenantId, patientId)) &&
+        validClinicalUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        canonicalPatientMetadata(patientId) &&
+        uploaderMetadataMatchesAuth();
+      allow update: if patientArea in ['exames', 'documentos'] &&
+        (superAdmin() || staffMember(tenantId)) &&
+        validClinicalUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        canonicalPatientMetadata(patientId) &&
+        uploaderMetadataMatchesAuth();
+      allow delete: if patientArea in ['exames', 'documentos'] &&
+        (superAdmin() || adminMember(tenantId));
+    }
+
+    match /clinicas/{tenantId}/financeiro/pacientes/{patientId}/{allPaths=**} {
+      allow read: if superAdmin() ||
+        adminMember(tenantId) ||
+        patientDocumentOwned(tenantId, patientId);
+      allow create, update: if (superAdmin() || adminMember(tenantId)) &&
+        validClinicalUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        canonicalPatientMetadata(patientId) &&
+        uploaderMetadataMatchesAuth();
+      allow delete: if superAdmin() || adminMember(tenantId);
+    }
+
+    match /clinicas/{tenantId}/financeiro/{financialArea}/{allPaths=**} {
+      allow read, delete: if financialArea != 'pacientes' &&
+        (superAdmin() || adminMember(tenantId));
+      allow create, update: if financialArea != 'pacientes' &&
+        (superAdmin() || adminMember(tenantId)) &&
+        validClinicalUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        uploaderMetadataMatchesAuth();
+    }
+
+    match /clinicas/{tenantId}/operacao/{allPaths=**} {
+      allow read, delete: if superAdmin() || staffMember(tenantId);
+      allow create, update: if (superAdmin() || staffMember(tenantId)) &&
+        validClinicalUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        uploaderMetadataMatchesAuth();
+    }
+
+    match /clinicas/{tenantId}/usuarios/{userId}/perfil/{allPaths=**} {
+      allow read: if superAdmin() ||
+        adminMember(tenantId) ||
+        (member(tenantId) && request.auth.uid == userId);
+      allow create, update: if (superAdmin() ||
+          adminMember(tenantId) ||
+        (member(tenantId) && request.auth.uid == userId)) &&
+        validImageUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        uploaderMetadataMatchesAuth();
+      allow delete: if superAdmin() ||
+        adminMember(tenantId) ||
+        (member(tenantId) && request.auth.uid == userId);
+    }
+
+    match /clinicas/{tenantId}/biblioteca/{allPaths=**} {
+      allow read: if superAdmin() || member(tenantId);
+      allow create, update: if (superAdmin() || adminMember(tenantId)) &&
+        validLibraryUpload() &&
+        canonicalTenantMetadata(tenantId) &&
+        uploaderMetadataMatchesAuth();
+      allow delete: if superAdmin() || adminMember(tenantId);
+    }
+
+    // Perfil legado fica somente leitura durante a migração. Novos uploads
+    // devem usar clinicas/{tenantId}/usuarios/{uid}/perfil/...
+    match /perfis/{userId}/{allPaths=**} {
+      allow read: if superAdmin() ||
+        (activeTenantMembership() && request.auth.uid == userId);
+      allow create, update: if false;
+      allow delete: if superAdmin();
+    }
+
+    // O caminho legado de exames não carrega tenant. Consultar usuário, clínica
+    // e paciente excederia o orçamento seguro de lookups cross-service; migre o
+    // objeto para a nova hierarquia antes de liberá-lo ao cliente.
+    match /exames/{patientId}/{allPaths=**} {
+      allow read, delete: if superAdmin();
+      allow create, update: if superAdmin() && validClinicalUpload();
+    }
+
+    // A biblioteca é tenant-scoped. O caminho legado não contém tenant e fica
+    // restrito ao superAdmin até a cópia para clinicas/{tenantId}/biblioteca.
+    match /biblioteca/{allPaths=**} {
+      allow read: if superAdmin();
+      allow create, update: if superAdmin() &&
+        validLibraryUpload() &&
+        uploaderMetadataMatchesAuth();
+      allow delete: if superAdmin();
+    }
+
+    // Os caminhos legados documentos/{arquivo} e exames/{paciente}/{arquivo}
+    // não oferecem isolamento suficiente; não há liberação para usuário comum.
+    match /documentos/{allPaths=**} {
+      allow read, delete: if superAdmin();
+      allow create, update: if superAdmin() && validClinicalUpload();
+    }
+
+    // Default deny para qualquer objeto não modelado acima.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

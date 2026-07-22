@@ -1,0 +1,1044 @@
+rules_version = '2';
+
+// STAGED ONLY — este arquivo não está referenciado por firebase.json.
+// Antes da ativação, conclua o roteiro em docs/MIGRACAO_MULTI_CLINICA.md.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userExists() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function userData() {
+      return get(
+        /databases/$(database)/documents/usuarios/$(request.auth.uid)
+      ).data;
+    }
+
+    function activeUser() {
+      return userExists() && userData().get('status', '') == 'ativo';
+    }
+
+    function hasClinicaId(data) {
+      return data.get('clinicaId', '') is string &&
+        data.get('clinicaId', '').size() > 0;
+    }
+
+    function hasAdminDonoId(data) {
+      return data.get('adminDonoId', '') is string &&
+        data.get('adminDonoId', '').size() > 0;
+    }
+
+    // Durante o backfill, a leitura aceita um dos aliases. Se ambos existirem,
+    // eles obrigatoriamente precisam apontar para a mesma clínica.
+    function tenantAliasesCompatible(data) {
+      return (!hasClinicaId(data) || !hasAdminDonoId(data)) ||
+        data.clinicaId == data.adminDonoId;
+    }
+
+    function tenantIdFrom(data) {
+      return hasClinicaId(data)
+        ? data.clinicaId
+        : (hasAdminDonoId(data) ? data.adminDonoId : '');
+    }
+
+    function belongsToTenantDualRead(data, tenantId) {
+      return tenantAliasesCompatible(data) &&
+        ((hasClinicaId(data) && data.clinicaId == tenantId) ||
+          (hasAdminDonoId(data) && data.adminDonoId == tenantId));
+    }
+
+    // Todo create/update depois da ativação precisa convergir os aliases.
+    function canonicalTenantWrite(data, tenantId) {
+      return hasClinicaId(data) &&
+        hasAdminDonoId(data) &&
+        data.clinicaId == tenantId &&
+        data.adminDonoId == tenantId;
+    }
+
+    function normalizeRole(value) {
+      return value == 'superAdmin' ||
+          value == 'superadmin' ||
+          value == 'super_admin'
+        ? 'superAdmin'
+        : (value == 'admin'
+          ? 'admin'
+          : (value == 'profissional'
+            ? 'profissional'
+            : (value == 'enfermeira'
+              ? 'enfermeira'
+              : (value == 'obstetra'
+                ? 'obstetra'
+                : (value == 'paciente' || value == 'gestante'
+                  ? 'paciente'
+                  : '')))));
+    }
+
+    function hasTipo(data) {
+      return data.get('tipo', '') is string && data.get('tipo', '').size() > 0;
+    }
+
+    function hasTipoUsuario(data) {
+      return data.get('tipoUsuario', '') is string &&
+        data.get('tipoUsuario', '').size() > 0;
+    }
+
+    function roleAliasesCompatible(data) {
+      return (!hasTipo(data) || !hasTipoUsuario(data)) ||
+        normalizeRole(data.tipo) == normalizeRole(data.tipoUsuario);
+    }
+
+    function roleFrom(data) {
+      return hasTipo(data)
+        ? normalizeRole(data.tipo)
+        : (hasTipoUsuario(data) ? normalizeRole(data.tipoUsuario) : '');
+    }
+
+    function knownClinicRole(role) {
+      return role in [
+        'admin',
+        'profissional',
+        'enfermeira',
+        'obstetra',
+        'paciente'
+      ];
+    }
+
+    function superAdminClaim() {
+      return signedIn() && request.auth.token.get('superAdmin', false) == true;
+    }
+
+    // O campo de perfil sozinho nunca concede poder global. São exigidos
+    // custom claim, perfil normalizado conhecido e usuário ativo.
+    function isSuperAdmin() {
+      return activeUser() &&
+        superAdminClaim() &&
+        roleAliasesCompatible(userData()) &&
+        roleFrom(userData()) == 'superAdmin';
+    }
+
+    function canonicalTenantActive(tenantId) {
+      return exists(/databases/$(database)/documents/clinicas/$(tenantId)) &&
+        belongsToTenantDualRead(
+          get(/databases/$(database)/documents/clinicas/$(tenantId)).data,
+          tenantId
+        ) &&
+        get(/databases/$(database)/documents/clinicas/$(tenantId))
+          .data.get('status', '') in ['ativa', 'teste'];
+    }
+
+    function legacyTenantActive(tenantId) {
+      return exists(/databases/$(database)/documents/clinicasSaaS/$(tenantId)) &&
+        belongsToTenantDualRead(
+          get(/databases/$(database)/documents/clinicasSaaS/$(tenantId)).data,
+          tenantId
+        ) &&
+        get(/databases/$(database)/documents/clinicasSaaS/$(tenantId))
+          .data.get('status', '') in ['ativa', 'teste'];
+    }
+
+    function tenantActive(tenantId) {
+      return tenantId is string &&
+        tenantId.size() > 0 &&
+        (exists(/databases/$(database)/documents/clinicas/$(tenantId))
+          ? canonicalTenantActive(tenantId)
+          : legacyTenantActive(tenantId));
+    }
+
+    function isTenantMember(tenantId) {
+      return activeUser() &&
+        roleAliasesCompatible(userData()) &&
+        knownClinicRole(roleFrom(userData())) &&
+        belongsToTenantDualRead(userData(), tenantId) &&
+        tenantActive(tenantId);
+    }
+
+    function isTenantAdmin(tenantId) {
+      return isTenantMember(tenantId) && roleFrom(userData()) == 'admin';
+    }
+
+    function isTenantStaff(tenantId) {
+      return isTenantMember(tenantId) && roleFrom(userData()) in [
+        'admin',
+        'profissional',
+        'enfermeira',
+        'obstetra'
+      ];
+    }
+
+    function isTenantPatient(tenantId) {
+      return isTenantMember(tenantId) && roleFrom(userData()) == 'paciente';
+    }
+
+    function optionalPatientAliasIsString(data, field) {
+      return data.get(field, '') is string;
+    }
+
+    function patientAliasPairCompatible(data, first, second) {
+      return optionalPatientAliasIsString(data, first) &&
+        optionalPatientAliasIsString(data, second) &&
+        (data.get(first, '') == '' ||
+          data.get(second, '') == '' ||
+          data.get(first, '') == data.get(second, ''));
+    }
+
+    function patientIdAliasesCompatible(data) {
+      return patientAliasPairCompatible(data, 'pacienteId', 'gestanteId') &&
+        patientAliasPairCompatible(data, 'pacienteId', 'idGestante') &&
+        patientAliasPairCompatible(data, 'gestanteId', 'idGestante');
+    }
+
+    function patientUidAliasesCompatible(data) {
+      return patientAliasPairCompatible(data, 'uidPaciente', 'pacienteUid') &&
+        patientAliasPairCompatible(data, 'uidPaciente', 'uidGestante') &&
+        patientAliasPairCompatible(data, 'uidPaciente', 'gestanteUid') &&
+        patientAliasPairCompatible(data, 'pacienteUid', 'uidGestante') &&
+        patientAliasPairCompatible(data, 'pacienteUid', 'gestanteUid') &&
+        patientAliasPairCompatible(data, 'uidGestante', 'gestanteUid');
+    }
+
+    function currentPatientUidAliasesValid(data) {
+      return patientUidAliasesCompatible(data) &&
+        (data.get('uidPaciente', '') == '' ||
+          data.get('uidPaciente', '') == request.auth.uid) &&
+        (data.get('pacienteUid', '') == '' ||
+          data.get('pacienteUid', '') == request.auth.uid) &&
+        (data.get('uidGestante', '') == '' ||
+          data.get('uidGestante', '') == request.auth.uid) &&
+        (data.get('gestanteUid', '') == '' ||
+          data.get('gestanteUid', '') == request.auth.uid);
+    }
+
+    function currentPatientIdMatches(patientId) {
+      return patientId is string &&
+        patientId.size() > 0 &&
+        patientIdAliasesCompatible(userData()) &&
+        currentPatientUidAliasesValid(userData()) &&
+        (userData().get('pacienteId', '') == patientId ||
+          userData().get('gestanteId', '') == patientId ||
+          userData().get('idGestante', '') == patientId);
+    }
+
+    function patientUidMatches(data) {
+      return signedIn() &&
+        patientUidAliasesCompatible(data) &&
+        (data.get('uidPaciente', '') == request.auth.uid ||
+          data.get('pacienteUid', '') == request.auth.uid ||
+          data.get('uidGestante', '') == request.auth.uid ||
+          data.get('gestanteUid', '') == request.auth.uid);
+    }
+
+    function patientPathOwnedByCurrentUser(tenantId, patientId) {
+      return isTenantPatient(tenantId) &&
+        (currentPatientIdMatches(patientId) ||
+          (exists(
+            /databases/$(database)/documents/clinicas/$(tenantId)/pacientes/$(patientId)
+          ) && patientUidMatches(get(
+            /databases/$(database)/documents/clinicas/$(tenantId)/pacientes/$(patientId)
+          ).data)));
+    }
+
+    function patientIdFrom(data) {
+      return data.get('pacienteId', '') != ''
+        ? data.get('pacienteId', '')
+        : (data.get('gestanteId', '') != ''
+          ? data.get('gestanteId', '')
+          : data.get('idGestante', ''));
+    }
+
+    function canonicalPatientWrite(data, patientId) {
+      return data.get('pacienteId', '') is string &&
+        data.get('pacienteId', '') == patientId &&
+        patientIdAliasesCompatible(data) &&
+        patientUidAliasesCompatible(data);
+    }
+
+    function legacyRecordOwnedByCurrentPatient(data) {
+      let tenantId = tenantIdFrom(data);
+      let patientId = patientIdFrom(data);
+      return belongsToTenantDualRead(data, tenantId) &&
+        patientIdAliasesCompatible(data) &&
+        patientUidAliasesCompatible(data) &&
+        isTenantPatient(tenantId) &&
+        (patientUidMatches(data) ||
+          (patientId is string &&
+            patientId.size() > 0 &&
+            currentPatientIdMatches(patientId)));
+    }
+
+    // O paciente pode criar apenas um registro explicitamente associado ao
+    // próprio cadastro e UID. Update/delete continuam reservados à equipe.
+    function patientCanCreateOwnRecord(data, tenantId, patientId) {
+      return patientId is string &&
+        patientId.size() > 0 &&
+        canonicalTenantWrite(data, tenantId) &&
+        isTenantPatient(tenantId) &&
+        currentPatientIdMatches(patientId) &&
+        patientUidMatches(data) &&
+        data.get('criadoPorUid', '') == request.auth.uid;
+    }
+
+    function patientCanCreateOwnLegacyRecord(data) {
+      let tenantId = tenantIdFrom(data);
+      let patientId = patientIdFrom(data);
+      return patientCanCreateOwnRecord(data, tenantId, patientId);
+    }
+
+    function canCreateForTenant(tenantId) {
+      return canonicalTenantWrite(request.resource.data, tenantId);
+    }
+
+    function canUpdateForTenant(tenantId) {
+      return belongsToTenantDualRead(resource.data, tenantId) &&
+        canonicalTenantWrite(request.resource.data, tenantId);
+    }
+
+    function canDeleteForTenant(tenantId) {
+      return belongsToTenantDualRead(resource.data, tenantId);
+    }
+
+    function safeOwnProfileFieldsOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'nome',
+        'fotoUrl',
+        'fotoAtualizadaEm',
+        'tema',
+        'pushAtivo',
+        'pushTokens',
+        'pushUltimoToken',
+        'pushPlataforma',
+        'pushAtualizadoEm',
+        'pushPermissao',
+        'pushPermissaoAtualizadaEm',
+        'pushSuportadoNaPlataforma'
+      ]);
+    }
+
+    // Após o updatePassword, o próprio usuário pode confirmar exatamente uma
+    // transição primeiroLogin: true -> false. O serverTimestamp precisa ser o
+    // timestamp da requisição; a regra não permite reabrir o primeiro acesso.
+    function validOwnFirstLoginTransition() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
+          'nome',
+          'fotoUrl',
+          'fotoAtualizadaEm',
+          'tema',
+          'pushAtivo',
+          'pushTokens',
+          'pushUltimoToken',
+          'pushPlataforma',
+          'pushAtualizadoEm',
+          'pushPermissao',
+          'pushPermissaoAtualizadaEm',
+          'pushSuportadoNaPlataforma',
+          'primeiroLogin',
+          'senhaAlteradaEm'
+        ]) &&
+        changed.hasAll(['primeiroLogin', 'senhaAlteradaEm']) &&
+        resource.data.get('primeiroLogin', false) == true &&
+        request.resource.data.get('primeiroLogin', true) == false &&
+        request.resource.data.get('senhaAlteradaEm', null) is timestamp &&
+        request.resource.data.get('senhaAlteradaEm', null) == request.time;
+    }
+
+    function safeOwnUserFieldsOnly() {
+      return safeOwnProfileFieldsOnly() || validOwnFirstLoginTransition();
+    }
+
+    function validClinicUserPayload(data) {
+      return roleAliasesCompatible(data) &&
+        knownClinicRole(roleFrom(data)) &&
+        data.get('status', '') in ['ativo', 'inativo', 'bloqueado'];
+    }
+
+    function validDirectoryUserPayload(data) {
+      return roleAliasesCompatible(data) &&
+        data.get('status', '') in ['ativo', 'inativo', 'bloqueado'] &&
+        ((roleFrom(data) == 'superAdmin' &&
+            !hasClinicaId(data) &&
+            !hasAdminDonoId(data)) ||
+          (knownClinicRole(roleFrom(data)) &&
+            canonicalTenantWrite(data, tenantIdFrom(data))));
+    }
+
+    function monotonicReadReceipt() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'lidasPor',
+        'atualizadoEm'
+      ]) &&
+        request.resource.data.get('lidasPor', []) is list &&
+        resource.data.get('lidasPor', []) is list &&
+        request.resource.data.lidasPor.hasAll(resource.data.lidasPor) &&
+        request.auth.uid in request.resource.data.lidasPor;
+    }
+
+    // ------------------------------------------------------------------
+    // Diretório global mínimo para bootstrap de autenticação.
+    // ------------------------------------------------------------------
+    match /usuarios/{userId} {
+      allow get: if isSuperAdmin() ||
+        (signedIn() &&
+          request.auth.uid == userId &&
+          resource.data.get('status', '') == 'ativo');
+
+      allow list: if isSuperAdmin() ||
+        (tenantAliasesCompatible(resource.data) &&
+          isTenantAdmin(tenantIdFrom(resource.data)));
+
+      allow create: if (isSuperAdmin() &&
+          validDirectoryUserPayload(request.resource.data) &&
+          request.resource.data.get('uid', '') == userId) ||
+        (canonicalTenantWrite(
+            request.resource.data,
+            tenantIdFrom(request.resource.data)
+          ) &&
+          isTenantAdmin(tenantIdFrom(request.resource.data)) &&
+          validClinicUserPayload(request.resource.data) &&
+          request.resource.data.get('uid', '') == userId);
+
+      allow update: if (isSuperAdmin() &&
+          validDirectoryUserPayload(request.resource.data) &&
+          request.resource.data.get('uid', '') == userId) ||
+        (signedIn() &&
+          request.auth.uid == userId &&
+          isTenantMember(tenantIdFrom(resource.data)) &&
+          belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          canonicalTenantWrite(
+            request.resource.data,
+            tenantIdFrom(resource.data)
+          ) &&
+          safeOwnUserFieldsOnly() &&
+          request.resource.data.get('uid', '') == userId) ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          isTenantAdmin(tenantIdFrom(resource.data)) &&
+          canonicalTenantWrite(
+            request.resource.data,
+            tenantIdFrom(resource.data)
+          ) &&
+          validClinicUserPayload(request.resource.data) &&
+          request.resource.data.get('uid', '') == userId);
+
+      allow delete: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          isTenantAdmin(tenantIdFrom(resource.data)) &&
+          request.auth.uid != userId);
+    }
+
+    // ------------------------------------------------------------------
+    // Nova hierarquia canônica: clinicas/{tenantId}/...
+    // ------------------------------------------------------------------
+    match /clinicas/{tenantId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantId) &&
+          isTenantMember(tenantId));
+      allow create, update: if isSuperAdmin() &&
+        canonicalTenantWrite(request.resource.data, tenantId) &&
+        request.resource.data.get('status', '') in [
+          'ativa',
+          'teste',
+          'pausada',
+          'bloqueada',
+          'excluida'
+        ];
+      allow delete: if isSuperAdmin();
+
+      match /usuarios/{userId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            (isTenantAdmin(tenantId) ||
+              (isTenantMember(tenantId) && request.auth.uid == userId)));
+        allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canCreateForTenant(tenantId) &&
+          validClinicUserPayload(request.resource.data) &&
+          request.resource.data.get('uid', '') == userId;
+        allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canUpdateForTenant(tenantId) &&
+          validClinicUserPayload(request.resource.data) &&
+          request.resource.data.get('uid', '') == userId;
+        allow update: if isTenantMember(tenantId) &&
+          request.auth.uid == userId &&
+          canUpdateForTenant(tenantId) &&
+          safeOwnProfileFieldsOnly() &&
+          request.resource.data.get('uid', '') == userId;
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          request.auth.uid != userId &&
+          canDeleteForTenant(tenantId);
+      }
+
+      match /profissionais/{professionalId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            isTenantStaff(tenantId));
+        allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      // Planos e biblioteca são configurações próprias de cada clínica, não
+      // catálogos globais compartilhados entre tenants.
+      match /planos/{planId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            isTenantMember(tenantId));
+        allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      match /biblioteca/{materialId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            isTenantMember(tenantId));
+        allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      match /pacientes/{patientId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            (isTenantStaff(tenantId) ||
+              patientPathOwnedByCurrentUser(tenantId, patientId)));
+        allow create: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canCreateForTenant(tenantId) &&
+          canonicalPatientWrite(request.resource.data, patientId);
+        allow update: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canUpdateForTenant(tenantId) &&
+          canonicalPatientWrite(request.resource.data, patientId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+
+        // Prontuário interno é deliberadamente mais restrito.
+        match /prontuario/{recordPath=**} {
+          allow read: if isSuperAdmin() ||
+            (belongsToTenantDualRead(resource.data, tenantId) &&
+              isTenantStaff(tenantId));
+          allow create: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+            canCreateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow update: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+            canUpdateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canDeleteForTenant(tenantId);
+        }
+
+        match /atendimentos/{recordPath=**} {
+          allow read: if isSuperAdmin() ||
+            (belongsToTenantDualRead(resource.data, tenantId) &&
+              isTenantStaff(tenantId));
+        }
+
+        // Contratos são visíveis à equipe e à própria paciente, mas qualquer
+        // mutação direta exige administração do tenant.
+        match /contratos/{recordPath=**} {
+          allow read: if isSuperAdmin() ||
+            (belongsToTenantDualRead(resource.data, tenantId) &&
+              (isTenantStaff(tenantId) ||
+                patientPathOwnedByCurrentUser(tenantId, patientId)));
+          allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canCreateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canUpdateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canDeleteForTenant(tenantId);
+        }
+
+        // O paciente pode ler os próprios recursos e criar apenas exames ou
+        // documentos próprios. Não pode alterar nem excluir após o envio.
+        match /{patientCollection}/{recordPath=**} {
+          allow read: if patientCollection in [
+              'exames',
+              'documentos',
+              'agenda'
+            ] &&
+            (isSuperAdmin() ||
+              (belongsToTenantDualRead(resource.data, tenantId) &&
+                (isTenantStaff(tenantId) ||
+                  patientPathOwnedByCurrentUser(tenantId, patientId))));
+          allow create: if patientCollection in [
+              'exames',
+              'documentos',
+              'agenda',
+              'atendimentos'
+            ] &&
+            canCreateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId) &&
+            ((isSuperAdmin() || isTenantStaff(tenantId)) ||
+              (patientCollection in ['exames', 'documentos'] &&
+                patientCanCreateOwnRecord(
+                  request.resource.data,
+                  tenantId,
+                  patientId
+                )));
+          allow update: if patientCollection in [
+              'exames',
+              'documentos',
+              'agenda',
+              'atendimentos'
+            ] &&
+            (isSuperAdmin() || isTenantStaff(tenantId)) &&
+            canUpdateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow delete: if patientCollection in [
+              'exames',
+              'documentos',
+              'agenda',
+              'atendimentos'
+            ] &&
+            (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canDeleteForTenant(tenantId);
+        }
+
+        match /financeiro/{recordPath=**} {
+          allow read: if isSuperAdmin() ||
+            (belongsToTenantDualRead(resource.data, tenantId) &&
+              (isTenantAdmin(tenantId) ||
+                patientPathOwnedByCurrentUser(tenantId, patientId)));
+          allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canCreateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canUpdateForTenant(tenantId) &&
+            canonicalPatientWrite(request.resource.data, patientId);
+          allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+            canDeleteForTenant(tenantId);
+        }
+      }
+
+      match /agenda/{eventId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            (isTenantStaff(tenantId) ||
+              legacyRecordOwnedByCurrentPatient(resource.data)));
+        allow create: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      // Operação clínica geral, sem prontuário ou financeiro.
+      match /operacao/{operationPath=**} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            isTenantStaff(tenantId));
+        allow create: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantStaff(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      // Financeiro da clínica nunca é exposto a profissionais não-admin.
+      match /financeiro/{financialPath=**} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            (isTenantAdmin(tenantId) ||
+              legacyRecordOwnedByCurrentPatient(resource.data)));
+        allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      match /configuracoes/{configPath=**} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            isTenantMember(tenantId));
+        allow create: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canCreateForTenant(tenantId);
+        allow update: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canUpdateForTenant(tenantId);
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      match /notificacoes/{notificationId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            (isTenantStaff(tenantId) ||
+              (isTenantMember(tenantId) &&
+                resource.data.get('destinatariosUids', []) is list &&
+                request.auth.uid in resource.data.destinatariosUids)));
+        allow create: if false;
+        allow update: if isTenantMember(tenantId) &&
+          canUpdateForTenant(tenantId) &&
+          monotonicReadReceipt();
+        allow delete: if (isSuperAdmin() || isTenantAdmin(tenantId)) &&
+          canDeleteForTenant(tenantId);
+      }
+
+      match /logs/{logId} {
+        allow read: if isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantId) &&
+            isTenantAdmin(tenantId));
+        allow create: if isTenantStaff(tenantId) &&
+          canCreateForTenant(tenantId) &&
+          request.resource.data.get('usuarioUid', '') == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Caminhos legados temporários. Leituras aceitam os aliases; qualquer
+    // create/update já precisa gravar os dois campos iguais.
+    // ------------------------------------------------------------------
+    match /gestantes/{patientId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          (isTenantStaff(tenantIdFrom(resource.data)) ||
+            legacyRecordOwnedByCurrentPatient(resource.data)));
+      allow create: if canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(request.resource.data)));
+      allow update: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(resource.data)));
+      allow delete: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    match /{staffDirectory}/{documentId} {
+      allow read: if staffDirectory in ['enfermeiras', 'obstetras'] &&
+        (isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+            isTenantStaff(tenantIdFrom(resource.data))));
+      allow create: if staffDirectory in ['enfermeiras', 'obstetras'] &&
+        canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(request.resource.data)));
+      allow update: if staffDirectory in ['enfermeiras', 'obstetras'] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+      allow delete: if staffDirectory in ['enfermeiras', 'obstetras'] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    // Contrato legado top-level: leitura clínica/paciente e escrita somente
+    // administrativa. O SuperAdmin depende do gate isSuperAdmin().
+    match /contratos/{contractId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          (isTenantStaff(tenantIdFrom(resource.data)) ||
+            legacyRecordOwnedByCurrentPatient(resource.data)));
+      allow create: if canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(request.resource.data)));
+      allow update: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+      allow delete: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    match /{clinicalCollection}/{documentId} {
+      allow read: if clinicalCollection in [
+          'atendimentos',
+          'exames',
+          'documentos',
+          'agenda'
+        ] &&
+        (isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+            (isTenantStaff(tenantIdFrom(resource.data)) ||
+              legacyRecordOwnedByCurrentPatient(resource.data))));
+      allow create: if clinicalCollection in [
+          'atendimentos',
+          'exames',
+          'documentos',
+          'agenda'
+        ] &&
+        canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        ((isSuperAdmin() ||
+            isTenantStaff(tenantIdFrom(request.resource.data))) ||
+          (clinicalCollection in ['exames', 'documentos'] &&
+            patientCanCreateOwnLegacyRecord(request.resource.data)));
+      allow update: if clinicalCollection in [
+          'atendimentos',
+          'exames',
+          'documentos',
+          'agenda'
+        ] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(resource.data)));
+      allow delete: if clinicalCollection in [
+          'atendimentos',
+          'exames',
+          'documentos',
+          'agenda'
+        ] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    match /{internalClinicalCollection}/{documentId} {
+      allow read: if internalClinicalCollection in [
+          'prontuario_atendimentos',
+          'prontuarios'
+        ] &&
+        (isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+            isTenantStaff(tenantIdFrom(resource.data))));
+      allow create: if internalClinicalCollection in [
+          'prontuario_atendimentos',
+          'prontuarios'
+        ] &&
+        canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(request.resource.data)));
+      allow update: if internalClinicalCollection in [
+          'prontuario_atendimentos',
+          'prontuarios'
+        ] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(resource.data)));
+      allow delete: if internalClinicalCollection in [
+          'prontuario_atendimentos',
+          'prontuarios'
+        ] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    match /contracoes/{contractionId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          (isTenantStaff(tenantIdFrom(resource.data)) ||
+            legacyRecordOwnedByCurrentPatient(resource.data)));
+      allow create: if canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() ||
+          isTenantStaff(tenantIdFrom(request.resource.data)) ||
+          legacyRecordOwnedByCurrentPatient(request.resource.data));
+      allow update: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() ||
+          isTenantStaff(tenantIdFrom(resource.data)) ||
+          legacyRecordOwnedByCurrentPatient(resource.data));
+      allow delete: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(resource.data)));
+    }
+
+    match /materiais/{materialId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          isTenantStaff(tenantIdFrom(resource.data)));
+      allow create: if canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(request.resource.data)));
+      allow update: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantStaff(tenantIdFrom(resource.data)));
+      allow delete: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    match /{financialCollection}/{financialId} {
+      allow read: if financialCollection in [
+          'parcelas',
+          'parcelasFinanceiras',
+          'notas_fiscais'
+        ] &&
+        (isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+            (isTenantAdmin(tenantIdFrom(resource.data)) ||
+              legacyRecordOwnedByCurrentPatient(resource.data))));
+      allow create: if financialCollection in [
+          'parcelas',
+          'parcelasFinanceiras',
+          'notas_fiscais'
+        ] &&
+        canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(request.resource.data)));
+      allow update: if financialCollection in [
+          'parcelas',
+          'parcelasFinanceiras',
+          'notas_fiscais'
+        ] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+      allow delete: if financialCollection in [
+          'parcelas',
+          'parcelasFinanceiras',
+          'notas_fiscais'
+        ] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    match /notificacoesCentral/{notificationId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          isTenantStaff(tenantIdFrom(resource.data)));
+      allow create: if false;
+      allow update: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        isTenantMember(tenantIdFrom(resource.data)) &&
+        monotonicReadReceipt();
+      allow delete: if belongsToTenantDualRead(
+          resource.data,
+          tenantIdFrom(resource.data)
+        ) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+    }
+
+    // Compatibilidade temporária com as coleções top-level usadas pelo app.
+    // Mesmo no legado, cada registro de planos/biblioteca pertence a um tenant.
+    match /{tenantCatalog}/{catalogId} {
+      allow read: if tenantCatalog in ['biblioteca', 'planos'] &&
+        (isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+            isTenantMember(tenantIdFrom(resource.data))));
+      allow create: if tenantCatalog in ['biblioteca', 'planos'] &&
+        canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        (isSuperAdmin() ||
+          isTenantAdmin(tenantIdFrom(request.resource.data)));
+      allow update: if tenantCatalog in ['biblioteca', 'planos'] &&
+        belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data)) &&
+        (isSuperAdmin() || isTenantAdmin(tenantIdFrom(resource.data)));
+      allow delete: if tenantCatalog in ['biblioteca', 'planos'] &&
+        (isSuperAdmin() ||
+          (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+            isTenantAdmin(tenantIdFrom(resource.data))));
+    }
+
+    match /clinicasSaaS/{tenantId} {
+      allow read: if isSuperAdmin() || isTenantMember(tenantId);
+      allow create, update: if isSuperAdmin() &&
+        canonicalTenantWrite(request.resource.data, tenantId);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /assinaturasSaaS/{subscriptionId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          isTenantAdmin(tenantIdFrom(resource.data)));
+      allow create: if isSuperAdmin() &&
+        canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        );
+      allow update: if isSuperAdmin() &&
+        canonicalTenantWrite(request.resource.data, tenantIdFrom(resource.data));
+      allow delete: if isSuperAdmin();
+    }
+
+    match /usuariosSaaS/{userId} {
+      allow read: if isSuperAdmin() ||
+        (signedIn() &&
+          request.auth.uid == userId &&
+          isTenantMember(tenantIdFrom(userData())));
+      allow create, update: if isSuperAdmin() &&
+        validDirectoryUserPayload(request.resource.data) &&
+        request.resource.data.get('uid', '') == userId;
+      allow delete: if isSuperAdmin();
+    }
+
+    match /logsAdministrativos/{logId} {
+      allow read: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          isTenantAdmin(tenantIdFrom(resource.data)));
+      allow create: if canonicalTenantWrite(
+          request.resource.data,
+          tenantIdFrom(request.resource.data)
+        ) &&
+        isTenantStaff(tenantIdFrom(request.resource.data)) &&
+        request.resource.data.get('usuarioUid', '') == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /logsSuperAdmin/{logId} {
+      allow read, create: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    // Única configuração global legível pelo cliente: chave pública de push.
+    match /integracoes/push {
+      allow read: if isSuperAdmin() ||
+        (activeUser() &&
+          tenantAliasesCompatible(userData()) &&
+          tenantActive(tenantIdFrom(userData())));
+      allow write: if isSuperAdmin();
+    }
+
+    // Default deny para qualquer caminho não modelado acima.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
