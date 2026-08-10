@@ -16,7 +16,17 @@ function Assert-Header {
 
   $response = Invoke-WebRequest -Uri "$BaseUrl$Path" -Method Head
   $actual = [string]$response.Headers[$Name]
-  if ($actual -ne $Expected) {
+  $actualComparable = $actual
+  $expectedComparable = $Expected
+  if ($Name -eq 'Cache-Control') {
+    $actualComparable = (($actual -split ',') | ForEach-Object {
+      $_.Trim()
+    } | Sort-Object) -join ','
+    $expectedComparable = (($Expected -split ',') | ForEach-Object {
+      $_.Trim()
+    } | Sort-Object) -join ','
+  }
+  if ($actualComparable -ne $expectedComparable) {
     throw "$Path retornou $Name='$actual'; esperado '$Expected'."
   }
 }
