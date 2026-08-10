@@ -48,7 +48,7 @@ Assert-Header -Path '/downloads/natus-android-1.1.0.apk' -Name 'Cache-Control' -
 Assert-Header -Path '/downloads/natus-android-1.1.0.apk' -Name 'Content-Type' -Expected 'application/vnd.android.package-archive'
 Assert-Header -Path '/downloads/natus-android-1.1.0.apk' -Name 'Content-Disposition' -Expected 'attachment; filename="natus-android-1.1.0.apk"'
 
-$home = Invoke-WebRequest -Uri "$BaseUrl/" -Method Head
+$rootResponse = Invoke-WebRequest -Uri "$BaseUrl/" -Method Head
 foreach ($headerName in @(
   'Content-Security-Policy',
   'Strict-Transport-Security',
@@ -57,7 +57,7 @@ foreach ($headerName in @(
   'Referrer-Policy',
   'Permissions-Policy'
 )) {
-  if ([string]::IsNullOrWhiteSpace([string]$home.Headers[$headerName])) {
+  if ([string]::IsNullOrWhiteSpace([string]$rootResponse.Headers[$headerName])) {
     throw "Header de segurança ausente: $headerName."
   }
 }
