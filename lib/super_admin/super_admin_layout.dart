@@ -30,10 +30,7 @@ class SuperAdminPageScaffold extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             subtitulo,
-            style: TextStyle(
-              color: Colors.grey.shade700,
-              fontSize: 15,
-            ),
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 15),
           ),
           const SizedBox(height: 28),
           child,
@@ -81,11 +78,7 @@ class SuperAdminActionCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              icone,
-              color: const Color(0xFF7B3A44),
-              size: 32,
-            ),
+            Icon(icone, color: const Color(0xFF7B3A44), size: 32),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -101,9 +94,7 @@ class SuperAdminActionCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     descricao,
-                    style: TextStyle(
-                      color: Colors.grey.shade700,
-                    ),
+                    style: TextStyle(color: Colors.grey.shade700),
                   ),
                 ],
               ),

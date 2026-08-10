@@ -5,22 +5,80 @@ const {setGlobalOptions} = require("firebase-functions");
 const {
   onDocumentCreated,
   onDocumentUpdated,
+  onDocumentWritten,
 } = require("firebase-functions/v2/firestore");
-const admin = require("firebase-admin");
+const {initializeApp} = require("firebase-admin/app");
+const {getAuth} = require("firebase-admin/auth");
+const {
+  FieldValue,
+  Timestamp,
+  getFirestore,
+} = require("firebase-admin/firestore");
+const {getMessaging} = require("firebase-admin/messaging");
+const {getStorage} = require("firebase-admin/storage");
 const {defineSecret} = require("firebase-functions/params");
 const {
   avaliarTransicaoPerfil,
 } = require("./user_lifecycle_policy");
+const {
+  AuthTokenValidationError,
+  verificarIdTokenNaoRevogado,
+} = require("./password_reset_auth");
+const {
+  MAX_SAFE_BATCH_WRITES,
+  canonicalPatientLinkedRecordPath,
+  canonicalPatientPath,
+  canonicalUserPath,
+  countPatientLinkBatchWrites,
+} = require("./canonical_dual_write_policy");
+const {
+  DurableOperationError,
+  OPERATION_KIND,
+  OPERATION_STATE,
+  adicionarCommitAoBatch,
+  consultarOperacao,
+  criarDescritorOperacao,
+  garantirUsuarioAuth,
+  marcarFirestoreParaRetentativa,
+  marcarRollbackNecessario,
+  prepararCommitOperacao,
+  reservarOperacao,
+  reverterUsuarioAuth,
+} = require("./durable_operation_journal");
+const {
+  applyRestrictedCors,
+} = require("./security/http_cors");
+const {
+  buildPrivateClinicalPush,
+} = require("./security/private_push");
+const {
+  RateLimitExceededError,
+  consumeRateLimit,
+} = require("./security/rate_limiter");
+const {
+  logSafeError,
+  safeErrorCode,
+} = require("./security/safe_logging");
+const {
+  validateCanonicalUpload,
+} = require("./security/upload_content_validator");
+const {
+  canonicalSyncDestination,
+} = require("./canonical_sync_policy");
 
 const {onRequest} = require("firebase-functions/v2/https");
 
 
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onObjectFinalized} = require("firebase-functions/v2/storage");
 
 const zapsignApiToken = defineSecret("ZAPSIGN_API_TOKEN");
 const googleMapsGeocodingApiKey = defineSecret(
     "GOOGLE_MAPS_GEOCODING_API_KEY",
 );
+// App Check e uma opcao de implantacao, nao uma configuracao lida em runtime.
+// Permanece desligado ate os provedores serem cadastrados e monitorados.
+const enforceAppCheck = false;
 const ZAPSIGN_API_BASE_URL = "https://api.zapsign.com.br/api/v1";
 const ZAPSIGN_SIGNER_BASE_URL = "https://app.zapsign.co/verificar";
 const ZAPSIGN_CONFIG_PATH = "integracoes/zapsign";
@@ -126,9 +184,91 @@ function descobrirTemplateKeyContrato(plano, consultorio) {
   return "";
 }
 
-admin.initializeApp();
+// Adapter mínimo para preservar os fluxos existentes enquanto o SDK Admin 14
+// expõe apenas as APIs modulares. Nenhum estado ou credencial é armazenado aqui.
+const adminFirestore = () => getFirestore();
+adminFirestore.FieldValue = FieldValue;
+adminFirestore.Timestamp = Timestamp;
+const admin = {
+  auth: getAuth,
+  firestore: adminFirestore,
+  messaging: getMessaging,
+  storage: getStorage,
+};
+
+initializeApp();
 
 setGlobalOptions({maxInstances: 10});
+
+exports.sincronizarRaizCanonica = onDocumentWritten(
+    "{collectionId}/{documentId}",
+    async (event) => {
+      const change = event.data;
+      if (!change) return;
+      const collectionName = event.params.collectionId;
+      const documentId = event.params.documentId;
+      const before = change.before.exists ? canonicalSyncDestination(
+          collectionName,
+          documentId,
+          change.before.data() || {},
+      ) : null;
+      const after = change.after.exists ? canonicalSyncDestination(
+          collectionName,
+          documentId,
+          change.after.data() || {},
+      ) : null;
+
+      if (after && after.status === "blocked") {
+        console.warn("Sincronização canônica recusada.", {
+          collectionName,
+          reason: after.reason,
+        });
+        return;
+      }
+      if ((!before || before.status !== "ready") &&
+          (!after || after.status !== "ready")) {
+        return;
+      }
+
+      const db = getFirestore();
+      const batch = db.batch();
+      let writes = 0;
+      if (before && before.status === "ready" &&
+          (!after || after.status !== "ready" || before.path !== after.path)) {
+        batch.delete(db.doc(before.path));
+        writes += 1;
+      }
+      if (after && after.status === "ready") {
+        batch.set(db.doc(after.path), after.data, {merge: false});
+        writes += 1;
+      }
+      if (writes > 0) await batch.commit();
+    },
+);
+
+exports.validarConteudoUpload = onObjectFinalized(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (event) => {
+      try {
+        const result = await validateCanonicalUpload({
+          objectData: event.data,
+          storage: admin.storage(),
+        });
+        if (result.deleted) {
+          console.warn(
+              "Upload canonico removido por assinatura de conteudo invalida.",
+          );
+        }
+      } catch (error) {
+        logSafeError("Falha ao validar conteudo de upload canonico.", error);
+        throw error;
+      }
+    },
+);
 
 const PERFIS_USUARIO_CONHECIDOS = new Set([
   "admin",
@@ -275,6 +415,8 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
     );
   }
 
+  await exigirSessaoAuthAtiva(autenticacao, uidNormalizado);
+
   const snapshot = await admin
       .firestore()
       .collection("usuarios")
@@ -331,6 +473,81 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
     clinicaId,
     dados,
   };
+}
+
+async function exigirSessaoAuthAtiva(autenticacao, uid) {
+  let usuarioAuth;
+
+  try {
+    usuarioAuth = await admin.auth().getUser(uid);
+  } catch (error) {
+    if (safeErrorCode(error) === "auth/user-not-found") {
+      throw new HttpsError(
+          "unauthenticated",
+          "Sessao invalida ou expirada.",
+      );
+    }
+
+    logSafeError("Falha ao validar a sessao no Firebase Auth.", error);
+    throw new HttpsError(
+        "unavailable",
+        "Nao foi possivel validar a sessao. Tente novamente.",
+    );
+  }
+
+  if (usuarioAuth.disabled) {
+    throw new HttpsError(
+        "permission-denied",
+        "Usuario desabilitado.",
+    );
+  }
+
+  const token = autenticacao && autenticacao.token ?
+    autenticacao.token : (autenticacao || {});
+  const authTimeSeconds = Number(token.auth_time);
+  const tokensValidAfterMillis = Date.parse(
+      usuarioAuth.tokensValidAfterTime || "",
+  );
+
+  if (!Number.isFinite(authTimeSeconds) ||
+      (Number.isFinite(tokensValidAfterMillis) &&
+       authTimeSeconds * 1000 < tokensValidAfterMillis)) {
+    throw new HttpsError(
+        "unauthenticated",
+        "Sessao invalida ou expirada.",
+    );
+  }
+}
+
+async function exigirLimiteUso({
+  action,
+  subjects,
+  limit,
+  windowSeconds,
+}) {
+  try {
+    await consumeRateLimit({
+      db: admin.firestore(),
+      action,
+      subjects,
+      limit,
+      windowSeconds,
+    });
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      throw new HttpsError(
+          "resource-exhausted",
+          "Muitas solicitacoes em pouco tempo. Aguarde e tente novamente.",
+          {retryAfterSeconds: error.retryAfterSeconds},
+      );
+    }
+
+    logSafeError("Falha ao aplicar limite de uso.", error);
+    throw new HttpsError(
+        "unavailable",
+        "Nao foi possivel validar o limite de uso. Tente novamente.",
+    );
+  }
 }
 
 function exigirAcessoAoTenant(contexto, clinicaId) {
@@ -603,12 +820,94 @@ async function buscarUsuarioAuthDaPaciente(contexto, paciente) {
   return usuario;
 }
 
+async function autenticarRedefinicaoSenha(
+    authorizationHeader,
+    autenticacaoCallable = null,
+) {
+  const uidCallable = textoSeguro(
+      autenticacaoCallable && autenticacaoCallable.uid,
+  );
+
+  if (autenticacaoCallable && !uidCallable) {
+    throw new HttpsError(
+        "unauthenticated",
+        "Voce precisa estar logado.",
+    );
+  }
+
+  try {
+    return await verificarIdTokenNaoRevogado(
+        admin.auth(),
+        authorizationHeader,
+        uidCallable,
+    );
+  } catch (error) {
+    if (error instanceof AuthTokenValidationError) {
+      throw new HttpsError(
+          "unauthenticated",
+          "Sessao invalida ou expirada.",
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function solicitarRedefinicaoSenhaPacienteCore(
+    autenticacao,
+    entrada,
+) {
+  const contexto = await exigirContextoUsuario(
+      autenticacao,
+      ["admin", "gestante"],
+  );
+  const paciente = await buscarPacienteParaRedefinicao(
+      contexto,
+      entrada || {},
+  );
+  await exigirLimiteUso({
+    action: "password-reset-request",
+    subjects: [
+      `actor:${contexto.uid}`,
+      `patient:${paciente.clinicaId}:${paciente.id}`,
+    ],
+    limit: 3,
+    windowSeconds: 15 * 60,
+  });
+  const usuarioAuth = await buscarUsuarioAuthDaPaciente(
+      contexto,
+      paciente,
+  );
+  const emailNormalizado = textoSeguro(usuarioAuth.email).toLowerCase();
+  const agora = new Date().toISOString();
+
+  await paciente.ref.set({
+    ...camposTenant(paciente.clinicaId),
+    linkSenhaInicial: admin.firestore.FieldValue.delete(),
+    linkSenhaInicialGeradoEm: admin.firestore.FieldValue.delete(),
+    linkSenhaInicialExpirado: true,
+    redefinicaoSenhaPendente: true,
+    redefinicaoSenhaSolicitadaEm: agora,
+    redefinicaoSenhaSolicitadaPor: contexto.uid,
+  }, {merge: true});
+
+  return {
+    sucesso: true,
+    mensagem: "Solicitacao de redefinicao registrada com seguranca.",
+    pacienteId: paciente.id,
+    emailPaciente: emailNormalizado,
+    telefonePaciente: textoSeguro(paciente.dados.telefoneGestante),
+    nomePaciente: textoSeguro(paciente.dados.nomeGestante),
+  };
+}
+
 function statusHttpParaErro(error) {
   if (error && error.code === "unauthenticated") return 401;
   if (error && error.code === "permission-denied") return 403;
   if (error && error.code === "not-found") return 404;
   if (error && error.code === "invalid-argument") return 400;
   if (error && error.code === "failed-precondition") return 400;
+  if (error && error.code === "resource-exhausted") return 429;
   if (error && error.code === "auth/user-not-found") return 404;
   if (error && textoSeguro(error.code).startsWith("auth/")) return 401;
   return 500;
@@ -657,11 +956,6 @@ const COLECOES_VINCULO_PACIENTE = [
     camposId: ["pacienteId", "idGestante", "gestanteId"],
     camposUid: CAMPOS_UID_PACIENTE,
     payload: true,
-  },
-  {
-    colecao: "notas_fiscais",
-    camposId: ["pacienteId", "gestanteId", "idGestante"],
-    camposUid: CAMPOS_UID_PACIENTE,
   },
 ];
 
@@ -1184,17 +1478,20 @@ async function prepararAtualizacoesVinculoPaciente({
             );
           }
 
+          const dadosAtualizacao = montarAtualizacaoRegistroPaciente({
+            configuracao,
+            dados,
+            pacienteId,
+            uidUsuario,
+            clinicaId,
+            uidOperador,
+          });
           atualizacoes.push({
             ref: documento.ref,
-            dados: montarAtualizacaoRegistroPaciente({
-              configuracao,
-              dados,
-              pacienteId,
-              uidUsuario,
-              clinicaId,
-              uidOperador,
-            }),
+            dados: dadosAtualizacao,
+            dadosCanonicos: {...dados, ...dadosAtualizacao},
             colecao: configuracao.colecao,
+            updateTime: documento.updateTime,
           });
         }
 
@@ -1434,12 +1731,60 @@ function contagensPorColecao(atualizacoes) {
   return contagens;
 }
 
+function adicionarEscritaGuardadaAoBatch(batch, snapshot, dados) {
+  if (snapshot.exists) {
+    if (!snapshot.updateTime) {
+      throw new HttpsError(
+          "internal",
+          "Snapshot sem versao para escrita concorrente segura.",
+      );
+    }
+
+    batch.update(
+        snapshot.ref,
+        dados,
+        {lastUpdateTime: snapshot.updateTime},
+    );
+    return;
+  }
+
+  batch.create(snapshot.ref, dados);
+}
+
+function conflitoConcorrenteFirestore(error) {
+  return [
+    "6",
+    "9",
+    "10",
+    "aborted",
+    "already-exists",
+    "failed-precondition",
+  ].includes(String(error && error.code || "").toLowerCase());
+}
+
+async function confirmarBatchGuardado(batch) {
+  try {
+    await batch.commit();
+  } catch (error) {
+    if (conflitoConcorrenteFirestore(error)) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Os dados foram alterados durante a operacao. Revise e tente " +
+            "novamente.",
+      );
+    }
+
+    throw error;
+  }
+}
+
 async function vincularUidAPaciente({
   contexto,
   uidUsuario,
   pacienteId,
   nomeUsuario,
   convitePendente = false,
+  descritorOperacao = null,
 }) {
   const uid = exigirIdDocumento(uidUsuario, "uidUsuario");
   const idPaciente = exigirIdDocumento(pacienteId, "pacienteId");
@@ -1484,6 +1829,15 @@ async function vincularUidAPaciente({
   const clinicaId = exigirTenant(paciente, "Paciente");
   exigirAcessoAoTenant(contexto, clinicaId);
   await exigirClinicaAtiva(clinicaId);
+  const usuarioCanonicoRef = db.doc(canonicalUserPath(clinicaId, uid));
+  const pacienteCanonicoRef = db.doc(
+      canonicalPatientPath(clinicaId, idPaciente),
+  );
+  const [usuarioCanonicoSnapshot, pacienteCanonicoSnapshot] =
+    await Promise.all([
+      usuarioCanonicoRef.get(),
+      pacienteCanonicoRef.get(),
+    ]);
 
   exigirIdsCompativeis(
       paciente,
@@ -1535,6 +1889,47 @@ async function vincularUidAPaciente({
     clinicaId,
     uidOperador: contexto.uid,
   });
+  const destinosCanonicos = atualizacoes.flatMap((atualizacao) => {
+    const path = canonicalPatientLinkedRecordPath({
+      collection: atualizacao.colecao,
+      documentId: atualizacao.ref.id,
+      clinicaId,
+      pacienteId: idPaciente,
+    });
+
+    if (!path) return [];
+
+    return [{
+      ref: db.doc(path),
+      dados: atualizacao.dadosCanonicos,
+      colecao: atualizacao.colecao,
+    }];
+  });
+  const quantidadeOperacoes = countPatientLinkBatchWrites({
+    legacyRecordWrites: atualizacoes.length,
+    canonicalRecordWrites: destinosCanonicos.length,
+    writesLegacyUser: usuarioSaaSSnapshot.exists,
+  });
+
+  const escritasJournal = descritorOperacao ? 1 : 0;
+
+  if (quantidadeOperacoes + escritasJournal > MAX_SAFE_BATCH_WRITES) {
+    throw new HttpsError(
+        "resource-exhausted",
+        "A vinculacao excede o limite seguro de escritas atomicas. " +
+          "Execute o backfill administrativo antes de tentar novamente.",
+    );
+  }
+
+  const snapshotsCanonicos = destinosCanonicos.length > 0 ?
+    await db.getAll(...destinosCanonicos.map((item) => item.ref)) : [];
+  const atualizacoesCanonicas = destinosCanonicos.map(
+      (item, indice) => ({
+        ...item,
+        snapshot: snapshotsCanonicos[indice],
+      }),
+  );
+
   const agora = admin.firestore.FieldValue.serverTimestamp();
   const dadosUsuarioAtual = usuarioSnapshot.exists ?
     (usuarioSnapshot.data() || {}) : {};
@@ -1585,17 +1980,61 @@ async function vincularUidAPaciente({
     dadosPaciente.linkSenhaInicialExpirado = true;
   }
 
+  const dadosUsuarioCanonico = {...dadosUsuarioAtual, ...dadosUsuario};
+  const dadosPacienteCanonico = {...paciente, ...dadosPaciente};
+  if (!pacienteCanonicoSnapshot.exists && convitePendente) {
+    delete dadosPacienteCanonico.linkSenhaInicial;
+    delete dadosPacienteCanonico.linkSenhaInicialGeradoEm;
+  }
+  const commitOperacao = descritorOperacao ?
+    await prepararCommitOperacao(db, descritorOperacao) : null;
+
+  if (commitOperacao && commitOperacao.concluida) {
+    return {
+      uidUsuario: uid,
+      pacienteId: idPaciente,
+      clinicaId,
+      registrosAtualizados: contagensPorColecao(atualizacoes),
+      conviteSenhaPendente: convitePendente,
+    };
+  }
+
   const batch = db.batch();
 
   for (const atualizacao of atualizacoes) {
-    batch.set(atualizacao.ref, atualizacao.dados, {merge: true});
+    batch.update(
+        atualizacao.ref,
+        atualizacao.dados,
+        {lastUpdateTime: atualizacao.updateTime},
+    );
+  }
+  for (const atualizacao of atualizacoesCanonicas) {
+    adicionarEscritaGuardadaAoBatch(
+        batch,
+        atualizacao.snapshot,
+        atualizacao.dados,
+    );
   }
 
-  batch.set(usuarioRef, dadosUsuario, {merge: true});
-  batch.set(pacienteRef, dadosPaciente, {merge: true});
+  adicionarEscritaGuardadaAoBatch(batch, usuarioSnapshot, dadosUsuario);
+  adicionarEscritaGuardadaAoBatch(batch, pacienteSnapshot, dadosPaciente);
+  adicionarEscritaGuardadaAoBatch(
+      batch,
+      usuarioCanonicoSnapshot,
+      dadosUsuarioCanonico,
+  );
+  adicionarEscritaGuardadaAoBatch(
+      batch,
+      pacienteCanonicoSnapshot,
+      dadosPacienteCanonico,
+  );
 
   if (usuarioSaaSSnapshot.exists) {
-    batch.set(usuarioSaaSRef, dadosUsuario, {merge: true});
+    adicionarEscritaGuardadaAoBatch(
+        batch,
+        usuarioSaaSSnapshot,
+        dadosUsuario,
+    );
   }
 
   const dadosLock = {
@@ -1607,20 +2046,27 @@ async function vincularUidAPaciente({
   };
 
   if (lockUidSnapshot.exists) {
-    batch.set(lockUidRef, dadosLock, {merge: true});
+    adicionarEscritaGuardadaAoBatch(batch, lockUidSnapshot, dadosLock);
   } else {
     batch.create(lockUidRef, {...dadosLock, criadoEm: agora});
   }
 
   if (lockPacienteSnapshot.exists) {
-    batch.set(lockPacienteRef, dadosLock, {merge: true});
+    adicionarEscritaGuardadaAoBatch(
+        batch,
+        lockPacienteSnapshot,
+        dadosLock,
+    );
   } else {
     batch.create(lockPacienteRef, {...dadosLock, criadoEm: agora});
   }
 
   const contagens = contagensPorColecao(atualizacoes);
-  const logRef = db.collection("logsAdministrativos").doc();
-  batch.set(logRef, {
+  const logRef = descritorOperacao ?
+    db.collection("logsAdministrativos")
+        .doc(descritorOperacao.recursos.logId) :
+    db.collection("logsAdministrativos").doc();
+  const dadosLog = {
     ...camposTenant(clinicaId),
     acao: "vincular_login_paciente",
     usuarioUid: contexto.uid,
@@ -1629,9 +2075,16 @@ async function vincularUidAPaciente({
     registrosAtualizados: contagens,
     convitePendente,
     criadoEm: agora,
-  });
+  };
 
-  await batch.commit();
+  if (descritorOperacao) {
+    batch.create(logRef, dadosLog);
+    adicionarCommitAoBatch(batch, commitOperacao);
+  } else {
+    batch.set(logRef, dadosLog);
+  }
+
+  await confirmarBatchGuardado(batch);
 
   return {
     uidUsuario: uid,
@@ -1660,6 +2113,7 @@ async function prepararDestinoCriacaoUsuario({
       clinicaId: contexto.clinicaId,
       entidadeRef: null,
       campoUid: "",
+      uidsAtuais: new Set(),
     };
   }
 
@@ -1716,13 +2170,6 @@ async function prepararDestinoCriacaoUsuario({
       configuracao.camposUid,
   );
 
-  if (uidsAtuais.size > 0) {
-    throw new HttpsError(
-        "failed-precondition",
-        `${configuracao.recurso} ja possui login vinculado.`,
-    );
-  }
-
   return {
     clinicaId,
     entidadeRef,
@@ -1730,6 +2177,8 @@ async function prepararDestinoCriacaoUsuario({
     campoUid: configuracao.campoUid,
     camposUid: configuracao.camposUid,
     idVinculo: id,
+    uidsAtuais,
+    recurso: configuracao.recurso,
   };
 }
 
@@ -1739,10 +2188,14 @@ async function gravarUsuarioClinicaCriado({
   nome,
   tipoUsuario,
   destino,
+  descritorOperacao,
 }) {
   const db = admin.firestore();
   const uid = usuarioAuth.uid;
   const usuarioRef = db.collection("usuarios").doc(uid);
+  const usuarioCanonicoRef = db.doc(
+      canonicalUserPath(destino.clinicaId, uid),
+  );
   const usuarioSnapshot = await usuarioRef.get();
 
   if (usuarioSnapshot.exists) {
@@ -1807,8 +2260,22 @@ async function gravarUsuarioClinicaCriado({
     criadoEm: agora,
     criadoPorUid: contexto.uid,
   };
+  const commitOperacao = await prepararCommitOperacao(
+      db,
+      descritorOperacao,
+  );
+
+  if (commitOperacao.concluida) {
+    return resultadoUsuarioCriado({
+      descritorOperacao,
+      tipoUsuario,
+      destino,
+    });
+  }
+
   const batch = db.batch();
   batch.create(usuarioRef, dadosUsuario);
+  batch.create(usuarioCanonicoRef, dadosUsuario);
 
   if (destino.entidadeRef) {
     const dadosEntidade = {
@@ -1820,7 +2287,11 @@ async function gravarUsuarioClinicaCriado({
       conviteSenhaPendente: true,
       conviteSenhaSolicitadoEm: agora,
     };
-    batch.set(destino.entidadeRef, dadosEntidade, {merge: true});
+    batch.update(
+        destino.entidadeRef,
+        dadosEntidade,
+        {lastUpdateTime: entidadeSnapshot.updateTime},
+    );
 
     const lockUidRef = db.collection("vinculosAuthEntidade").doc(uid);
     const lockEntidadeRef = db
@@ -1837,8 +2308,9 @@ async function gravarUsuarioClinicaCriado({
     batch.create(lockEntidadeRef, dadosLock);
   }
 
-  const logRef = db.collection("logsAdministrativos").doc();
-  batch.set(logRef, {
+  const logRef = db.collection("logsAdministrativos")
+      .doc(descritorOperacao.recursos.logId);
+  batch.create(logRef, {
     ...camposTenant(destino.clinicaId),
     acao: "criar_usuario_clinica",
     usuarioUid: contexto.uid,
@@ -1848,8 +2320,9 @@ async function gravarUsuarioClinicaCriado({
     convitePendente: true,
     criadoEm: agora,
   });
+  adicionarCommitAoBatch(batch, commitOperacao);
 
-  await batch.commit();
+  await confirmarBatchGuardado(batch);
 
   return {
     uidUsuario: uid,
@@ -1866,15 +2339,166 @@ async function rollbackUsuarioAuth(uidUsuario) {
     await admin.auth().deleteUser(uidUsuario);
     return true;
   } catch (error) {
-    console.error(
-        "Falha critica ao reverter usuario do Firebase Authentication:",
+    logSafeError(
+        "Falha critica ao reverter usuario do Firebase Authentication.",
         error,
     );
     return false;
   }
 }
 
-function exigirTextoCriacaoClinicaSaaS(valor, campo, tamanhoMaximo) {
+function resultadoUsuarioCriado({
+  descritorOperacao,
+  tipoUsuario,
+  destino,
+}) {
+  const resultado = {
+    uidUsuario: descritorOperacao.recursos.authUid,
+    tipoUsuario,
+    idVinculo: destino.idVinculo || "",
+    clinicaId: destino.clinicaId,
+    conviteSenhaPendente: true,
+    registrosAtualizados: {},
+  };
+
+  if (tipoUsuario === "gestante") {
+    resultado.pacienteId = destino.idVinculo;
+  }
+
+  return resultado;
+}
+
+function resultadoClinicaCriada(descritorOperacao) {
+  return {
+    clinicaId: descritorOperacao.recursos.clinicId,
+    adminUid: descritorOperacao.recursos.authUid,
+    assinaturaId: descritorOperacao.recursos.subscriptionId,
+    statusClinica: "teste",
+    statusAssinatura: "ativa",
+    primeiroLogin: false,
+    conviteSenhaPendente: true,
+  };
+}
+
+async function operacaoDuravelConcluida(descritorOperacao) {
+  const dados = await consultarOperacao(
+      admin.firestore(),
+      descritorOperacao,
+  );
+  return dados && dados.estado === OPERATION_STATE.COMMITTED;
+}
+
+function erroDuravelParaHttps(error) {
+  if (!(error instanceof DurableOperationError)) return null;
+
+  if ([
+    "auth-identity-conflict",
+    "operation-payload-conflict",
+    "operation-requires-reconciliation",
+  ].includes(error.code)) {
+    return new HttpsError(
+        "already-exists",
+        "A operacao conflita com um cadastro existente.",
+    );
+  }
+
+  if ([
+    "invalid-auth-resource",
+    "invalid-operation-input",
+    "invalid-operation-kind",
+    "invalid-operation-payload",
+  ].includes(error.code)) {
+    return new HttpsError("invalid-argument", "Dados da operacao invalidos.");
+  }
+
+  return new HttpsError(
+      "internal",
+      "Nao foi possivel validar o estado duravel da operacao.",
+  );
+}
+
+function falhaPermanenteDePersistencia(error) {
+  if (error instanceof HttpsError) {
+    return [
+      "already-exists",
+      "failed-precondition",
+      "invalid-argument",
+      "not-found",
+      "permission-denied",
+      "resource-exhausted",
+    ].includes(error.code);
+  }
+
+  return ["3", "6", "already-exists", "invalid-argument"]
+      .includes(String(error && error.code || ""));
+}
+
+async function tentarResolverConcorrencia(descritorOperacao) {
+  try {
+    return await operacaoDuravelConcluida(descritorOperacao);
+  } catch (error) {
+    console.error(
+        "Falha ao consultar estado da operacao duravel:",
+        error && error.code || "erro_desconhecido",
+    );
+    return false;
+  }
+}
+
+async function prepararRetentativaFirestore(descritorOperacao) {
+  try {
+    const estado = await marcarFirestoreParaRetentativa(
+        admin.firestore(),
+        descritorOperacao,
+    );
+    return estado === OPERATION_STATE.COMMITTED;
+  } catch (error) {
+    if (error instanceof DurableOperationError &&
+        error.code === "operation-already-committed") {
+      return true;
+    }
+
+    console.error(
+        "Falha ao marcar retentativa da operacao duravel:",
+        error && error.code || "erro_desconhecido",
+    );
+    return tentarResolverConcorrencia(descritorOperacao);
+  }
+}
+
+async function rollbackDuravelSeguro(descritorOperacao) {
+  try {
+    const estado = await marcarRollbackNecessario(
+        admin.firestore(),
+        descritorOperacao,
+        "domain_rollback_required",
+    );
+
+    if (estado === OPERATION_STATE.COMMITTED) {
+      return {concluido: false, operacaoJaConcluida: true};
+    }
+
+    const concluido = await reverterUsuarioAuth({
+      auth: admin.auth(),
+      db: admin.firestore(),
+      descritor: descritorOperacao,
+    });
+    return {concluido, operacaoJaConcluida: false};
+  } catch (error) {
+    if (error instanceof DurableOperationError &&
+        error.code === "operation-already-committed") {
+      return {concluido: false, operacaoJaConcluida: true};
+    }
+
+    console.error(
+        "Falha no rollback da operacao duravel:",
+        error && error.code || "erro_desconhecido",
+    );
+    return {concluido: false, operacaoJaConcluida: false};
+  }
+}
+
+function exigirTextoCriacao(valor, campo, tamanhoMaximo) {
   const texto = typeof valor === "string" ? textoSeguro(valor) : "";
   const possuiControle = Array.from(texto).some((caractere) => {
     const codigo = caractere.charCodeAt(0);
@@ -1913,15 +2537,21 @@ async function gravarClinicaComAdminSaaS({
   emailAdmin,
   plano,
   valorAssinatura,
+  descritorOperacao,
 }) {
   const db = admin.firestore();
-  const clinicaRef = db.collection("clinicas").doc();
+  const recursos = descritorOperacao.recursos;
+  const clinicaRef = db.collection("clinicas").doc(recursos.clinicId);
   const clinicaId = clinicaRef.id;
   const clinicaSaaSRef = db.collection("clinicasSaaS").doc(clinicaId);
   const usuarioRef = db.collection("usuarios").doc(usuarioAuth.uid);
   const usuarioSaaSRef = db.collection("usuariosSaaS").doc(usuarioAuth.uid);
-  const assinaturaRef = db.collection("assinaturasSaaS").doc();
-  const logRef = db.collection("logsSuperAdmin").doc();
+  const usuarioCanonicoRef = db.doc(
+      canonicalUserPath(clinicaId, usuarioAuth.uid),
+  );
+  const assinaturaRef = db.collection("assinaturasSaaS")
+      .doc(recursos.subscriptionId);
+  const logRef = db.collection("logsSuperAdmin").doc(recursos.logId);
   const agora = admin.firestore.FieldValue.serverTimestamp();
   const vencimento = admin.firestore.Timestamp.fromMillis(
       Date.now() + (30 * 24 * 60 * 60 * 1000),
@@ -1993,14 +2623,25 @@ async function gravarClinicaComAdminSaaS({
     },
     criadoEm: agora,
   };
+  const commitOperacao = await prepararCommitOperacao(
+      db,
+      descritorOperacao,
+  );
+
+  if (commitOperacao.concluida) {
+    return resultadoClinicaCriada(descritorOperacao);
+  }
+
   const batch = db.batch();
 
   batch.create(clinicaRef, dadosClinica);
   batch.create(clinicaSaaSRef, dadosClinica);
   batch.create(usuarioRef, dadosUsuario);
   batch.create(usuarioSaaSRef, dadosUsuario);
+  batch.create(usuarioCanonicoRef, dadosUsuario);
   batch.create(assinaturaRef, dadosAssinatura);
   batch.create(logRef, dadosLog);
+  adicionarCommitAoBatch(batch, commitOperacao);
 
   await batch.commit();
 
@@ -2734,22 +3375,26 @@ async function buscarUsuariosOperacionaisPush(clinicaId) {
 }
 
 function extrairTokensUsuariosPush(usuarios) {
+  const maxTokensPerUser = 5;
+  const maxRecipients = 500;
   const tokens = [];
   const donosPorToken = new Map();
 
   for (const usuario of usuarios) {
+    if (tokens.length >= maxRecipients) break;
     const tokensUsuario = Array.isArray(usuario.pushTokens) ?
-      usuario.pushTokens :
+      usuario.pushTokens.slice(-maxTokensPerUser) :
       [];
 
     for (const token of tokensUsuario) {
       const tokenNormalizado = String(token || "").trim();
 
-      if (!tokenNormalizado) {
+      if (tokenNormalizado.length < 20 || tokenNormalizado.length > 4096) {
         continue;
       }
 
       if (!donosPorToken.has(tokenNormalizado)) {
+        if (tokens.length >= maxRecipients) break;
         tokens.push(tokenNormalizado);
         donosPorToken.set(tokenNormalizado, new Set());
       }
@@ -2858,7 +3503,7 @@ async function enviarPushParaUsuariosOperacionais({
       resultado.error.code :
       "";
 
-    console.error("Push: falha ao enviar notificação:", code, resultado.error);
+    logSafeError("Push: falha ao enviar notificacao.", {code});
 
     if ([
       "messaging/registration-token-not-registered",
@@ -2890,24 +3535,29 @@ async function registrarNotificacaoCentral({
 }) {
   const tenantId = exigirTenant(camposTenant(clinicaId), "Notificacao");
 
-  await admin.firestore().collection("notificacoesCentral").add({
-    ...camposTenant(tenantId),
-    tipo: tipo || "notificacao",
-    titulo: titulo || "Notificação",
-    mensagem: mensagem || "",
-    gestante: gestante || "",
-    intensidade: intensidade || "",
-    duracao: duracao || "",
-    intervalo: intervalo || "",
-    idGestante: idGestante || "",
-    destinatariosTipos: Array.isArray(destinatariosTipos) ?
-      destinatariosTipos :
-      ["admin"],
-    lidasPor: [],
-    criadoEm: admin.firestore.FieldValue.serverTimestamp(),
-    criadoEmIso: new Date().toISOString(),
-    atualizadoEm: new Date().toISOString(),
-  });
+  const notificationRef = await admin
+      .firestore()
+      .collection("notificacoesCentral")
+      .add({
+        ...camposTenant(tenantId),
+        tipo: tipo || "notificacao",
+        titulo: titulo || "Notificação",
+        mensagem: mensagem || "",
+        gestante: gestante || "",
+        intensidade: intensidade || "",
+        duracao: duracao || "",
+        intervalo: intervalo || "",
+        idGestante: idGestante || "",
+        destinatariosTipos: Array.isArray(destinatariosTipos) ?
+          destinatariosTipos :
+          ["admin"],
+        lidasPor: [],
+        criadoEm: admin.firestore.FieldValue.serverTimestamp(),
+        criadoEmIso: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(),
+      });
+
+  return notificationRef.id;
 }
 
 async function chamarZapSign({
@@ -2916,30 +3566,68 @@ async function chamarZapSign({
   apiToken,
   body,
 }) {
-  const resposta = await fetch(`${ZAPSIGN_API_BASE_URL}${path}`, {
-    method,
+  const methodNormalized = String(method || "").toUpperCase();
+  const safePath = String(path || "");
+  const allowedRequest =
+    (methodNormalized === "POST" &&
+      safePath === "/models/create-doc/") ||
+    (methodNormalized === "GET" &&
+      /^\/docs\/[a-zA-Z0-9_-]{1,200}\/$/.test(safePath)) ||
+    (methodNormalized === "POST" &&
+      /^\/docs\/[a-zA-Z0-9_-]{1,200}\/add-signer\/$/.test(safePath));
+
+  if (!allowedRequest) {
+    const pathError = new Error("Endpoint ZapSign nao permitido.");
+    pathError.code = "zapsign/invalid-path";
+    throw pathError;
+  }
+
+  const serializedBody = body ? JSON.stringify(body) : undefined;
+  if (serializedBody && Buffer.byteLength(serializedBody, "utf8") > 256000) {
+    const bodyError = new Error("Payload ZapSign excede o limite seguro.");
+    bodyError.code = "zapsign/payload-too-large";
+    throw bodyError;
+  }
+
+  const resposta = await fetch(`${ZAPSIGN_API_BASE_URL}${safePath}`, {
+    method: methodNormalized,
     headers: {
       Authorization: `Bearer ${apiToken}`,
       "Content-Type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: serializedBody,
+    signal: AbortSignal.timeout(20000),
   });
 
+  const contentLength = Number(resposta.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > 2 * 1024 * 1024) {
+    const responseSizeError = new Error("Resposta ZapSign excede o limite.");
+    responseSizeError.code = "zapsign/response-too-large";
+    throw responseSizeError;
+  }
+
   const texto = await resposta.text();
+  if (Buffer.byteLength(texto, "utf8") > 2 * 1024 * 1024) {
+    const responseSizeError = new Error("Resposta ZapSign excede o limite.");
+    responseSizeError.code = "zapsign/response-too-large";
+    throw responseSizeError;
+  }
   let json;
 
   try {
     json = texto ? JSON.parse(texto) : {};
-  } catch (error) {
-    json = {raw: texto};
+  } catch (_) {
+    const invalidResponseError = new Error(
+        "Resposta ZapSign em formato invalido.",
+    );
+    invalidResponseError.code = "zapsign/invalid-response";
+    throw invalidResponseError;
   }
 
   if (!resposta.ok) {
-    throw new Error(
-        `ZapSign ${resposta.status}: ${
-          json.detail || json.message || json.error || texto || "erro desconhecido"
-        }`,
-    );
+    const integrationError = new Error("Falha na integracao ZapSign.");
+    integrationError.code = `zapsign/http-${resposta.status}`;
+    throw integrationError;
   }
 
   return json;
@@ -3085,21 +3773,25 @@ async function processarGeracaoContrato({
       zapsignSigners: signatariosFinais,
     };
   } catch (error) {
+    const errorCode = safeErrorCode(error);
     await atualizarContrato(contratoId, {
       status: "erro",
-      erro: error.message || String(error),
+      erro: "Falha temporaria na integracao de assinatura.",
+      erroCodigo: errorCode,
       atualizadoEm: new Date().toISOString(),
     }, tenantId);
 
     await atualizarGestanteComContrato(pacienteId, {
       contratoStatus: "erro",
-      contratoErro: error.message || String(error),
+      contratoErro: "Falha temporaria na integracao de assinatura.",
+      contratoErroCodigo: errorCode,
       contratoUltimaTentativaEm: new Date().toISOString(),
     }, tenantId);
 
+    logSafeError("Erro ao gerar contrato na ZapSign.", error);
     throw new HttpsError(
         "internal",
-        error.message || "Erro ao gerar contrato na ZapSign.",
+        "Nao foi possivel gerar o contrato na ZapSign.",
     );
   }
 }
@@ -3123,8 +3815,8 @@ async function prepararContratoParaGestante(idGestante, dados) {
     clinicaId = exigirTenant(dados, "Paciente");
     await exigirClinicaAtiva(clinicaId);
   } catch (error) {
-    console.error(
-        "Contrato automatico bloqueado por vinculo de clinica invalido:",
+    logSafeError(
+        "Contrato automatico bloqueado por vinculo de clinica invalido.",
         error,
     );
     return;
@@ -3197,7 +3889,10 @@ async function prepararContratoParaGestante(idGestante, dados) {
         }, {merge: true});
       }
     } catch (error) {
-      console.error("Falha ao sincronizar login no contrato existente:", error);
+      logSafeError(
+          "Falha ao sincronizar login no contrato existente.",
+          error,
+      );
     }
 
     return;
@@ -3254,7 +3949,7 @@ async function prepararContratoParaGestante(idGestante, dados) {
       clinicaId,
     });
   } catch (error) {
-    console.error("Erro ao preparar contrato ZapSign:", error);
+    logSafeError("Erro ao preparar contrato ZapSign.", error);
   }
 }
 
@@ -3287,7 +3982,7 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
         clinicaId = exigirTenant(dados, "Paciente");
         await exigirClinicaAtiva(clinicaId);
       } catch (error) {
-        console.error(
+        logSafeError(
             "Usuario da paciente nao criado: vinculo de clinica invalido.",
             error,
         );
@@ -3319,7 +4014,7 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
         if (error.code === "auth/email-already-exists") {
           usuario = await admin.auth().getUserByEmail(email);
         } else {
-          console.error("Erro ao criar usuário:", error);
+          logSafeError("Erro ao criar usuario.", error);
           return;
         }
       }
@@ -3372,25 +4067,26 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
             console.error(
                 "Falha critica: usuario Auth automatico ficou sem vinculo " +
                   "Firestore e exige reconciliacao manual.",
-                {
-                  uidUsuario: usuario.uid,
-                  pacienteId: idGestante,
-                  clinicaId,
-                },
             );
           }
         }
 
-        console.error("Erro ao vincular usuario automatico da paciente:", error);
+        logSafeError(
+            "Erro ao vincular usuario automatico da paciente.",
+            error,
+        );
         return;
       }
 
-      console.log("Usuária gestante criada com sucesso:", email);
+      console.log("Conta da paciente criada com sucesso.");
     },
 );
 
 exports.notificarContracaoGestante = onDocumentCreated(
-    "contracoes/{idContracao}",
+    {
+      document: "contracoes/{idContracao}",
+      region: "southamerica-east1",
+    },
     async (event) => {
       const snapshot = event.data;
 
@@ -3432,8 +4128,8 @@ exports.notificarContracaoGestante = onDocumentCreated(
           ...camposTenant(clinicaId),
         }, {merge: true});
       } catch (error) {
-        console.error(
-            "Push contracao bloqueado por vinculo invalido:",
+        logSafeError(
+            "Push clinico bloqueado por vinculo invalido.",
             error,
         );
         return;
@@ -3455,7 +4151,7 @@ exports.notificarContracaoGestante = onDocumentCreated(
       ].filter(Boolean);
       const mensagem = partesCorpo.join(" ");
 
-      await registrarNotificacaoCentral({
+      const notificacaoId = await registrarNotificacaoCentral({
         clinicaId,
         tipo: "alerta_contracao",
         titulo: "Alerta de contração",
@@ -3473,22 +4169,10 @@ exports.notificarContracaoGestante = onDocumentCreated(
         ],
       });
 
+      const pushPrivado = buildPrivateClinicalPush(notificacaoId);
       await enviarPushParaUsuariosOperacionais({
         clinicaId,
-        title: "Alerta de contração",
-        body: mensagem,
-        data: {
-          tipo: "alerta_contracao",
-          tag: `contracao_${event.params.idContracao}`,
-          contracaoId: event.params.idContracao,
-          gestante: nomeGestante,
-          intensidade,
-          duracao,
-          intervalo,
-          idGestante,
-          clinicaId,
-          adminDonoId: clinicaId,
-        },
+        ...pushPrivado,
       });
     },
 );
@@ -3534,6 +4218,8 @@ exports.prepararContratoZapSignAoAtualizar = onDocumentUpdated(
 exports.excluirUsuarioAuth = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
@@ -3758,6 +4444,8 @@ exports.excluirUsuarioAuth = onCall(
 exports.alterarTipoUsuarioClinica = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
@@ -3906,11 +4594,19 @@ exports.alterarTipoUsuarioClinica = onCall(
         atualizadoEm: admin.firestore.FieldValue.serverTimestamp(),
         atualizadoPor: contexto.uid,
       };
+      const usuarioCanonicoRef = db.doc(
+          canonicalUserPath(tenantUsuario.clinicaId, uidUsuario),
+      );
       const batch = db.batch();
       batch.update(
           usuarioRef,
           atualizacao,
           {lastUpdateTime: usuarioSnapshot.updateTime},
+      );
+      batch.set(
+          usuarioCanonicoRef,
+          {...dadosUsuario, ...atualizacao},
+          {merge: true},
       );
 
       if (usuarioSaaSSnapshot.exists) {
@@ -3948,6 +4644,8 @@ exports.alterarTipoUsuarioClinica = onCall(
 exports.vincularLoginPaciente = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
@@ -3974,24 +4672,38 @@ exports.vincularLoginPaciente = onCall(
 exports.criarUsuarioClinica = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
           request.auth,
           ["admin", "superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "clinic-user-create",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 60,
+        windowSeconds: 60 * 60,
+      });
       const entrada = request.data || {};
-      const nome = textoSeguro(entrada.nome);
-      const email = textoSeguro(entrada.email).toLowerCase();
+      const nome = exigirTextoCriacao(
+          entrada.nome,
+          "nome",
+          200,
+      );
+      const email = exigirTextoCriacao(
+          entrada.email,
+          "email",
+          320,
+      ).toLowerCase();
       const tipoUsuario = normalizarPerfilUsuario(entrada.tipo);
       const idVinculo = textoSeguro(entrada.idVinculo);
-
-      if (!nome || !email) {
-        throw new HttpsError(
-            "invalid-argument",
-            "Nome e e-mail sao obrigatorios.",
-        );
-      }
+      const operacaoId = exigirTextoCriacao(
+          entrada.operacaoId || entrada.operationId,
+          "operacaoId",
+          128,
+      );
 
       if (!["admin", "enfermeira", "obstetra", "gestante"]
           .includes(tipoUsuario)) {
@@ -4006,31 +4718,95 @@ exports.criarUsuarioClinica = onCall(
         tipoUsuario,
         idVinculo,
       });
+      const db = admin.firestore();
+      let descritorOperacao;
+      const respostaConcluida = () => ({
+        sucesso: true,
+        ...resultadoUsuarioCriado({
+          descritorOperacao,
+          tipoUsuario,
+          destino,
+        }),
+        mensagem: "Usuario criado; convite de senha pendente de envio.",
+      });
+
+      try {
+        descritorOperacao = criarDescritorOperacao({
+          tipo: OPERATION_KIND.CREATE_CLINIC_USER,
+          atorUid: contexto.uid,
+          clinicaId: destino.clinicaId,
+          operationIdSolicitado: operacaoId,
+          payload: {nome, email, tipoUsuario, idVinculo},
+        });
+        const reserva = await reservarOperacao(db, descritorOperacao);
+
+        if (reserva.concluida) return respostaConcluida();
+      } catch (error) {
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        console.error(
+            "Falha ao reservar criacao duravel de usuario:",
+            error && error.code || "erro_desconhecido",
+        );
+        throw new HttpsError(
+            "unavailable",
+            "Nao foi possivel iniciar o cadastro. Tente novamente.",
+        );
+      }
+
+      if (destino.uidsAtuais.size > 0) {
+        const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+        if (rollback.operacaoJaConcluida) return respostaConcluida();
+        throw new HttpsError(
+            "failed-precondition",
+            `${destino.recurso || "Registro"} ja possui login vinculado.`,
+        );
+      }
+
       let usuarioAuth;
 
       try {
-        usuarioAuth = await admin.auth().createUser({
-          email,
-          displayName: nome,
-          emailVerified: false,
-          disabled: false,
+        usuarioAuth = await garantirUsuarioAuth({
+          auth: admin.auth(),
+          db,
+          descritor: descritorOperacao,
+          especificacao: {
+            uid: descritorOperacao.recursos.authUid,
+            email,
+            displayName: nome,
+            emailVerified: false,
+            disabled: false,
+          },
         });
       } catch (error) {
-        if (error.code === "auth/email-already-exists") {
-          throw new HttpsError(
-              "already-exists",
-              "Ja existe um usuario com este e-mail.",
-          );
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
         }
 
-        if (error.code === "auth/invalid-email") {
+        if (error && error.code === "auth/invalid-email") {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
           throw new HttpsError("invalid-argument", "E-mail invalido.");
         }
 
-        console.error("Erro ao criar usuario no Firebase Authentication:", error);
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
+
+        if (concluida) return respostaConcluida();
+        console.error(
+            "Falha ao preparar Auth da criacao duravel de usuario:",
+            error && error.code || "erro_desconhecido",
+        );
         throw new HttpsError(
-            "internal",
-            "Nao foi possivel criar o usuario no Firebase Authentication.",
+            "unavailable",
+            "Nao foi possivel concluir o cadastro. Tente novamente.",
         );
       }
 
@@ -4042,6 +4818,7 @@ exports.criarUsuarioClinica = onCall(
             pacienteId: idVinculo,
             nomeUsuario: nome,
             convitePendente: true,
+            descritorOperacao,
           }) :
           await gravarUsuarioClinicaCriado({
             contexto,
@@ -4049,6 +4826,7 @@ exports.criarUsuarioClinica = onCall(
             nome,
             tipoUsuario,
             destino,
+            descritorOperacao,
           });
 
         return {
@@ -4057,23 +4835,40 @@ exports.criarUsuarioClinica = onCall(
           mensagem: "Usuario criado; convite de senha pendente de envio.",
         };
       } catch (error) {
-        const rollbackConcluido = await rollbackUsuarioAuth(usuarioAuth.uid);
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
+        }
 
-        if (!rollbackConcluido) {
+        if (falhaPermanenteDePersistencia(error)) {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
+          if (!rollback.concluido) {
+            throw new HttpsError(
+                "internal",
+                "Falha ao concluir o cadastro e ao reverter o usuario.",
+            );
+          }
+
+          if (error instanceof HttpsError) throw error;
           throw new HttpsError(
-              "internal",
-              "Falha ao concluir o cadastro e ao reverter o usuario criado.",
+              "failed-precondition",
+              "O cadastro conflita com dados existentes.",
           );
         }
 
-        if (error instanceof HttpsError) {
-          throw error;
-        }
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
 
-        console.error("Erro ao vincular usuario criado a clinica:", error);
+        if (concluida) return respostaConcluida();
+        console.error(
+            "Falha transitoria no cadastro duravel de usuario:",
+            error && error.code || "erro_desconhecido",
+        );
         throw new HttpsError(
-            "internal",
-            "O cadastro foi revertido porque o vinculo nao pode ser salvo.",
+            "unavailable",
+            "Cadastro ainda nao concluido. Tente novamente.",
         );
       }
     },
@@ -4082,29 +4877,37 @@ exports.criarUsuarioClinica = onCall(
 exports.criarClinicaComAdminSaaS = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
           request.auth,
           ["superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "clinic-create",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 10,
+        windowSeconds: 60 * 60,
+      });
       const entrada = request.data || {};
-      const nomeClinica = exigirTextoCriacaoClinicaSaaS(
+      const nomeClinica = exigirTextoCriacao(
           entrada.nomeClinica,
           "nomeClinica",
           200,
       );
-      const nomeAdmin = exigirTextoCriacaoClinicaSaaS(
+      const nomeAdmin = exigirTextoCriacao(
           entrada.nomeAdmin,
           "nomeAdmin",
           200,
       );
-      const emailAdmin = exigirTextoCriacaoClinicaSaaS(
+      const emailAdmin = exigirTextoCriacao(
           entrada.emailAdmin,
           "emailAdmin",
           320,
       ).toLowerCase();
-      const plano = exigirTextoCriacaoClinicaSaaS(
+      const plano = exigirTextoCriacao(
           entrada.plano,
           "plano",
           120,
@@ -4112,34 +4915,92 @@ exports.criarClinicaComAdminSaaS = onCall(
       const valorAssinatura = exigirValorAssinaturaSaaS(
           entrada.valorAssinatura,
       );
+      const operacaoId = exigirTextoCriacao(
+          entrada.operacaoId || entrada.operationId,
+          "operacaoId",
+          128,
+      );
+      const db = admin.firestore();
+      let descritorOperacao;
+      const respostaConcluida = () => ({
+        sucesso: true,
+        ...resultadoClinicaCriada(descritorOperacao),
+        mensagem: "Clinica e administrador criados; convite de senha " +
+          "pendente de envio.",
+      });
+
+      try {
+        descritorOperacao = criarDescritorOperacao({
+          tipo: OPERATION_KIND.CREATE_CLINIC_WITH_ADMIN,
+          atorUid: contexto.uid,
+          operationIdSolicitado: operacaoId,
+          payload: {
+            nomeClinica,
+            nomeAdmin,
+            emailAdmin,
+            plano,
+            valorAssinatura,
+          },
+        });
+        const reserva = await reservarOperacao(db, descritorOperacao);
+
+        if (reserva.concluida) return respostaConcluida();
+      } catch (error) {
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        console.error(
+            "Falha ao reservar criacao duravel de clinica:",
+            error && error.code || "erro_desconhecido",
+        );
+        throw new HttpsError(
+            "unavailable",
+            "Nao foi possivel iniciar o cadastro. Tente novamente.",
+        );
+      }
+
       let usuarioAuth;
 
       try {
-        usuarioAuth = await admin.auth().createUser({
-          email: emailAdmin,
-          displayName: nomeAdmin,
-          emailVerified: false,
-          disabled: false,
+        usuarioAuth = await garantirUsuarioAuth({
+          auth: admin.auth(),
+          db,
+          descritor: descritorOperacao,
+          especificacao: {
+            uid: descritorOperacao.recursos.authUid,
+            email: emailAdmin,
+            displayName: nomeAdmin,
+            emailVerified: false,
+            disabled: false,
+          },
         });
       } catch (error) {
-        if (error.code === "auth/email-already-exists") {
-          throw new HttpsError(
-              "already-exists",
-              "Ja existe um usuario com este e-mail.",
-          );
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
         }
 
-        if (error.code === "auth/invalid-email") {
+        if (error && error.code === "auth/invalid-email") {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
           throw new HttpsError("invalid-argument", "E-mail invalido.");
         }
 
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
+
+        if (concluida) return respostaConcluida();
         console.error(
-            "Erro ao criar admin SaaS no Firebase Authentication:",
-            error,
+            "Falha ao preparar Auth da criacao duravel de clinica:",
+            error && error.code || "erro_desconhecido",
         );
         throw new HttpsError(
-            "internal",
-            "Nao foi possivel criar o administrador da clinica.",
+            "unavailable",
+            "Nao foi possivel concluir o cadastro. Tente novamente.",
         );
       }
 
@@ -4152,6 +5013,7 @@ exports.criarClinicaComAdminSaaS = onCall(
           emailAdmin,
           plano,
           valorAssinatura,
+          descritorOperacao,
         });
 
         return {
@@ -4161,26 +5023,40 @@ exports.criarClinicaComAdminSaaS = onCall(
             "pendente de envio.",
         };
       } catch (error) {
-        const rollbackConcluido = await rollbackUsuarioAuth(usuarioAuth.uid);
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
+        }
 
-        if (!rollbackConcluido) {
+        if (falhaPermanenteDePersistencia(error)) {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
+          if (!rollback.concluido) {
+            throw new HttpsError(
+                "internal",
+                "Falha ao concluir o cadastro e ao reverter o admin.",
+            );
+          }
+
+          if (error instanceof HttpsError) throw error;
           throw new HttpsError(
-              "internal",
-              "Falha ao concluir o cadastro e ao reverter o admin criado.",
+              "failed-precondition",
+              "O cadastro conflita com dados existentes.",
           );
         }
 
-        if (error instanceof HttpsError) {
-          throw error;
-        }
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
 
+        if (concluida) return respostaConcluida();
         console.error(
-            "Cadastro SaaS revertido apos falha no batch Firestore:",
-            error,
+            "Falha transitoria no cadastro duravel de clinica:",
+            error && error.code || "erro_desconhecido",
         );
         throw new HttpsError(
-            "internal",
-            "O cadastro foi revertido porque os dados nao puderam ser salvos.",
+            "unavailable",
+            "Cadastro ainda nao concluido. Tente novamente.",
         );
       }
     },
@@ -4190,6 +5066,7 @@ exports.gerarContratoZapSign = onCall(
     {
       invoker: "public",
       region: "us-central1",
+      enforceAppCheck,
       secrets: [zapsignApiToken],
     },
     async (request) => {
@@ -4197,6 +5074,12 @@ exports.gerarContratoZapSign = onCall(
           request.auth,
           ["admin", "superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "zapsign-create",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 10,
+        windowSeconds: 60,
+      });
       const entrada = request.data || {};
       const contratoId = textoSeguro(entrada.contratoId);
       const contratoResolvido = await buscarContratoComTenant(contratoId);
@@ -4260,6 +5143,7 @@ exports.consultarContratoZapSign = onCall(
     {
       invoker: "public",
       region: "us-central1",
+      enforceAppCheck,
       secrets: [zapsignApiToken],
     },
     async (request) => {
@@ -4267,6 +5151,12 @@ exports.consultarContratoZapSign = onCall(
           request.auth,
           ["admin", "superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "zapsign-consult",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 30,
+        windowSeconds: 60,
+      });
       const entrada = request.data || {};
       const contratoId = textoSeguro(entrada.contratoId);
       const contratoResolvido = await buscarContratoComTenant(contratoId);
@@ -4359,14 +5249,17 @@ exports.consultarContratoZapSign = onCall(
           originalFile: detalhe.original_file || "",
         };
       } catch (error) {
+        const errorCode = safeErrorCode(error);
         await atualizarContrato(contratoId, {
-          erroConsulta: error.message || String(error),
+          erroConsulta: "Falha temporaria ao consultar a assinatura.",
+          erroConsultaCodigo: errorCode,
           atualizadoEm: new Date().toISOString(),
         }, contratoResolvido.clinicaId);
 
+        logSafeError("Erro ao consultar contrato na ZapSign.", error);
         throw new HttpsError(
             "internal",
-            error.message || "Erro ao consultar contrato na ZapSign.",
+            "Nao foi possivel consultar o contrato na ZapSign.",
         );
       }
     },
@@ -4375,13 +5268,22 @@ exports.consultarContratoZapSign = onCall(
 exports.buscarCoordenadaEndereco = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
       secrets: [googleMapsGeocodingApiKey],
+      timeoutSeconds: 15,
     },
     async (request) => {
-      await exigirContextoUsuario(
+      const contexto = await exigirContextoUsuario(
           request.auth,
           ["admin", "enfermeira", "obstetra", "profissional"],
       );
+      await exigirLimiteUso({
+        action: "geocoding",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 30,
+        windowSeconds: 60,
+      });
 
       const endereco = textoSeguro(request.data && request.data.endereco);
 
@@ -4411,7 +5313,9 @@ exports.buscarCoordenadaEndereco = onCall(
       let resposta;
 
       try {
-        resposta = await fetch(url);
+        resposta = await fetch(url, {
+          signal: AbortSignal.timeout(10000),
+        });
       } catch (_) {
         throw new HttpsError(
             "unavailable",
@@ -4454,12 +5358,15 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
       invoker: "public",
     },
     async (req, res) => {
-      res.set("Access-Control-Allow-Origin", "*");
-      res.set(
-          "Access-Control-Allow-Headers",
-          "Content-Type, Authorization",
-      );
-      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      const originAllowed = applyRestrictedCors(req, res);
+
+      if (!originAllowed) {
+        res.status(403).json({
+          sucesso: false,
+          mensagem: "Origem nao autorizada.",
+        });
+        return;
+      }
 
       if (req.method === "OPTIONS") {
         res.status(204).send("");
@@ -4467,6 +5374,7 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
       }
 
       if (req.method !== "POST") {
+        res.set("Allow", "POST, OPTIONS");
         res.status(405).json({
           sucesso: false,
           mensagem: "Método não permitido.",
@@ -4474,64 +5382,43 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
         return;
       }
 
+      const contentLength = Number(req.headers["content-length"] || 0);
+      let parsedBodyLength = 0;
       try {
-        const authHeader = req.headers.authorization || "";
+        parsedBodyLength = Buffer.byteLength(
+            JSON.stringify(req.body || {}),
+            "utf8",
+        );
+      } catch (_) {
+        parsedBodyLength = 16 * 1024 + 1;
+      }
+      if ((Number.isFinite(contentLength) && contentLength > 16 * 1024) ||
+          parsedBodyLength > 16 * 1024) {
+        res.status(413).json({
+          sucesso: false,
+          mensagem: "Solicitacao excede o limite permitido.",
+        });
+        return;
+      }
 
-        if (!authHeader.startsWith("Bearer ")) {
-          res.status(401).json({
-            sucesso: false,
-            mensagem: "Token de autenticação não informado.",
-          });
-          return;
-        }
-
-        const idToken = authHeader.split("Bearer ")[1];
-        const decodedToken = await admin.auth().verifyIdToken(idToken, true);
-
-        if (!decodedToken || !decodedToken.uid) {
-          res.status(401).json({
-            sucesso: false,
-            mensagem: "Usuário não autenticado.",
-          });
-          return;
-        }
-
-        const contexto = await exigirContextoUsuario(
+      try {
+        const decodedToken = await autenticarRedefinicaoSenha(
+            req.headers.authorization,
+        );
+        const resultado = await solicitarRedefinicaoSenhaPacienteCore(
             decodedToken,
-            ["admin", "gestante"],
+            req.body,
         );
-        const entrada = req.body || {};
-        const paciente = await buscarPacienteParaRedefinicao(
-            contexto,
-            entrada,
-        );
-        const usuarioAuth = await buscarUsuarioAuthDaPaciente(
-            contexto,
-            paciente,
-        );
-        const emailNormalizado = textoSeguro(usuarioAuth.email).toLowerCase();
-
-        const agora = new Date().toISOString();
-        await paciente.ref.set({
-          ...camposTenant(paciente.clinicaId),
-          linkSenhaInicial: admin.firestore.FieldValue.delete(),
-          linkSenhaInicialGeradoEm: admin.firestore.FieldValue.delete(),
-          linkSenhaInicialExpirado: true,
-          redefinicaoSenhaPendente: true,
-          redefinicaoSenhaSolicitadaEm: agora,
-          redefinicaoSenhaSolicitadaPor: contexto.uid,
-        }, {merge: true});
 
         res.status(200).json({
-          sucesso: true,
-          mensagem: "Solicitacao de redefinicao registrada com seguranca.",
-          gestanteId: paciente.id,
-          emailGestante: emailNormalizado,
-          telefoneGestante: textoSeguro(paciente.dados.telefoneGestante),
-          nomeGestante: textoSeguro(paciente.dados.nomeGestante),
+          ...resultado,
+          gestanteId: resultado.pacienteId,
+          emailGestante: resultado.emailPaciente,
+          telefoneGestante: resultado.telefonePaciente,
+          nomeGestante: resultado.nomePaciente,
         });
       } catch (error) {
-        console.error("Erro ao gerar novo link de acesso:", error);
+        logSafeError("Erro ao registrar redefinicao de senha.", error);
 
         const statusHttp = statusHttpParaErro(error);
         const mensagem = statusHttp === 500 ?
@@ -4543,5 +5430,34 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
           mensagem,
         });
       }
+    },
+);
+
+exports.solicitarRedefinicaoSenhaPaciente = onCall(
+    {
+      region: "us-central1",
+      invoker: "public",
+      enforceAppCheck,
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Voce precisa estar logado.",
+        );
+      }
+
+      const authorizationHeader = request.rawRequest &&
+        request.rawRequest.headers ?
+        request.rawRequest.headers.authorization : "";
+      const decodedToken = await autenticarRedefinicaoSenha(
+          authorizationHeader,
+          request.auth,
+      );
+
+      return solicitarRedefinicaoSenhaPacienteCore(
+          decodedToken,
+          request.data,
+      );
     },
 );

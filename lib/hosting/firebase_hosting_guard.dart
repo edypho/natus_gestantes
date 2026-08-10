@@ -20,8 +20,6 @@ class FirebaseHostingGuard {
     required bool firebaseConectado,
     required bool semErroConsole,
   }) {
-    return buildGerado &&
-        firebaseConectado &&
-        semErroConsole;
+    return buildGerado && firebaseConectado && semErroConsole;
   }
 }

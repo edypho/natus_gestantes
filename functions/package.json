@@ -1,9 +1,19 @@
 {
   "name": "functions",
+  "version": "1.0.0",
   "description": "Cloud Functions for Firebase",
   "scripts": {
     "lint": "npx eslint .",
     "test": "node --test test/*.test.js",
+    "test:backend-emulator": "node --test test/backend_functions_emulator.test.js",
+    "test:security-emulator": "node --test test/security_rules_emulator.test.js",
+    "test:emulator": "node --test --test-concurrency=1 test/backend_functions_emulator.test.js test/security_rules_emulator.test.js",
+    "audit:multi-tenant": "node scripts/audit_multi_tenant.js",
+    "backup:firebase": "node scripts/backup_firebase.js",
+    "check:function-contract": "node scripts/check_function_contract.js",
+    "migrate:multi-tenant": "node scripts/migrate_multi_tenant.js",
+    "restore:emulator": "node scripts/restore_firebase_emulator.js",
+    "select:legacy-tenant": "node scripts/select_legacy_tenant.js",
     "serve": "firebase emulators:start --only functions",
     "shell": "firebase functions:shell",
     "start": "npm run shell",
@@ -15,13 +25,17 @@
   },
   "main": "index.js",
   "dependencies": {
-    "firebase-admin": "^13.6.0",
-    "firebase-functions": "^7.0.0"
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "eslint": "^8.15.0",
     "eslint-config-google": "^0.14.0",
-    "firebase-functions-test": "^3.4.1"
+    "firebase": "^12.17.1"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
 }

@@ -8,9 +8,20 @@ import GoogleMaps
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    
-    GMSServices.provideAPIKey("AIzaSyDByLyeMhclxRPtHte05j8iuWrFRq-ENNc")
+    configureGoogleMaps()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  private func configureGoogleMaps() {
+    let apiKey = (Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let apiKey, !apiKey.isEmpty, !apiKey.contains("$(") else {
+      NSLog("Natus: GOOGLE_MAPS_IOS_API_KEY não configurada.")
+      return
+    }
+
+    GMSServices.provideAPIKey(apiKey)
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {

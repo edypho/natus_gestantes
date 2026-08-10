@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/natus_breakpoints.dart';
 import '../shared/natus_app.dart';
 import '../shared/natus_premium_visual.dart';
 
@@ -7,16 +8,14 @@ class AppShellNatus extends StatelessWidget {
   final Widget menu;
   final Widget conteudo;
 
-  const AppShellNatus({
-    super.key,
-    required this.menu,
-    required this.conteudo,
-  });
+  const AppShellNatus({super.key, required this.menu, required this.conteudo});
 
   @override
   Widget build(BuildContext context) {
-    final largura = MediaQuery.of(context).size.width;
-    final mobile = largura < 800;
+    final mobile = NatusBreakpoints.usarLayoutCompacto(
+      context,
+      larguraLimite: 800,
+    );
 
     if (mobile) {
       return PremiumNatusBackground(
@@ -77,9 +76,7 @@ class AppShellNatus extends StatelessWidget {
         body: Row(
           children: [
             menu,
-            Expanded(
-              child: conteudo,
-            ),
+            Expanded(child: conteudo),
           ],
         ),
       ),

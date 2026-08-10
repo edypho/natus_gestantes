@@ -125,7 +125,7 @@ Widget financeiroParcelaCard({
       parcela['nomeGestante'] ??
       parcela['gestante'] ??
       parcela['nome'] ??
-      'Gestante';
+      'Paciente';
 
   final valor =
       parcela['valor'] ??

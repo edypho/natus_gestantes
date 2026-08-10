@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
+import '../core/natus_breakpoints.dart';
+import '../core/natus_terminologia.dart';
 import '../shared/natus_app.dart';
 import '../shared/formatadores.dart';
 import '../gestantes/gestantes_regras.dart';
@@ -156,7 +158,7 @@ class NatusCardAlertaDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
     return _NatusCardClicavel(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -212,6 +214,47 @@ class NatusCardAlertaDashboard extends StatelessWidget {
   }
 }
 
+class NatusAlertasDashboardLayout extends StatelessWidget {
+  final List<Widget> children;
+  final double spacing;
+
+  const NatusAlertasDashboardLayout({
+    required this.children,
+    this.spacing = 12,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final empilhar =
+            constraints.maxWidth < 520 || NatusBreakpoints.isPhone(context);
+
+        if (empilhar) {
+          return Column(
+            children: [
+              for (var indice = 0; indice < children.length; indice++) ...[
+                SizedBox(width: double.infinity, child: children[indice]),
+                if (indice < children.length - 1) SizedBox(height: spacing),
+              ],
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            for (var indice = 0; indice < children.length; indice++) ...[
+              Expanded(child: children[indice]),
+              if (indice < children.length - 1) SizedBox(width: spacing),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
 class NatusCardFinanceiroResumo extends StatelessWidget {
   final String titulo;
   final double valor;
@@ -236,7 +279,7 @@ class NatusCardFinanceiroResumo extends StatelessWidget {
         ? '${valor.toStringAsFixed(1)}%'
         : formatarMoeda(valor);
 
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return _NatusCardClicavel(
       onTap: onTap,
@@ -315,7 +358,7 @@ class NatusCardContagemResumo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return _NatusCardClicavel(
       onTap: onTap,
@@ -435,7 +478,7 @@ class NatusCardResumo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final corFinal = cor ?? NatusApp.vinho;
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return Container(
       width: 220,
@@ -496,6 +539,45 @@ class NatusCardResumo extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class NatusCardsResumoLayout extends StatelessWidget {
+  final List<Widget> children;
+  final double spacing;
+  final double larguraMinimaParaDuasColunas;
+
+  const NatusCardsResumoLayout({
+    required this.children,
+    this.spacing = 12,
+    this.larguraMinimaParaDuasColunas = 360,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compacto = NatusBreakpoints.usarLayoutCompacto(context);
+        final colunas =
+            compacto && constraints.maxWidth >= larguraMinimaParaDuasColunas
+            ? 2
+            : compacto
+            ? 1
+            : (constraints.maxWidth / (220 + spacing)).floor().clamp(1, 6);
+        final largura =
+            (constraints.maxWidth - (spacing * (colunas - 1))) / colunas;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final child in children)
+              SizedBox(width: largura, child: child),
+          ],
+        );
+      },
     );
   }
 }
@@ -1272,7 +1354,7 @@ class NatusStatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        status,
+        NatusTermos.rotuloStatusPaciente(status),
         style: TextStyle(color: cor, fontWeight: FontWeight.w700, fontSize: 12),
       ),
     );

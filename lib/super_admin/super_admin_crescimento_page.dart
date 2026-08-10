@@ -12,7 +12,9 @@ class SuperAdminCrescimentoPage extends StatelessWidget {
       titulo: 'Crescimento de usuários por período SaaS',
       subtitulo: 'Análise de crescimento da plataforma por período.',
       child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance.collection('usuariosSaaS').snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('usuariosSaaS')
+            .snapshots(),
         builder: (context, snapshot) {
           final total = snapshot.data?.docs.length ?? 0;
 

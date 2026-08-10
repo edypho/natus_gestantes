@@ -1,7 +1,6 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
+import '../core/natus_terminologia.dart';
 import '../shared/natus_app.dart';
 
 class ItemMenuInferior {
@@ -9,6 +8,25 @@ class ItemMenuInferior {
   final IconData icone;
 
   const ItemMenuInferior(this.titulo, this.icone);
+
+  String get rotulo => NatusTermos.rotuloMenu(titulo);
+}
+
+class _NatusRoundedNotchedShape extends NotchedShape {
+  static const _borderRadius = BorderRadius.all(Radius.circular(28));
+
+  const _NatusRoundedNotchedShape();
+
+  @override
+  Path getOuterPath(Rect host, Rect? guest) {
+    final roundedPath = Path()..addRRect(_borderRadius.toRRect(host));
+    final notchedPath = const CircularNotchedRectangle().getOuterPath(
+      host,
+      guest,
+    );
+
+    return Path.combine(PathOperation.intersect, roundedPath, notchedPath);
+  }
 }
 
 class NatusMenuInferiorCoracao extends StatelessWidget {
@@ -33,65 +51,71 @@ class NatusMenuInferiorCoracao extends StatelessWidget {
     final corIcone = ativo ? NatusApp.vinho : NatusApp.textoSuave;
 
     return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => onSelecionarTela(item.titulo),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-            decoration: BoxDecoration(
-              color: ativo
-                  ? Colors.white.withValues(alpha: 0.46)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
+      child: Semantics(
+        button: true,
+        selected: ativo,
+        label: item.rotulo,
+        excludeSemantics: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => onSelecionarTela(item.titulo),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              decoration: BoxDecoration(
                 color: ativo
-                    ? Colors.white.withValues(alpha: 0.72)
+                    ? Colors.white.withValues(alpha: 0.46)
                     : Colors.transparent,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: ativo
+                      ? Colors.white.withValues(alpha: 0.72)
+                      : Colors.transparent,
+                ),
+                boxShadow: ativo
+                    ? [
+                        BoxShadow(
+                          color: NatusApp.vinho.withValues(alpha: 0.08),
+                          blurRadius: 14,
+                          offset: const Offset(0, 5),
+                        ),
+                      ]
+                    : null,
               ),
-              boxShadow: ativo
-                  ? [
-                      BoxShadow(
-                        color: NatusApp.vinho.withValues(alpha: 0.08),
-                        blurRadius: 14,
-                        offset: const Offset(0, 5),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: ativo
-                        ? NatusApp.rose.withValues(alpha: 0.24)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(11),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: ativo
+                          ? NatusApp.rose.withValues(alpha: 0.24)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(item.icone, size: 19, color: corIcone),
                   ),
-                  child: Icon(item.icone, size: 19, color: corIcone),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  item.titulo,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: ativo ? FontWeight.w800 : FontWeight.w600,
-                    color: corIcone,
-                    letterSpacing: -0.1,
+                  const SizedBox(height: 4),
+                  Text(
+                    item.rotulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: ativo ? FontWeight.w800 : FontWeight.w600,
+                      color: corIcone,
+                      letterSpacing: -0.1,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -105,53 +129,25 @@ class NatusMenuInferiorCoracao extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Container(
-              decoration: BoxDecoration(
-                color: NatusApp.offWhite.withValues(alpha: 0.78),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.82),
-                  width: 1.1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 24,
-                    spreadRadius: -12,
-                    offset: const Offset(0, 14),
-                  ),
-                  BoxShadow(
-                    color: NatusApp.vinho.withValues(alpha: 0.08),
-                    blurRadius: 22,
-                    spreadRadius: -14,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: BottomAppBar(
-                color: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
-                shape: const CircularNotchedRectangle(),
-                notchMargin: 10,
-                elevation: 0,
-                padding: EdgeInsets.zero,
-                child: SizedBox(
-                  height: 72,
-                  child: Row(
-                    children: [
-                      _botaoAba(itensEsquerda[0]),
-                      _botaoAba(itensEsquerda[1]),
-                      const SizedBox(width: 70),
-                      _botaoAba(itensDireita[0]),
-                      _botaoAba(itensDireita[1]),
-                    ],
-                  ),
-                ),
-              ),
+        child: BottomAppBar(
+          color: NatusApp.offWhite.withValues(alpha: 0.94),
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.black.withValues(alpha: 0.18),
+          shape: const _NatusRoundedNotchedShape(),
+          notchMargin: 10,
+          elevation: 8,
+          clipBehavior: Clip.antiAlias,
+          padding: EdgeInsets.zero,
+          child: SizedBox(
+            height: 72,
+            child: Row(
+              children: [
+                _botaoAba(itensEsquerda[0]),
+                _botaoAba(itensEsquerda[1]),
+                const SizedBox(width: 94),
+                _botaoAba(itensDireita[0]),
+                _botaoAba(itensDireita[1]),
+              ],
             ),
           ),
         ),
@@ -163,8 +159,14 @@ class NatusMenuInferiorCoracao extends StatelessWidget {
 class NatusFabCoracao extends StatelessWidget {
   final bool ativo;
   final VoidCallback onTap;
+  final String tooltip;
 
-  const NatusFabCoracao({required this.ativo, required this.onTap, super.key});
+  const NatusFabCoracao({
+    required this.ativo,
+    required this.onTap,
+    this.tooltip = 'Abrir ação principal',
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -188,6 +190,7 @@ class NatusFabCoracao extends StatelessWidget {
         ),
         child: FloatingActionButton(
           onPressed: onTap,
+          tooltip: tooltip,
           elevation: 0,
           highlightElevation: 0,
           backgroundColor: Colors.transparent,

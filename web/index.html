@@ -1,26 +1,24 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCs6g3cU_eV-LWMKNfgobF5I2BfKijDQZ0"></script>
-
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
 
-  <title>Natus | Enfermagem Obstétrica Premium</title>
+  <title>Natus | Gestão para clínicas</title>
 
-  <meta name="description" content="Assistência obstétrica humanizada, pré-natal, parto, pós-parto, amamentação e acompanhamento especializado pela Natus.">
+  <meta name="description" content="Gestão e relacionamento para clínicas, pacientes, profissionais, atendimentos e prontuários.">
 
-  <meta property="og:title" content="Natus | Enfermagem Obstétrica Premium">
-  <meta property="og:description" content="Assistência obstétrica humanizada, pré-natal, parto, pós-parto e amamentação especializada.">
+  <meta property="og:title" content="Natus | Gestão para clínicas">
+  <meta property="og:description" content="Gestão simples e acolhedora para clínicas, pacientes, profissionais, atendimentos e prontuários.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://natus-gestantes.web.app/">
   <meta property="og:site_name" content="Natus">
 
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="Natus | Enfermagem Obstétrica Premium">
-  <meta name="twitter:description" content="Assistência obstétrica humanizada, pré-natal, parto, pós-parto e amamentação especializada.">
+  <meta name="twitter:title" content="Natus | Gestão para clínicas">
+  <meta name="twitter:description" content="Gestão simples e acolhedora para clínicas, pacientes, profissionais, atendimentos e prontuários.">
 
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -29,9 +27,57 @@
 
   <link rel="icon" type="image/png" href="favicon.png"/>
   <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="dns-prefetch" href="https://maps.googleapis.com">
+
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #f8f1ed; }
+    #natus-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-content: center;
+      gap: 16px;
+      color: #40010d;
+      background: #f8f1ed;
+      font: 600 14px/1.5 system-ui, sans-serif;
+      text-align: center;
+      transition: opacity 180ms ease;
+    }
+    #natus-loading img { width: 88px; height: 88px; margin: auto; }
+    #natus-loading::after {
+      content: "";
+      width: 32px;
+      height: 32px;
+      margin: auto;
+      border: 3px solid rgb(64 1 13 / 14%);
+      border-top-color: #7a3e57;
+      border-radius: 50%;
+      animation: natus-spin 800ms linear infinite;
+    }
+    #natus-loading.is-ready { opacity: 0; pointer-events: none; }
+    @keyframes natus-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #natus-loading { transition: none; }
+      #natus-loading::after { animation-duration: 1600ms; }
+    }
+  </style>
 </head>
 <body>
+  <div id="natus-loading" role="status" aria-live="polite">
+    <img src="icons/Icon-192.png" alt="Natus">
+    <span>Preparando seu ambiente Natus…</span>
+  </div>
   <script>
+    window.addEventListener('flutter-first-frame', function () {
+      const loading = document.getElementById('natus-loading');
+      if (!loading) return;
+      loading.classList.add('is-ready');
+      window.setTimeout(function () { loading.remove(); }, 220);
+    });
+
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('/firebase-messaging-sw.js');

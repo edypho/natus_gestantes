@@ -4,9 +4,7 @@ import '../models/parcela_model.dart';
 import 'base_repository.dart';
 
 class FinanceiroRepository extends BaseRepository {
-  const FinanceiroRepository({
-    required super.firestore,
-  });
+  const FinanceiroRepository({required super.firestore});
 
   CollectionReference<Map<String, dynamic>> get colecao {
     return firestore.collection('parcelasFinanceiras');

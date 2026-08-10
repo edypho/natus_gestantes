@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/firebase_globals.dart';
+import '../seguranca/log_seguro.dart';
 
 typedef PushForegroundHandler = void Function(RemoteMessage message);
 
@@ -80,7 +81,7 @@ class PushNotificationsService {
       );
 
       if (permissao.authorizationStatus == AuthorizationStatus.denied) {
-        debugPrint('Push: permissao negada para ${usuario.uid}.');
+        logInfoSeguro('Push: permissao negada.');
         return;
       }
 
@@ -120,18 +121,45 @@ class PushNotificationsService {
       if (kIsWeb) {
         final vapidPublicKey = await _buscarVapidPublicKey();
         if (vapidPublicKey.isEmpty) {
-          debugPrint('Push: vapidPublicKey nao configurada em $_configPath.');
+          logInfoSeguro('Push: configuracao Web Push indisponivel.');
           return null;
         }
 
         return FirebaseMessaging.instance.getToken(vapidKey: vapidPublicKey);
       }
 
+      if (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS) {
+        final tokenApns = await _aguardarTokenApns();
+        if (tokenApns == null) {
+          logInfoSeguro(
+            'Push: token APNs ainda indisponível; o FCM será registrado '
+            'quando a Apple concluir a ativação.',
+          );
+          return null;
+        }
+      }
+
       return FirebaseMessaging.instance.getToken();
     } catch (e) {
-      debugPrint('Push: erro ao obter token FCM: $e');
+      logErroSeguro('Push: erro ao obter token FCM.', e);
       return null;
     }
+  }
+
+  Future<String?> _aguardarTokenApns() async {
+    const totalTentativas = 6;
+
+    for (var tentativa = 0; tentativa < totalTentativas; tentativa++) {
+      final token = await FirebaseMessaging.instance.getAPNSToken();
+      if (token != null && token.trim().isNotEmpty) return token;
+
+      if (tentativa < totalTentativas - 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    }
+
+    return null;
   }
 
   Future<String> _buscarVapidPublicKey() async {
@@ -140,7 +168,7 @@ class PushNotificationsService {
       final dados = snapshot.data();
       return (dados?['vapidPublicKey'] ?? '').toString().trim();
     } catch (e) {
-      debugPrint('Push: erro ao buscar vapidPublicKey: $e');
+      logErroSeguro('Push: erro ao buscar configuracao Web Push.', e);
       return '';
     }
   }
@@ -169,19 +197,35 @@ class PushNotificationsService {
     required String token,
   }) async {
     final agora = DateTime.now().toIso8601String();
+    final usuarioRef = firestore.collection('usuarios').doc(uid);
 
-    await firestore.collection('usuarios').doc(uid).set({
-      'uid': uid,
-      'nome': nomeUsuario,
-      'tipo': tipoUsuario,
-      'tipoUsuario': tipoUsuario,
-      'pushAtivo': true,
-      'pushTokens': FieldValue.arrayUnion(<String>[token]),
-      'pushUltimoToken': token,
-      'pushPlataforma': _nomePlataformaAtual(),
-      'pushAtualizadoEm': agora,
-      'pushPermissao': 'autorizado',
-    }, SetOptions(merge: true));
+    await firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(usuarioRef);
+      final dados = snapshot.data() ?? const <String, dynamic>{};
+      final tokensAtuais = ((dados['pushTokens'] as List?) ?? const <Object>[])
+          .whereType<String>()
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty && item.length <= 4096)
+          .where((item) => item != token)
+          .toList();
+      final tokensLimitados = <String>[...tokensAtuais, token];
+      if (tokensLimitados.length > 5) {
+        tokensLimitados.removeRange(0, tokensLimitados.length - 5);
+      }
+
+      transaction.set(usuarioRef, {
+        'uid': uid,
+        'nome': nomeUsuario,
+        'tipo': tipoUsuario,
+        'tipoUsuario': tipoUsuario,
+        'pushAtivo': true,
+        'pushTokens': tokensLimitados,
+        'pushUltimoToken': token,
+        'pushPlataforma': _nomePlataformaAtual(),
+        'pushAtualizadoEm': agora,
+        'pushPermissao': 'autorizado',
+      }, SetOptions(merge: true));
+    });
   }
 
   String _nomePlataformaAtual() {

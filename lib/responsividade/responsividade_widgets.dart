@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../core/natus_breakpoints.dart';
+
 bool isMobile(BuildContext context) {
-  return MediaQuery.of(context).size.width < 700;
+  return NatusBreakpoints.usarLayoutCompacto(context);
 }
 
 int gridResponsivo(BuildContext context) {

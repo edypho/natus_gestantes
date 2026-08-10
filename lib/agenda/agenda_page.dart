@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../core/natus_breakpoints.dart';
+import '../seguranca/log_seguro.dart';
 import '../shared/natus_app.dart';
 import '../saas/tenant_access_scope.dart';
 import 'agenda_model.dart';
@@ -110,8 +112,9 @@ class _AgendaPageState extends State<AgendaPage> {
           return dpp != null && _mesmoDia(dpp, _dataSelecionada);
         }).toList();
 
-        final largura = MediaQuery.sizeOf(context).width;
-        final padding = largura < 700 ? 12.0 : 24.0;
+        final padding = NatusBreakpoints.usarLayoutCompacto(context)
+            ? 12.0
+            : 24.0;
 
         return SingleChildScrollView(
           padding: EdgeInsets.all(padding),
@@ -148,7 +151,7 @@ class _AgendaPageState extends State<AgendaPage> {
   Widget _telaGestanteNaoIdentificada() {
     return Center(
       child: Text(
-        'Não foi possível identificar sua ficha de gestante para exibir a agenda.',
+        'Não foi possível identificar seu cadastro de paciente para exibir a agenda.',
         textAlign: TextAlign.center,
         style: TextStyle(
           fontSize: 18,
@@ -196,9 +199,9 @@ class _AgendaPageState extends State<AgendaPage> {
 
   Widget _cabecalhoAgenda() {
     final subtitulo = _usuarioGestante
-        ? 'Acompanhe seus compromissos, retornos e previsão de parto cadastrados pela equipe Natus.'
-        : 'Organize visitas, plantões, retornos, reuniões e previsões de parto da equipe.';
-    final compacto = MediaQuery.sizeOf(context).width < 700;
+        ? 'Acompanhe seus compromissos, retornos e atendimentos cadastrados pela equipe Natus.'
+        : 'Organize consultas, visitas, retornos, reuniões e demais compromissos da equipe.';
+    final compacto = NatusBreakpoints.usarLayoutCompacto(context);
 
     final textos = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -251,7 +254,7 @@ class _AgendaPageState extends State<AgendaPage> {
             .toSet()
             .toList()
           ..sort();
-    final compacto = MediaQuery.sizeOf(context).width < 700;
+    final compacto = NatusBreakpoints.usarLayoutCompacto(context);
     final larguraCampoBusca = compacto ? double.infinity : 320.0;
     final larguraStatus = compacto ? double.infinity : 190.0;
     final larguraTipo = compacto ? double.infinity : 230.0;
@@ -297,7 +300,7 @@ class _AgendaPageState extends State<AgendaPage> {
           if (!_usuarioGestante)
             _dropdownFiltro(
               largura: larguraEnfermeira,
-              label: 'Enfermeira',
+              label: 'Profissional',
               valor: _filtroEnfermeira,
               itens: ['Todas', ...nomesEnfermeiras],
               onChanged: (valor) => setState(() => _filtroEnfermeira = valor),
@@ -354,7 +357,7 @@ class _AgendaPageState extends State<AgendaPage> {
     final diasNoMes = DateTime(_mesExibido.year, _mesExibido.month + 1, 0).day;
     final espacosAntes = primeiroDia.weekday - 1;
     final totalCelulas = espacosAntes + diasNoMes;
-    final compacto = MediaQuery.sizeOf(context).width < 700;
+    final compacto = NatusBreakpoints.usarLayoutCompacto(context);
 
     return Container(
       padding: EdgeInsets.all(compacto ? 10 : 18),
@@ -632,9 +635,9 @@ class _AgendaPageState extends State<AgendaPage> {
                   ),
                 ),
                 if (evento.gestanteNome.trim().isNotEmpty)
-                  Text('Gestante: ${evento.gestanteNome}'),
+                  Text('Paciente: ${evento.gestanteNome}'),
                 if (evento.enfermeiraNome.trim().isNotEmpty)
-                  Text('EO: ${evento.enfermeiraNome}'),
+                  Text('Profissional: ${evento.enfermeiraNome}'),
                 if (evento.local.trim().isNotEmpty)
                   Text('Local: ${evento.local}'),
                 if (evento.observacoes.trim().isNotEmpty) ...[
@@ -669,7 +672,7 @@ class _AgendaPageState extends State<AgendaPage> {
   }
 
   Widget _cardDpp(Map<String, String> gestante) {
-    final nome = gestante['nomeGestante'] ?? 'Gestante sem nome';
+    final nome = gestante['nomeGestante'] ?? 'Paciente sem nome';
     final telefone = gestante['telefoneGestante'] ?? '';
     final hospital = gestante['hospitalGestante'] ?? '';
 
@@ -717,7 +720,7 @@ class _AgendaPageState extends State<AgendaPage> {
                 if (hospital.isNotEmpty) Text('Hospital: $hospital'),
                 const SizedBox(height: 4),
                 const Text(
-                  'Evento automático gerado pela DPP da ficha da gestante.',
+                  'Evento automático gerado pela DPP do módulo obstétrico do prontuário da paciente.',
                   style: TextStyle(color: Colors.black54),
                 ),
               ],
@@ -747,7 +750,7 @@ class _AgendaPageState extends State<AgendaPage> {
     DateTime? dataInicial,
   }) async {
     if (_usuarioGestante) {
-      _mensagem('A agenda da gestante é somente para visualização.');
+      _mensagem('A agenda do paciente é somente para visualização.');
       return;
     }
 
@@ -886,11 +889,11 @@ class _AgendaPageState extends State<AgendaPage> {
                         ),
                         isExpanded: true,
                         decoration: const InputDecoration(
-                          labelText: 'Gestante vinculada',
+                          labelText: 'Paciente vinculado',
                         ),
                         items: gestantesDisponiveis.map((g) {
                           final id = _idGestante(g);
-                          final nome = g['nomeGestante'] ?? 'Gestante sem nome';
+                          final nome = g['nomeGestante'] ?? 'Paciente sem nome';
                           return DropdownMenuItem(value: id, child: Text(nome));
                         }).toList(),
                         onChanged: (value) {
@@ -906,11 +909,11 @@ class _AgendaPageState extends State<AgendaPage> {
                         ),
                         isExpanded: true,
                         decoration: const InputDecoration(
-                          labelText: 'Enfermeira responsável',
+                          labelText: 'Profissional responsável',
                         ),
                         items: enfermeirasDisponiveis.map((e) {
                           final id = _idEnfermeira(e);
-                          final nome = e['nome'] ?? 'Enfermeira';
+                          final nome = e['nome'] ?? 'Profissional';
                           return DropdownMenuItem(value: id, child: Text(nome));
                         }).toList(),
                         onChanged: (value) {
@@ -1066,7 +1069,8 @@ class _AgendaPageState extends State<AgendaPage> {
                             : 'Compromisso criado.',
                       );
                     } catch (e) {
-                      _mensagem('Erro ao salvar compromisso: $e');
+                      logErroSeguro('Erro ao salvar compromisso.', e);
+                      _mensagem('Não foi possível salvar o compromisso.');
                     }
                   },
                   icon: const Icon(Icons.save),
@@ -1136,7 +1140,8 @@ class _AgendaPageState extends State<AgendaPage> {
       await _service.excluirEvento(evento.id);
       _mensagem('Compromisso excluído.');
     } catch (e) {
-      _mensagem('Erro ao excluir compromisso: $e');
+      logErroSeguro('Erro ao excluir compromisso.', e);
+      _mensagem('Não foi possível excluir o compromisso.');
     }
   }
 
@@ -1321,6 +1326,8 @@ class _AgendaPageState extends State<AgendaPage> {
     }
 
     return status.contains('gestante') ||
+        status == 'ativa' ||
+        status == 'ativo' ||
         status.contains('puerpera') ||
         status.contains('puérpera');
   }

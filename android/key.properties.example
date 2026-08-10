@@ -1,0 +1,4 @@
+storeFile=C:/caminho/seguro/natus-release.jks
+storePassword=CONFIGURE_EM_UM_GERENCIADOR_DE_SEGREDOS
+keyAlias=natus-release
+keyPassword=CONFIGURE_EM_UM_GERENCIADOR_DE_SEGREDOS

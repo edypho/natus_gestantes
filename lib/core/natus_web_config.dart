@@ -1,7 +1,7 @@
 class NatusWebConfig {
   static const String appNome = 'Natus';
   static const String appDescricao =
-      'Natus Cuidados Materno e Neonatal';
+      'Natus Gestão e Relacionamento para Clínicas';
 
   static const bool usarAnimacoesLeves = true;
 

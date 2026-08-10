@@ -86,7 +86,7 @@ class ExameArquivo {
       }
     }
 
-    return 'Gestante não identificada';
+    return 'Paciente não identificado';
   }
 
   DateTime get dataOrdenacao {

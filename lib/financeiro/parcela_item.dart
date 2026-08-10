@@ -10,15 +10,7 @@ class NatusParcelaItem extends StatelessWidget {
   final String rotulo;
   final bool pago;
   final bool atrasado;
-  final String statusAsaasTexto;
-  final Color statusAsaasCor;
-  final bool temCobrancaAsaas;
-  final VoidCallback onAbrirCobranca;
-  final VoidCallback onConsultarStatus;
-  final VoidCallback onCopiarPix;
-  final VoidCallback onAbrirBoleto;
   final VoidCallback onAbrirComprovante;
-  final VoidCallback onGerarCobranca;
   final VoidCallback onSelecionarComprovante;
   final VoidCallback onDarBaixa;
   final VoidCallback? onAlterarParcelas;
@@ -30,15 +22,7 @@ class NatusParcelaItem extends StatelessWidget {
     required this.rotulo,
     required this.pago,
     required this.atrasado,
-    required this.statusAsaasTexto,
-    required this.statusAsaasCor,
-    required this.temCobrancaAsaas,
-    required this.onAbrirCobranca,
-    required this.onConsultarStatus,
-    required this.onCopiarPix,
-    required this.onAbrirBoleto,
     required this.onAbrirComprovante,
-    required this.onGerarCobranca,
     required this.onSelecionarComprovante,
     required this.onDarBaixa,
     this.onAlterarParcelas,
@@ -159,33 +143,6 @@ class NatusParcelaItem extends StatelessWidget {
                     color: NatusApp.textoSuave,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Tooltip(
-                  message: statusAsaasTexto,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.account_balance_wallet_outlined,
-                        size: 13,
-                        color: statusAsaasCor,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          statusAsaasTexto,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: statusAsaasCor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
@@ -248,16 +205,6 @@ class NatusParcelaItem extends StatelessWidget {
             icon: Icon(Icons.more_vert, color: NatusApp.textoSuave, size: 20),
             onSelected: (op) {
               switch (op) {
-                case 'abrir':
-                  onAbrirCobranca();
-                case 'consultar':
-                  onConsultarStatus();
-                case 'pix_copiar':
-                  onCopiarPix();
-                case 'boleto':
-                  onAbrirBoleto();
-                case 'gerar':
-                  onGerarCobranca();
                 case 'comprovante_sel':
                   onSelecionarComprovante();
                 case 'quitar':
@@ -282,30 +229,7 @@ class NatusParcelaItem extends StatelessWidget {
                     ],
                   ),
                 ),
-              if (temCobrancaAsaas) ...[
-                const PopupMenuItem(
-                  value: 'abrir',
-                  child: Text('Abrir cobrança Asaas'),
-                ),
-                const PopupMenuItem(
-                  value: 'consultar',
-                  child: Text('Consultar status Asaas'),
-                ),
-                const PopupMenuItem(
-                  value: 'pix_copiar',
-                  child: Text('Copiar Pix copia e cola'),
-                ),
-                const PopupMenuItem(
-                  value: 'boleto',
-                  child: Text('Abrir boleto Asaas'),
-                ),
-              ],
               if (!pago) ...[
-                if (!temCobrancaAsaas)
-                  const PopupMenuItem(
-                    value: 'gerar',
-                    child: Text('Gerar cobrança Asaas'),
-                  ),
                 const PopupMenuItem(
                   value: 'comprovante_sel',
                   child: Text('Selecionar comprovante'),
@@ -321,7 +245,7 @@ class NatusParcelaItem extends StatelessWidget {
                           color: NatusApp.douradoEscuro,
                         ),
                         SizedBox(width: 10),
-                        Text('Quitar plano da gestante'),
+                        Text('Quitar plano do paciente'),
                       ],
                     ),
                   ),

@@ -1,5 +1,5 @@
-importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.16.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: 'AIzaSyB3irHorITGhIAlxVYzgHewkGmI3eVQQMY',
@@ -13,18 +13,21 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const notification = payload.notification || {};
   const data = payload.data || {};
+  const notificationId = /^[a-zA-Z0-9_-]{1,128}$/.test(data.notificacaoId || '')
+    ? data.notificacaoId
+    : '';
+  const safeData = {
+    tipo: 'atualizacao_clinica',
+    ...(notificationId ? { notificacaoId: notificationId } : {}),
+  };
 
-  const title = notification.title || data.title || 'Natus';
-  const body = notification.body || data.body || 'Você recebeu uma nova atualização.';
-
-  self.registration.showNotification(title, {
-    body,
+  self.registration.showNotification('Nova atualização clínica', {
+    body: 'Abra o Natus para visualizar os detalhes com segurança.',
     icon: '/icons/Icon-192.png',
     badge: '/icons/Icon-192.png',
-    data,
-    tag: data.tag || data.tipo || 'natus-alerta',
-    requireInteraction: data.tipo === 'alerta_contracao',
+    data: safeData,
+    tag: 'atualizacao_clinica',
+    requireInteraction: false,
   });
 });

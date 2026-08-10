@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../shared/natus_app.dart';
 import '../shared/natus_logo.dart';
@@ -34,13 +36,23 @@ class _TelaLoginState extends State<TelaLogin> {
         email: emailController.text.trim(),
         password: senhaController.text.trim(),
       );
-    } catch (e) {
+    } catch (_) {
       mostrarErro('E-mail ou senha inválidos.');
+    } finally {
+      senhaController.clear();
+      if (mounted) {
+        setState(() {
+          carregando = false;
+        });
+      }
     }
+  }
 
-    setState(() {
-      carregando = false;
-    });
+  @override
+  void dispose() {
+    emailController.dispose();
+    senhaController.dispose();
+    super.dispose();
   }
 
   void mostrarErro(String mensagem) {
@@ -49,113 +61,179 @@ class _TelaLoginState extends State<TelaLogin> {
     ).showSnackBar(SnackBar(content: Text(mensagem)));
   }
 
+  Future<void> baixarAplicativoAndroid() async {
+    final url = Uri.base.resolve('/downloads/natus-android-1.1.0.apk');
+    final abriuDownload = await launchUrl(url, webOnlyWindowName: '_self');
+    if (!abriuDownload && mounted) {
+      mostrarErro('Não foi possível iniciar o download do aplicativo.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return PremiumNatusBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        body: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 420),
-            width: double.infinity,
-            margin: const EdgeInsets.all(20),
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: NatusApp.offWhite.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(34),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.82)),
-              boxShadow: [
-                BoxShadow(
-                  color: NatusApp.vinho.withValues(alpha: 0.12),
-                  blurRadius: 34,
-                  spreadRadius: -12,
-                  offset: const Offset(0, 22),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const NatusLogo(height: 180),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final alturaMinima = constraints.maxHeight > 40
+                  ? constraints.maxHeight - 40
+                  : 0.0;
 
-                const SizedBox(height: 24),
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: alturaMinima),
+                  child: Center(
+                    child: Container(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                        color: NatusApp.offWhite.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(34),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.82),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: NatusApp.vinho.withValues(alpha: 0.12),
+                            blurRadius: 34,
+                            spreadRadius: -12,
+                            offset: const Offset(0, 22),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const NatusLogo(height: 180),
 
-                Text(
-                  'Bem Vinda',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: NatusApp.vinho,
-                  ),
-                ),
+                          const SizedBox(height: 24),
 
-                const SizedBox(height: 6),
+                          Text(
+                            'Bem Vinda',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: NatusApp.vinho,
+                            ),
+                          ),
 
-                Text(
-                  'Cuidado, gestão e acolhimento em um só lugar',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: NatusApp.textoSuave),
-                ),
+                          const SizedBox(height: 6),
 
-                const SizedBox(height: 24),
+                          Text(
+                            'Cuidado, gestão e acolhimento em um só lugar',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: NatusApp.textoSuave),
+                          ),
 
-                TextFormField(
-                  controller: emailController,
-                  textInputAction: TextInputAction.next,
-                  onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
-                  decoration: InputDecoration(
-                    labelText: 'E-mail',
-                    floatingLabelBehavior: FloatingLabelBehavior.always,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
+                          const SizedBox(height: 24),
 
-                const SizedBox(height: 16),
+                          TextFormField(
+                            controller: emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [AutofillHints.username],
+                            textInputAction: TextInputAction.next,
+                            onFieldSubmitted: (_) =>
+                                FocusScope.of(context).nextFocus(),
+                            decoration: InputDecoration(
+                              labelText: 'E-mail',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
 
-                TextFormField(
-                  controller: senhaController,
-                  obscureText: true,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => fazerLogin(),
-                  decoration: InputDecoration(
-                    labelText: 'Senha',
-                    floatingLabelBehavior: FloatingLabelBehavior.always,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
+                          const SizedBox(height: 16),
 
-                const SizedBox(height: 24),
+                          TextFormField(
+                            controller: senhaController,
+                            obscureText: true,
+                            enableSuggestions: false,
+                            autocorrect: false,
+                            autofillHints: const [AutofillHints.password],
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => fazerLogin(),
+                            decoration: InputDecoration(
+                              labelText: 'Senha',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
 
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: carregando ? null : fazerLogin,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: NatusApp.marsala,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                          const SizedBox(height: 24),
+
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: ElevatedButton(
+                              onPressed: carregando ? null : fazerLogin,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: NatusApp.marsala,
+                                foregroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.onPrimary,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: carregando
+                                  ? SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onPrimary,
+                                      ),
+                                    )
+                                  : const Text('Entrar'),
+                            ),
+                          ),
+
+                          if (kIsWeb) ...[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 44,
+                              child: OutlinedButton.icon(
+                                onPressed: baixarAplicativoAndroid,
+                                icon: const Icon(
+                                  Icons.android_rounded,
+                                  size: 20,
+                                ),
+                                label: const Text(
+                                  'Baixar aplicativo para Android',
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: NatusApp.marsala,
+                                  side: BorderSide(
+                                    color: NatusApp.marsala.withValues(
+                                      alpha: 0.32,
+                                    ),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    child: carregando
-                        ? SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Theme.of(context).colorScheme.onPrimary,
-                            ),
-                          )
-                        : const Text('Entrar'),
                   ),
                 ),
-              ],
-            ),
+              );
+            },
           ),
         ),
       ),

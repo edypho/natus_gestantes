@@ -10,7 +10,7 @@ class BuildWebGuard {
     'Login funcionando',
     'Dashboard carregando',
     'Financeiro carregando',
-    'Gestantes carregando',
+    'Pacientes carregando',
     'Exames carregando',
     'Firebase conectado',
   ];
@@ -20,8 +20,6 @@ class BuildWebGuard {
     required bool firebaseOk,
     required bool semErroConsole,
   }) {
-    return edgeOk &&
-        firebaseOk &&
-        semErroConsole;
+    return edgeOk && firebaseOk && semErroConsole;
   }
 }

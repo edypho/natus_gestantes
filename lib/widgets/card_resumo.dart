@@ -1,15 +1,10 @@
-
 import 'package:flutter/material.dart';
 
 class CardResumo extends StatelessWidget {
   final String titulo;
   final String valor;
 
-  const CardResumo({
-    super.key,
-    required this.titulo,
-    required this.valor,
-  });
+  const CardResumo({super.key, required this.titulo, required this.valor});
 
   @override
   Widget build(BuildContext context) {
@@ -22,10 +17,7 @@ class CardResumo extends StatelessWidget {
             SizedBox(height: 8),
             Text(
               valor,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
           ],
         ),

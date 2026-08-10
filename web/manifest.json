@@ -5,7 +5,7 @@
   "display": "standalone",
   "background_color": "#F8F1ED",
   "theme_color": "#7A3E57",
-  "description": "Sistema premium para enfermagem obstétrica, gestão de gestantes, financeiro, contratos e assistência materno neonatal.",
+  "description": "Sistema de gestão e relacionamento para clínicas, pacientes, profissionais, atendimentos, prontuários, financeiro e contratos.",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
   "icons": [

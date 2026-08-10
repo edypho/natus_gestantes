@@ -27,6 +27,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'agenda/agenda_page.dart';
 import 'core/firebase_globals.dart';
+import 'core/natus_breakpoints.dart';
+import 'core/natus_especialidades.dart';
+import 'core/natus_terminologia.dart';
+import 'core/sessao_idempotencia.dart';
 import 'financeiro/financeiro_calculos.dart' as fincalc;
 import 'gestantes/gestantes_regras.dart' as gregras;
 import 'gestantes/maternidades_regras.dart' as mregras;
@@ -42,9 +46,16 @@ import 'navigation/menu_inferior_coracao.dart';
 import 'notificacoes/notificacoes_central_page.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
 import 'services/push_notifications_service.dart';
+import 'services/arquivo_download_service.dart';
+import 'services/google_maps_web_loader.dart';
 import 'services/tenant_firestore_service.dart';
 import 'saas/contexto_saas.dart';
 import 'saas/tenant_access_scope.dart';
+import 'seguranca/arquivo_upload_seguro.dart';
+import 'seguranca/erro_publico.dart';
+import 'seguranca/firebase_app_check_config.dart';
+import 'seguranca/log_seguro.dart';
+import 'seguranca/url_externa_segura.dart';
 import 'uploads/upload_progress_dialog.dart';
 
 export 'core/firebase_globals.dart';
@@ -55,18 +66,43 @@ import 'core/usuario_tipos.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  if (kIsWeb) {
+    try {
+      await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
+    } catch (erro) {
+      logErroSeguro(
+        'Nao foi possivel limitar a persistencia da sessao Web.',
+        erro,
+      );
+    }
+  }
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await ativarFirebaseAppCheck();
 
   if (PushNotificationsService.plataformaSuportada) {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   }
 
   runApp(const NatusApp(home: AuthGate()));
+
+  if (kIsWeb) {
+    unawaited(_carregarGoogleMapsWebEmSegundoPlano());
+  }
+}
+
+Future<void> _carregarGoogleMapsWebEmSegundoPlano() async {
+  final mapasWebConfigurado = await carregarGoogleMapsWeb();
+  if (!mapasWebConfigurado) {
+    logInfoSeguro(
+      'Google Maps Web aguardando uma chave publica configurada no build.',
+    );
+  }
 }
 
 class AuthGate extends StatelessWidget {
@@ -75,14 +111,9 @@ class AuthGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
+      initialData: FirebaseAuth.instance.currentUser,
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
         if (snapshot.hasData) {
           final user = snapshot.data!;
 
@@ -227,9 +258,10 @@ class _PrimeiroLoginSaaSGateState extends State<PrimeiroLoginSaaSGate> {
       if (!mounted) return;
       setState(() => _concluido = true);
     } catch (e) {
+      logErroSeguro('Erro ao alterar a senha inicial.', e);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Não foi possível alterar a senha: $e')),
+        const SnackBar(content: Text('Não foi possível alterar a senha.')),
       );
     } finally {
       if (mounted) setState(() => _alterando = false);
@@ -348,6 +380,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Tipo de arquivo não permitido. Use PDF, JPG, PNG, WebP ou MP4.',
       );
     }
+    final bytes = arquivo.bytes;
+    if (bytes == null ||
+        !arquivoPossuiAssinaturaPermitida(bytes, contentType)) {
+      throw const FormatException(
+        'O conteúdo do arquivo não corresponde ao tipo permitido.',
+      );
+    }
     if (contentType == 'video/mp4' && !permitirVideo) {
       throw const FormatException(
         'Vídeos em MP4 são aceitos apenas na biblioteca.',
@@ -412,8 +451,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 initialValue: tipoInicial,
                 items: tiposAlteraveis
                     .map(
-                      (tipo) =>
-                          DropdownMenuItem(value: tipo, child: Text(tipo)),
+                      (tipo) => DropdownMenuItem(
+                        value: tipo,
+                        child: Text(NatusTermos.rotuloPerfil(tipo)),
+                      ),
                     )
                     .toList(),
                 onChanged: (value) {
@@ -440,9 +481,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 }
 
                 try {
-                  final callable = FirebaseFunctions.instance.httpsCallable(
-                    'alterarTipoUsuarioClinica',
-                  );
+                  final callable = FirebaseFunctions.instanceFor(
+                    region: 'us-central1',
+                  ).httpsCallable('alterarTipoUsuarioClinica');
                   await callable.call({
                     'uidUsuario': uid,
                     'tipoUsuario': novoTipo,
@@ -453,7 +494,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   mostrarMensagem('Tipo de usuário atualizado.');
                 } on FirebaseFunctionsException catch (e) {
                   mostrarMensagem(
-                    e.message ?? 'Não foi possível alterar o tipo de usuário.',
+                    mensagemErroFunctionsSeguro(
+                      e,
+                      fallback: 'Não foi possível alterar o tipo de usuário.',
+                    ),
                   );
                 }
               },
@@ -478,7 +522,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       );
       mostrarMensagem('E-mail de definição de senha enviado.');
     } catch (e) {
-      mostrarMensagem('Não foi possível enviar o e-mail de acesso: $e');
+      logErroSeguro('Erro ao enviar e-mail de acesso.', e);
+      mostrarMensagem('Não foi possível enviar o e-mail de acesso.');
     }
   }
 
@@ -491,9 +536,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         contracoes.addAll(listaFirebase);
       });
 
-      debugPrint('✅ Contrações carregadas do Firebase');
+      logInfoSeguro('Contracoes carregadas do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar contrações: $e');
+      logErroSeguro('Erro ao carregar contracoes.', e);
       mostrarMensagem('Erro ao carregar contrações');
     }
   }
@@ -529,7 +574,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Enfermeira cadastrada com sucesso!');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar enfermeira: $e');
+      logErroSeguro('Erro ao salvar profissional.', e);
+      mostrarMensagem('Erro ao salvar profissional.');
     }
   }
 
@@ -564,7 +610,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Obstetra cadastrado com sucesso!');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar obstetra: $e');
+      logErroSeguro('Erro ao salvar profissional.', e);
+      mostrarMensagem('Erro ao salvar profissional.');
     }
   }
 
@@ -584,7 +631,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final idGestante = gestante['id'];
 
       if (idGestante == null || idGestante.isEmpty) {
-        mostrarMensagem('Erro: gestante sem ID do Firebase.');
+        mostrarMensagem('Erro: paciente sem ID do Firebase.');
         return;
       }
 
@@ -610,7 +657,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Dados do nascimento salvos com sucesso!');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar nascimento: $e');
+      logErroSeguro('Erro ao salvar dados do procedimento.', e);
+      mostrarMensagem('Erro ao salvar dados do procedimento.');
     }
   }
 
@@ -619,22 +667,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   String rotuloPerfilUsuario() {
-    switch (widget.tipoUsuario) {
-      case 'admin':
-        return 'Admin da clínica';
-      case 'enfermeira':
-        return 'EO';
-      case 'obstetra':
-        return 'Obstetra';
-      case 'profissional':
-        return 'Profissional';
-      case 'gestante':
-        return 'Gestante';
-      case 'superAdmin':
-        return 'Super Admin';
-      default:
-        return widget.tipoUsuario;
-    }
+    return NatusTermos.rotuloPerfil(widget.tipoUsuario);
   }
 
   String iniciaisPerfilUsuario() {
@@ -765,28 +798,36 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         .orderBy('criadoEm', descending: true)
         .limit(20)
         .snapshots()
-        .listen((snapshot) {
-          final totalNaoLidas = snapshot.docs.where((doc) {
-            final dados = doc.data();
-            final lidasPor = ((dados['lidasPor'] as List?) ?? const [])
-                .map((item) => item.toString())
-                .toList();
-            return !lidasPor.contains(uid);
-          }).length;
+        .listen(
+          (snapshot) {
+            final totalNaoLidas = snapshot.docs.where((doc) {
+              final dados = doc.data();
+              final lidasPor = ((dados['lidasPor'] as List?) ?? const [])
+                  .map((item) => item.toString())
+                  .toList();
+              return !lidasPor.contains(uid);
+            }).length;
 
-          if (!mounted) return;
-          setState(() {
-            notificacoesNaoLidas = totalNaoLidas;
-          });
-        });
+            if (!mounted) return;
+            setState(() {
+              notificacoesNaoLidas = totalNaoLidas;
+            });
+          },
+          onError: (Object erro, StackTrace stackTrace) {
+            logErroSeguro('Erro ao escutar notificacoes.', erro);
+            if (!mounted || notificacoesNaoLidas == 0) return;
+            setState(() {
+              notificacoesNaoLidas = 0;
+            });
+          },
+        );
   }
 
   Future<void> abrirPainelNotificacoes() async {
     if (!podeReceberNotificacoesInternas || !mounted) return;
 
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final media = MediaQuery.of(context);
-    final isMobile = media.size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     await showGeneralDialog<void>(
       context: context,
@@ -940,11 +981,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           planoIdSelecionado = (primeiro['id'] ?? '').toString();
           plano = (primeiro['nomePlano'] ?? '').toString();
           parcelas = (primeiro['parcelas'] ?? '1').toString();
-          descricaoNfsePlano = (primeiro['descricaoNfse'] ?? '').toString();
         }
       });
     } catch (e) {
-      mostrarMensagem('Erro ao carregar planos: $e');
+      logErroSeguro('Erro ao carregar planos.', e);
+      mostrarMensagem('Erro ao carregar planos.');
     }
   }
 
@@ -958,7 +999,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       planoIdSelecionado = idPlano;
       plano = (planoEncontrado['nomePlano'] ?? '').toString();
       parcelas = (planoEncontrado['parcelas'] ?? '1').toString();
-      descricaoNfsePlano = (planoEncontrado['descricaoNfse'] ?? '').toString();
     });
   }
 
@@ -993,7 +1033,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               'parcelas': qtdParcelas.toString(),
               'descricaoComercial': planoDescricaoComercialController.text
                   .trim(),
-              'descricaoNfse': planoDescricaoNfseController.text.trim(),
               'ativo': true,
               'criadoEm': DateTime.now().toIso8601String(),
               'atualizadoEm': DateTime.now().toIso8601String(),
@@ -1004,12 +1043,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       planoValorController.clear();
       planoParcelasController.text = '1';
       planoDescricaoComercialController.clear();
-      planoDescricaoNfseController.clear();
 
       await carregarPlanosFirestore();
       mostrarMensagem('Plano cadastrado com sucesso!');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar plano: $e');
+      logErroSeguro('Erro ao salvar plano.', e);
+      mostrarMensagem('Erro ao salvar plano.');
     }
   }
 
@@ -1027,7 +1066,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await carregarPlanosFirestore();
       mostrarMensagem(ativoAtual ? 'Plano inativado.' : 'Plano ativado.');
     } catch (e) {
-      mostrarMensagem('Erro ao atualizar plano: $e');
+      logErroSeguro('Erro ao atualizar plano.', e);
+      mostrarMensagem('Erro ao atualizar plano.');
     }
   }
 
@@ -1047,9 +1087,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final descricaoComercialController = TextEditingController(
       text: (planoDados['descricaoComercial'] ?? '').toString(),
     );
-    final descricaoNfseController = TextEditingController(
-      text: (planoDados['descricaoNfse'] ?? '').toString(),
-    );
 
     final salvou = await showDialog<bool>(
       context: context,
@@ -1067,8 +1104,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 campoFull(parcelasController, 'Parcelas'),
                 const SizedBox(height: 12),
                 campoFull(descricaoComercialController, 'Descrição comercial'),
-                const SizedBox(height: 12),
-                campoFull(descricaoNfseController, 'Descrição NFS-e'),
               ],
             ),
           ),
@@ -1121,13 +1156,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'valorFormatado': formatarMoeda(valor),
         'parcelas': qtdParcelas.toString(),
         'descricaoComercial': descricaoComercialController.text.trim(),
-        'descricaoNfse': descricaoNfseController.text.trim(),
         'atualizadoEm': DateTime.now().toIso8601String(),
       });
       await carregarPlanosFirestore();
       mostrarMensagem('Plano atualizado com sucesso!');
     } catch (e) {
-      mostrarMensagem('Erro ao editar plano: $e');
+      logErroSeguro('Erro ao editar plano.', e);
+      mostrarMensagem('Erro ao editar plano.');
     }
   }
 
@@ -1137,7 +1172,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
-    final uri = Uri.parse(url.trim());
+    final uri = uriHttpsExternaSegura(url);
+    if (uri == null) {
+      mostrarMensagem('Link externo inválido ou não seguro.');
+      return;
+    }
 
     try {
       final abriu = await launchUrl(uri, mode: LaunchMode.platformDefault);
@@ -1201,7 +1240,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         emailPerfilLogado = email;
       });
     } catch (e) {
-      debugPrint('❌ Erro ao carregar perfil do usuário: $e');
+      logErroSeguro('Erro ao carregar perfil do usuario.', e);
     }
   }
 
@@ -1306,7 +1345,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Foto de perfil atualizada com sucesso.');
     } catch (e) {
-      debugPrint('❌ Erro ao enviar foto de perfil: $e');
+      logErroSeguro('Erro ao enviar foto de perfil.', e);
       mostrarMensagem('Erro ao atualizar a foto de perfil.');
     } finally {
       if (mounted) {
@@ -1325,21 +1364,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         onForegroundMessage: tratarPushForeground,
       );
     } catch (e) {
-      debugPrint('❌ Erro ao inicializar push: $e');
+      logErroSeguro('Erro ao inicializar push.', e);
     }
   }
 
   void tratarPushForeground(RemoteMessage message) {
     final tipo = (message.data['tipo'] ?? '').toString().trim();
 
-    if (tipo != 'alerta_contracao') {
+    if (tipo != 'alerta_contracao' && tipo != 'atualizacao_clinica') {
       return;
     }
-
-    final nomeGestante = (message.data['gestante'] ?? '').toString().trim();
-    final intensidade = (message.data['intensidade'] ?? '').toString().trim();
-    final duracao = (message.data['duracao'] ?? '').toString().trim();
-    final intervalo = (message.data['intervalo'] ?? '').toString().trim();
 
     SystemSound.play(SystemSoundType.alert);
     Future.delayed(const Duration(milliseconds: 350), () {
@@ -1348,11 +1382,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (!mounted) return;
 
-    mostrarMensagem(
-      nomeGestante.isEmpty
-          ? 'Nova contração registrada agora.'
-          : 'Alerta de contração: $nomeGestante',
-    );
+    mostrarMensagem('Nova atualização clínica disponível.');
 
     if (alertaPushAberto) return;
 
@@ -1363,29 +1393,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       barrierDismissible: true,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Alerta de contração'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                nomeGestante.isEmpty
-                    ? 'Uma paciente registrou uma nova contração.'
-                    : '$nomeGestante registrou uma nova contração.',
-              ),
-              if (intensidade.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text('Intensidade: $intensidade'),
-              ],
-              if (duracao.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text('Duração: $duracao'),
-              ],
-              if (intervalo.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text('Intervalo: $intervalo'),
-              ],
-            ],
+          title: const Text('Nova atualização clínica'),
+          content: const Text(
+            'Abra a central de notificações do Natus para consultar os '
+            'detalhes com segurança.',
           ),
           actions: [
             TextButton(
@@ -1413,23 +1424,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircleAvatar(
-                  radius: 42,
-                  backgroundColor: NatusApp.rose.withValues(alpha: 0.35),
-                  backgroundImage: fotoPerfilUrl.trim().isNotEmpty
-                      ? NetworkImage(fotoPerfilUrl)
-                      : null,
-                  child: fotoPerfilUrl.trim().isNotEmpty
-                      ? null
-                      : Text(
-                          iniciaisPerfilUsuario(),
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: NatusApp.vinho,
-                          ),
-                        ),
-                ),
+                avatarPerfilUsuario(radius: 42),
                 const SizedBox(height: 16),
                 Text(
                   widget.nomeUsuario.trim().isEmpty
@@ -1512,6 +1507,36 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ],
         );
       },
+    );
+  }
+
+  Widget avatarPerfilUsuario({double radius = 24}) {
+    final imagemUrl = fotoPerfilUrl.trim();
+    final imagemUri = uriMidiaNatusSegura(imagemUrl);
+
+    Widget iniciais() => Text(
+      iniciaisPerfilUsuario(),
+      style: TextStyle(
+        fontSize: radius * 0.7,
+        fontWeight: FontWeight.bold,
+        color: NatusApp.vinho,
+      ),
+    );
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: NatusApp.rose.withValues(alpha: 0.35),
+      child: imagemUri == null
+          ? iniciais()
+          : ClipOval(
+              child: Image.network(
+                imagemUri.toString(),
+                width: radius * 2,
+                height: radius * 2,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Center(child: iniciais()),
+              ),
+            ),
     );
   }
 
@@ -1608,11 +1633,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         biblioteca.addAll(listaFirebase);
       });
 
-      debugPrint(
-        '✅ Biblioteca carregada do Firebase: ${listaFirebase.length} itens',
-      );
+      logInfoSeguro('Biblioteca carregada do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar biblioteca: $e');
+      logErroSeguro('Erro ao carregar biblioteca.', e);
       mostrarMensagem('Erro ao carregar biblioteca');
     }
   }
@@ -1629,7 +1652,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await carregarBibliotecaFirestore();
       mostrarMensagem('Material adicionado à biblioteca.');
     } catch (e) {
-      debugPrint('❌ Erro ao salvar material da biblioteca: $e');
+      logErroSeguro('Erro ao salvar material da biblioteca.', e);
       mostrarMensagem('Erro ao adicionar material à biblioteca.');
     }
   }
@@ -1650,7 +1673,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await carregarBibliotecaFirestore();
       mostrarMensagem('Material atualizado com sucesso.');
     } catch (e) {
-      debugPrint('Erro ao atualizar material da biblioteca: $e');
+      logErroSeguro('Erro ao atualizar material da biblioteca.', e);
       mostrarMensagem('Erro ao atualizar material da biblioteca.');
     }
   }
@@ -1702,7 +1725,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await carregarBibliotecaFirestore();
       mostrarMensagem('Material excluído da biblioteca.');
     } catch (e) {
-      debugPrint('❌ Erro ao excluir material da biblioteca: $e');
+      logErroSeguro('Erro ao excluir material da biblioteca.', e);
       mostrarMensagem('Erro ao excluir material da biblioteca.');
     }
   }
@@ -1716,9 +1739,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         atendimentos.addAll(listaFirebase);
       });
 
-      debugPrint('✅ Atendimentos carregados do Firebase');
+      logInfoSeguro('Atendimentos carregados do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar atendimentos: $e');
+      logErroSeguro('Erro ao carregar atendimentos.', e);
       mostrarMensagem('Erro ao carregar atendimentos');
     }
   }
@@ -1862,7 +1885,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 .toList();
           }).toList();
         } catch (erroExcel) {
-          debugPrint('❌ Erro ao ler XLSX. Tente importar como CSV: $erroExcel');
+          logErroSeguro('Erro ao ler arquivo XLSX.', erroExcel);
           mostrarMensagem(
             'Não consegui ler este XLSX. Salve a planilha como CSV e importe novamente.',
           );
@@ -2146,7 +2169,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       if (linhaCabecalhoIndex == -1 || melhorPontuacao == 0) {
         mostrarMensagem(
-          'Não encontrei cabeçalhos reconhecíveis na planilha. Verifique se existe uma linha com nomes como Gestante, Telefone, DPP ou Nascimento.',
+          'Não encontrei cabeçalhos reconhecíveis na planilha. Verifique se existe uma linha com nomes como Paciente, Nome da Gestante, Telefone, DPP ou Nascimento.',
         );
         return;
       }
@@ -2523,15 +2546,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       }
 
       final mensagemFinanceiro = gerarFinanceiro
-          ? ' e parcelas de $parcelasCriadas gestantes geradas'
+          ? ' e parcelas de $parcelasCriadas pacientes geradas'
           : '';
 
       mostrarMensagem(
         'Importação concluída: $importadas importadas, $ignoradas ignoradas$mensagemFinanceiro. Cabeçalho encontrado na linha ${linhaCabecalhoIndex + 1}.',
       );
     } catch (e) {
-      debugPrint('❌ Erro ao importar gestantes: $e');
-      mostrarMensagem('Erro ao importar gestantes.');
+      logErroSeguro('Erro ao importar pacientes.', e);
+      mostrarMensagem('Erro ao importar pacientes.');
     }
   }
 
@@ -2634,6 +2657,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final novoNomeController = TextEditingController();
   final novoEmailController = TextEditingController();
   final novaSenhaController = TextEditingController();
+  final _sessaoCriacaoUsuario = SessaoIdempotencia();
 
   String novoTipoUsuario = 'gestante';
   String? gestanteSelecionadaLogin;
@@ -2687,6 +2711,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final hospitalGestante = TextEditingController();
   final obstetraGestante = TextEditingController();
   final convenioGestante = TextEditingController();
+  String especialidadePaciente = NatusEspecialidades.clinicaGeral;
+  bool salvandoPaciente = false;
+
+  bool get especialidadePacienteEhObstetricia =>
+      NatusEspecialidades.ehObstetricia(especialidadePaciente);
+
+  String get tituloContatoCadastroPaciente =>
+      NatusEspecialidades.tituloContato(especialidadePaciente);
 
   final eoNomeController = TextEditingController();
   final eoTelefoneController = TextEditingController();
@@ -2729,7 +2761,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   String plano = '';
   String planoIdSelecionado = '';
-  String descricaoNfsePlano = '';
   String descontoPercentual = '0%';
   String parcelas = '1';
   String consultorio = 'Não';
@@ -2782,7 +2813,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final planoValorController = TextEditingController();
   final planoParcelasController = TextEditingController(text: '1');
   final planoDescricaoComercialController = TextEditingController();
-  final planoDescricaoNfseController = TextEditingController();
 
   final telefoneMask = MaskTextInputFormatter(
     mask: '(##) #####-####',
@@ -2820,9 +2850,35 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   bool gestanteAtivaParaContracoes(Map<String, String> g) =>
       gregras.gestanteAtivaParaContracoes(g);
 
+  String especialidadeDoPaciente(Map<String, String> paciente) {
+    final especialidade =
+        (paciente['especialidadeAcompanhamento'] ??
+                paciente['tipoCadastroPaciente'] ??
+                '')
+            .trim();
+    if (especialidade.isNotEmpty) return especialidade;
+
+    return pacienteTemModuloObstetrico(paciente)
+        ? 'Obstetrícia'
+        : 'Clínica geral';
+  }
+
+  bool pacienteTemModuloObstetrico(Map<String, String> paciente) {
+    final especialidade =
+        (paciente['especialidadeAcompanhamento'] ??
+                paciente['tipoCadastroPaciente'] ??
+                '')
+            .toLowerCase();
+    final status = statusGestanteNormalizado(paciente);
+    return NatusEspecialidades.ehObstetricia(especialidade) ||
+        (paciente['dpp'] ?? '').trim().isNotEmpty ||
+        status == 'Gestante' ||
+        status == 'Puérpera';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
     final mostrarMenuInferior = isMobile && exibirMenuInferiorCoracao();
     final telaCoracao = telaCentralMenuCoracao();
     final itensEsquerda = itensMenuInferiorEsquerda();
@@ -2830,6 +2886,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     return PremiumNatusBackground(
       child: Scaffold(
+        extendBody: true,
         backgroundColor: Colors.transparent,
         drawer: isMobile && !mostrarMenuInferior
             ? Drawer(
@@ -2845,7 +2902,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     children: [
                       Padding(
                         padding: EdgeInsets.only(
-                          bottom: mostrarMenuInferior ? 88 : 0,
+                          bottom: mostrarMenuInferior
+                              ? 88.0 + MediaQuery.viewPaddingOf(context).bottom
+                              : 0,
                         ),
                         child: telaConteudo(),
                       ),
@@ -2916,6 +2975,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ativo: widget.tipoUsuario == 'gestante'
                     ? telaAtual == telaCoracao
                     : false,
+                tooltip: widget.tipoUsuario == 'gestante'
+                    ? 'Abrir ${NatusTermos.rotuloMenu(telaCoracao)}'
+                    : 'Abrir mais opções',
                 onTap: () {
                   if (widget.tipoUsuario == 'gestante') {
                     selecionarTelaPrincipal(telaCoracao);
@@ -3076,25 +3138,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     final menusDoUsuario = menusPermitidos[chaveMenus] ?? [];
 
-    Widget avatarPerfilLateral({double radius = 24}) {
-      final imagemUrl = fotoPerfilUrl.trim();
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: NatusApp.rose.withValues(alpha: 0.35),
-        backgroundImage: imagemUrl.isNotEmpty ? NetworkImage(imagemUrl) : null,
-        child: imagemUrl.isNotEmpty
-            ? null
-            : Text(
-                iniciaisPerfilUsuario(),
-                style: TextStyle(
-                  fontSize: radius * 0.7,
-                  fontWeight: FontWeight.bold,
-                  color: NatusApp.vinho,
-                ),
-              ),
-      );
-    }
-
     Widget cardPerfilLateral() {
       return Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
@@ -3114,7 +3157,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 children: [
                   Stack(
                     children: [
-                      avatarPerfilLateral(),
+                      avatarPerfilUsuario(),
                       if (carregandoFotoPerfil)
                         Positioned.fill(
                           child: Container(
@@ -3280,7 +3323,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (menusDoUsuario.contains('Cadastro'))
         itemMenu(Icons.person_add_alt_1, 'Cadastro'),
       if (menusDoUsuario.contains('Gestantes'))
-        itemMenu(Icons.pregnant_woman, 'Gestantes'),
+        itemMenu(Icons.people_alt_rounded, 'Gestantes'),
       if (menusDoUsuario.contains('Calculadora de IG'))
         itemMenu(Icons.calculate, 'Calculadora de IG'),
       if (menusDoUsuario.contains('Atendimentos'))
@@ -3291,10 +3334,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         itemMenu(Icons.payments, 'Financeiro'),
       if (menusDoUsuario.contains('Planos da Natus'))
         itemMenu(Icons.workspace_premium_rounded, 'Planos da Natus'),
-      if (menusDoUsuario.contains('NFS-e'))
-        itemMenu(Icons.receipt_long_rounded, 'NFS-e'),
-      if (menusDoUsuario.contains('Histórico Fiscal'))
-        itemMenu(Icons.history_edu_rounded, 'Histórico Fiscal'),
       if (menusDoUsuario.contains('Centro de custo'))
         itemMenu(Icons.account_balance_wallet, 'Centro de custo'),
       if (menusDoUsuario.contains('Biblioteca'))
@@ -3370,7 +3409,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: () {
-            final isMobile = MediaQuery.of(context).size.width < 700;
+            final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
             if (isMobile) {
               Navigator.pop(context);
@@ -3418,7 +3457,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    titulo,
+                    NatusTermos.rotuloMenu(titulo),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -3533,7 +3572,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     return const [
       ItemMenuInferior('Agenda', Icons.event_note_rounded),
-      ItemMenuInferior('Gestantes', Icons.pregnant_woman_rounded),
+      ItemMenuInferior('Gestantes', Icons.people_alt_rounded),
     ];
   }
 
@@ -3580,7 +3619,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       case 'Cadastro':
         return Icons.person_add_alt_1_rounded;
       case 'Gestantes':
-        return Icons.pregnant_woman_rounded;
+        return Icons.people_alt_rounded;
       case 'Prontuário':
         return Icons.note_alt_rounded;
       case 'Calculadora de IG':
@@ -3725,7 +3764,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                   ),
                                   const SizedBox(height: 10),
                                   Text(
-                                    titulo,
+                                    NatusTermos.rotuloMenu(titulo),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -3817,13 +3856,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           const SizedBox(height: 6),
 
           Text(
-            'Cadastre enfermeiras obstétricas que fazem parte da equipe Natus.',
+            'Cadastre profissionais que fazem parte da equipe da clínica.',
             style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
           const SizedBox(height: 24),
 
-          bloco('Dados da enfermeira obstétrica', [
+          bloco('Dados do profissional', [
             campo(eoNomeController, 'Nome'),
 
             const SizedBox(height: 16),
@@ -3847,7 +3886,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ElevatedButton.icon(
               onPressed: salvarEO,
               icon: const Icon(Icons.save),
-              label: const Text('Salvar enfermeira'),
+              label: const Text('Salvar profissional'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
                 foregroundColor: (NatusApp.escuro
@@ -3883,7 +3922,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           const SizedBox(height: 6),
 
           Text(
-            'Cadastre os obstetras que acompanham as gestantes da clínica.',
+            'Cadastre profissionais da especialidade obstétrica da clínica.',
             style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
@@ -4089,12 +4128,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       case 'Planos da Natus':
         return telaPlanosNatus();
 
-      case 'NFS-e':
-        return telaCentralNfse();
-
-      case 'Histórico Fiscal':
-        return telaHistoricoFiscalNfse();
-
       case 'Almoxarifado':
         return telaAlmoxarifado();
 
@@ -4143,7 +4176,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = gestante['id'];
 
     if (usuarioGestante && (idGestante == null || idGestante.isEmpty)) {
-      return telaSimples('Gestante não identificada para exibir exames.');
+      return telaSimples('Paciente não identificado para exibir exames.');
     }
 
     return SingleChildScrollView(
@@ -4165,7 +4198,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           Text(
             usuarioGestante
                 ? 'Envie e acompanhe seus exames.'
-                : 'Visualize os exames enviados pelas gestantes.',
+                : 'Visualize os exames enviados pelos pacientes.',
             style: TextStyle(color: NatusApp.textoSuave),
           ),
 
@@ -4252,7 +4285,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
               if (exames.isEmpty) {
                 return blocoFicha(
-                  usuarioGestante ? 'Meus exames' : 'Exames das gestantes',
+                  usuarioGestante ? 'Meus exames' : 'Exames dos pacientes',
                   [const Text('Nenhum exame encontrado.')],
                 );
               }
@@ -4264,7 +4297,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 dados['nomeGestante'] = nomeGestanteDoExame(dados);
 
                 final nomeGestante =
-                    dados['nomeGestante'] ?? 'Gestante não identificada';
+                    dados['nomeGestante'] ?? 'Paciente não identificado';
 
                 examesAgrupados.putIfAbsent(nomeGestante, () => []);
 
@@ -4274,7 +4307,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               return blocoFicha(
                 usuarioGestante
                     ? 'Meus exames (${exames.length})'
-                    : 'Exames das gestantes (${exames.length})',
+                    : 'Exames dos pacientes (${exames.length})',
                 [
                   ...examesAgrupados.entries.map((grupo) {
                     return Column(
@@ -4401,7 +4434,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         try {
           await ref.delete();
         } catch (e) {
-          debugPrint('Falha ao remover arquivo órfão do exame: $e');
+          logErroSeguro('Falha ao remover arquivo orfao do exame.', e);
         }
       }
 
@@ -4409,7 +4442,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Exame excluído com sucesso.');
     } catch (e) {
-      mostrarMensagem('Erro ao excluir exame: $e');
+      logErroSeguro('Erro ao excluir exame.', e);
+      mostrarMensagem('Erro ao excluir exame.');
     }
   }
 
@@ -4445,7 +4479,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       }
     }
 
-    return 'Gestante nÃ£o identificada';
+    return 'Paciente não identificado';
   }
 
   Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
@@ -4456,7 +4490,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         : (gestante['uidGestante'] ?? '').trim();
 
     if (idGestante.isEmpty) {
-      mostrarMensagem('Erro: gestante não identificada.');
+      mostrarMensagem('Erro: paciente não identificado.');
       return;
     }
 
@@ -4517,7 +4551,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Exame enviado com sucesso!');
     } catch (e) {
-      mostrarMensagem('Erro ao enviar exame: $e');
+      logErroSeguro('Erro ao enviar exame.', e);
+      mostrarMensagem('Erro ao enviar exame.');
     }
   }
 
@@ -5056,7 +5091,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isMobile = constraints.maxWidth < 620;
+        final isMobile =
+            constraints.maxWidth < 620 || NatusBreakpoints.isPhone(context);
 
         return Column(
           children: [
@@ -5489,7 +5525,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget graficoPizzaAmamentacao() {
     final dados = contarAmamentacao();
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     final ame = (dados['AME'] ?? 0).toDouble();
     final mista = (dados['Mista'] ?? 0).toDouble();
@@ -6101,6 +6137,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget telaCadastroGestante() {
+    final layoutCompacto = NatusBreakpoints.usarLayoutCompacto(context);
     double valorPlano = valorPlanoAtual();
     double percentualDesconto = converterPercentual(descontoPercentual);
     double valorDesconto = valorPlano * percentualDesconto;
@@ -6124,7 +6161,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Cadastro de Gestantes',
+                'Cadastro de pacientes',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w600,
@@ -6133,7 +6170,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Preencha as informações da gestante para iniciar o acompanhamento',
+                'Preencha as informações do paciente para iniciar o acompanhamento',
                 style: TextStyle(fontSize: 13, color: NatusApp.textoSuave),
               ),
               const SizedBox(height: 20),
@@ -6141,20 +6178,34 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
           const SizedBox(height: 20),
 
-          bloco('Gestante', [
-            Row(
+          bloco('Paciente', [
+            dropdownGrande(
+              'Tipo / especialidade do acompanhamento',
+              especialidadePaciente,
+              NatusEspecialidades.opcoes,
+              (valor) {
+                setState(() {
+                  especialidadePaciente = valor;
+                });
+              },
+            ),
+
+            const SizedBox(height: 16),
+
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
-                campo(nomeGestante, 'Nome da gestante'),
-                const SizedBox(width: 12),
+                campo(nomeGestante, 'Nome do paciente'),
                 campo(cpfGestante, 'CPF', mask: cpfMask),
-                const SizedBox(width: 12),
                 campo(telefoneGestante, 'Telefone', mask: telefoneMask),
-                const SizedBox(width: 12),
                 campo(emailGestante, 'E-mail'),
               ],
             ),
 
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
                 SizedBox(
                   width: 130,
@@ -6180,23 +6231,33 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     },
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
+                SizedBox(
+                  width: layoutCompacto ? 230 : 480,
                   child: campoBloqueadoFull(enderecoGestante, 'Endereço'),
                 ),
               ],
             ),
 
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 12,
               children: [
-                Expanded(child: campoFull(numeroGestante, 'Número')),
-                const SizedBox(width: 10),
-                Expanded(child: campoFull(complementoGestante, 'Apto / Bloco')),
-                const SizedBox(width: 10),
-                Expanded(child: campoBloqueadoFull(bairroGestante, 'Bairro')),
-                const SizedBox(width: 10),
-                Expanded(child: campoBloqueadoFull(cidadeGestante, 'Cidade')),
-                const SizedBox(width: 10),
+                SizedBox(
+                  width: 160,
+                  child: campoFull(numeroGestante, 'Número'),
+                ),
+                SizedBox(
+                  width: 230,
+                  child: campoFull(complementoGestante, 'Apto / Bloco'),
+                ),
+                SizedBox(
+                  width: 230,
+                  child: campoBloqueadoFull(bairroGestante, 'Bairro'),
+                ),
+                SizedBox(
+                  width: 230,
+                  child: campoBloqueadoFull(cidadeGestante, 'Cidade'),
+                ),
                 SizedBox(
                   width: 70,
                   child: campoBloqueadoFull(estadoGestante, 'UF'),
@@ -6204,66 +6265,67 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ],
             ),
 
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
-                Expanded(
-                  child: dropdownGrande(
-                    'Hospital / Maternidade',
-                    hospitalGestante.text.isEmpty
-                        ? 'Selecione'
-                        : hospitalGestante.text,
-                    listaHospitais,
-                    (v) {
-                      setState(() {
-                        hospitalGestante.text = v;
-                      });
-                    },
-                  ),
+                dropdownGrande(
+                  'Unidade / Hospital',
+                  hospitalGestante.text.isEmpty
+                      ? 'Selecione'
+                      : hospitalGestante.text,
+                  listaHospitais,
+                  (v) {
+                    setState(() {
+                      hospitalGestante.text = v;
+                    });
+                  },
                 ),
-                const SizedBox(width: 12),
-                campo(obstetraGestante, 'Obstetra'),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: dropdownGrande(
-                    'Convênio',
-                    convenioGestante.text.isEmpty
-                        ? 'Selecione'
-                        : convenioGestante.text,
-                    listaConvenios,
-                    (v) {
-                      setState(() {
-                        convenioGestante.text = v;
-                      });
-                    },
-                  ),
+                campo(obstetraGestante, 'Profissional responsável'),
+                dropdownGrande(
+                  'Convênio',
+                  convenioGestante.text.isEmpty
+                      ? 'Selecione'
+                      : convenioGestante.text,
+                  listaConvenios,
+                  (v) {
+                    setState(() {
+                      convenioGestante.text = v;
+                    });
+                  },
                 ),
               ],
             ),
           ]),
 
-          bloco('Pai', [
-            campo(nomePai, 'Nome do pai'),
-            campo(cpfPai, 'CPF do pai / responsável', mask: cpfMask),
-            campo(telefonePai, 'Telefone do pai', mask: telefoneMask),
-            campo(emailPai, 'E-mail do pai'),
+          bloco(tituloContatoCadastroPaciente, [
+            campo(nomePai, 'Nome'),
+            campo(cpfPai, 'CPF', mask: cpfMask),
+            campo(telefonePai, 'Telefone', mask: telefoneMask),
+            campo(emailPai, 'E-mail'),
           ]),
 
-          bloco('Bebê', [
-            campo(nomeBebe, 'Nome do bebê'),
-            dropdown('Sexo', sexo, ['Masculino', 'Feminino', 'Não informado'], (
-              v,
-            ) {
-              setState(() => sexo = v);
-            }),
-            campoDpp(),
-            campoInfo('IG atual', calcularIdadeGestacional(dppController.text)),
-          ]),
+          if (especialidadePacienteEhObstetricia)
+            bloco('Acompanhamento obstétrico', [
+              campo(nomeBebe, 'Nome do bebê'),
+              dropdown(
+                'Sexo do bebê',
+                sexo,
+                ['Masculino', 'Feminino', 'Não informado'],
+                (v) {
+                  setState(() => sexo = v);
+                },
+              ),
+              campoDpp(),
+              campoInfo(
+                'IG atual',
+                calcularIdadeGestacional(dppController.text),
+              ),
+            ]),
 
           bloco('Valores', [
             seletorPlanoGestante(),
             campoInfo('Valor do plano', formatarMoeda(valorPlano)),
-            if (descricaoNfsePlano.trim().isNotEmpty)
-              campoInfo('Descrição NFS-e', descricaoNfsePlano),
             dropdown(
               'Desconto',
               descontoPercentual,
@@ -6304,9 +6366,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ]),
 
           ElevatedButton.icon(
-            onPressed: salvarGestante,
-            icon: const Icon(Icons.save),
-            label: const Text('Salvar gestante'),
+            onPressed: salvandoPaciente ? null : salvarGestante,
+            icon: salvandoPaciente
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save),
+            label: Text(
+              salvandoPaciente ? 'Salvando paciente...' : 'Salvar paciente',
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: NatusApp.vinho,
               foregroundColor: (NatusApp.escuro
@@ -6321,7 +6390,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget telaGestantes() {
-    final totalAtivas = gestantes.where(gestanteAtivaParaContracoes).length;
+    final totalAtivas = gestantes.where(gestanteEstaAtiva).length;
     final totalPuerperas = gestantes.where((g) {
       return statusGestanteNormalizado(g) == 'Puérpera';
     }).length;
@@ -6353,7 +6422,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Gestantes',
+            'Pacientes',
             style: TextStyle(
               fontSize: 26,
               fontWeight: FontWeight.w800,
@@ -6365,7 +6434,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           const SizedBox(height: 3),
 
           Text(
-            'Acompanhamento das gestantes da sua clínica.',
+            'Acompanhamento dos pacientes da sua clínica.',
             style: TextStyle(
               fontSize: 13,
               color: NatusApp.textoSuave,
@@ -6375,18 +6444,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 20),
 
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          NatusCardsResumoLayout(
             children: [
               cardResumo(
                 'Ativas',
                 totalAtivas.toString(),
-                Icons.pregnant_woman,
+                Icons.people_alt_rounded,
                 cor: NatusApp.vinho,
               ),
               cardResumo(
-                'Puérperas',
+                'Pós-parto',
                 totalPuerperas.toString(),
                 Icons.child_friendly,
                 cor: NatusApp.marsalaSuave,
@@ -6473,8 +6540,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               setState(() {});
             },
             decoration: InputDecoration(
-              labelText: 'Buscar gestante',
-              hintText: 'Nome, telefone, e-mail, cidade, hospital ou obstetra',
+              labelText: 'Buscar paciente',
+              hintText:
+                  'Nome, telefone, e-mail, cidade, unidade ou profissional',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: buscaGestantesController.text.trim().isEmpty
                   ? null
@@ -6625,7 +6693,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget telaBiblioteca() {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
     final podeGerenciarBiblioteca = usuarioEhAdmin();
 
     if (biblioteca.isEmpty) {
@@ -7210,7 +7278,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget cabecalhoBiblioteca(bool podeGerenciarBiblioteca) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -7395,7 +7463,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       return url;
     } catch (e) {
-      debugPrint('❌ Erro ao enviar material da biblioteca: $e');
+      logErroSeguro('Erro ao enviar material da biblioteca.', e);
       controller.error(
         titulo: 'Erro no upload',
         mensagem: 'Nao foi possivel concluir o envio de ${arquivo.name}.',
@@ -7831,6 +7899,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final descricao = material['descricao'] ?? '';
     final url = material['url'] ?? '';
     final capaUrl = material['capaUrl'] ?? '';
+    final capaUri = uriMidiaNatusSegura(capaUrl);
 
     IconData icone = Icons.menu_book_rounded;
     IconData iconeAcao = Icons.auto_stories_rounded;
@@ -7898,9 +7967,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (capaUrl.isNotEmpty)
+                    if (capaUri != null)
                       Image.network(
-                        capaUrl.trim(),
+                        capaUri.toString(),
                         fit: BoxFit.cover,
                         width: double.infinity,
                         height: double.infinity,
@@ -8179,7 +8248,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               icon: const Icon(Icons.add),
               label: const Text('Adicionar material'),
             ),
-            dropdownGrande('Gestante', atendimentoGestante, nomesGestantes, (
+            dropdownGrande('Paciente', atendimentoGestante, nomesGestantes, (
               v,
             ) {
               setState(() => atendimentoGestante = v);
@@ -8361,7 +8430,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   void salvarAtendimento() {
     if (atendimentoGestante == 'Selecione') {
-      mostrarMensagem('Selecione uma gestante antes de salvar.');
+      mostrarMensagem('Selecione um paciente antes de salvar.');
       return;
     }
 
@@ -8467,14 +8536,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final idGestante = g['id'] ?? '';
 
       if (idGestante.isEmpty) {
-        mostrarMensagem('ID da gestante não encontrado.');
+        mostrarMensagem('ID do paciente não encontrado.');
         return;
       }
 
       final doc = await firestore.collection('gestantes').doc(idGestante).get();
 
       if (!doc.exists) {
-        mostrarMensagem('Gestante não encontrada no Firebase.');
+        mostrarMensagem('Paciente não encontrado no Firebase.');
         return;
       }
 
@@ -8490,35 +8559,26 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final email = dados['emailGestante']?.toString() ?? '';
 
       if (email.trim().isEmpty) {
-        mostrarMensagem('E-mail da gestante não informado.');
+        mostrarMensagem('E-mail do paciente não informado.');
         return;
       }
 
-      final usuarioAtual = FirebaseAuth.instance.currentUser;
-
-      if (usuarioAtual == null) {
+      if (FirebaseAuth.instance.currentUser == null) {
         mostrarMensagem('Usuário não autenticado. Faça login novamente.');
         return;
       }
 
       mostrarMensagem('Solicitando redefinição de senha...');
 
-      final idToken = await usuarioAtual.getIdToken();
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'us-central1',
+      ).httpsCallable('solicitarRedefinicaoSenhaPaciente');
+      final resposta = await callable.call(<String, dynamic>{
+        'pacienteId': idGestante,
+      });
+      final dadosResposta = Map<String, dynamic>.from(resposta.data as Map);
 
-      final resposta = await http.post(
-        Uri.parse(
-          'https://reenviarlinktrocasenhagestante-knszwirncq-uc.a.run.app',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({'gestanteId': idGestante}),
-      );
-
-      final dadosResposta = jsonDecode(resposta.body);
-
-      if (resposta.statusCode != 200 || dadosResposta['sucesso'] != true) {
+      if (dadosResposta['sucesso'] != true) {
         mostrarMensagem(
           dadosResposta['mensagem']?.toString() ??
               'Não foi possível solicitar a redefinição de senha.',
@@ -8527,7 +8587,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       }
 
       final emailValidado =
-          dadosResposta['emailGestante']?.toString().trim().toLowerCase() ?? '';
+          dadosResposta['emailPaciente']?.toString().trim().toLowerCase() ?? '';
       if (emailValidado.isEmpty) {
         mostrarMensagem('O cadastro não possui um e-mail válido.');
         return;
@@ -8536,9 +8596,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: emailValidado);
 
       final nomeValidado =
-          dadosResposta['nomeGestante']?.toString().trim() ?? nome;
+          dadosResposta['nomePaciente']?.toString().trim() ?? nome;
       final telefoneValidado =
-          dadosResposta['telefoneGestante']?.toString().trim() ?? telefone;
+          dadosResposta['telefonePaciente']?.toString().trim() ?? telefone;
 
       if (telefoneValidado.isEmpty) {
         mostrarMensagem('E-mail de redefinição enviado com sucesso.');
@@ -8557,11 +8617,24 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'Equipe Natus',
       );
 
-      final url = Uri.parse('https://wa.me/55$telefoneLimpo?text=$mensagem');
+      final url = Uri.https('wa.me', '/55$telefoneLimpo', {'text': mensagem});
+
+      if (!uriExternaPermitida(url, hostsHttpsPermitidos: const {'wa.me'})) {
+        mostrarMensagem('Não foi possível abrir o canal de atendimento.');
+        return;
+      }
 
       await launchUrl(url, mode: LaunchMode.externalApplication);
+    } on FirebaseFunctionsException catch (e) {
+      mostrarMensagem(
+        mensagemErroFunctionsSeguro(
+          e,
+          fallback: 'Não foi possível solicitar a redefinição de senha.',
+        ),
+      );
     } catch (e) {
-      mostrarMensagem('Erro ao solicitar redefinição de senha: $e');
+      logErroSeguro('Erro ao solicitar redefinicao de senha.', e);
+      mostrarMensagem('Erro ao solicitar redefinição de senha.');
     }
   }
 
@@ -8580,7 +8653,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         }
 
         if (!snapshot.hasData || !snapshot.data!.exists) {
-          return const Center(child: Text('Gestante não encontrada.'));
+          return const Center(child: Text('Paciente não encontrado.'));
         }
 
         final dados = snapshot.data!.data() as Map<String, dynamic>;
@@ -8632,7 +8705,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
           ),
           const SizedBox(height: 20),
-          Text(g['nomeGestante'] ?? 'Ficha da gestante'),
+          Text(g['nomeGestante'] ?? 'Prontuário do paciente'),
 
           const SizedBox(height: 8),
 
@@ -8667,7 +8740,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 enviarAcessoGestante(g);
               },
               icon: const Icon(Icons.lock_reset),
-              label: const Text('Reenviar acesso da gestante'),
+              label: const Text('Reenviar acesso do paciente'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
                 foregroundColor: (NatusApp.escuro
@@ -8686,7 +8759,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             label: Text(
               (g['statusGestante'] ?? 'Gestante') == 'Gestante'
                   ? 'Transformar em puérpera'
-                  : (g['statusGestante'] ?? 'Gestante') == 'Puérpera'
+                  : (g['statusGestante'] ?? 'Gestante') == 'Puérpera' ||
+                        (g['statusGestante'] ?? 'Gestante') == 'Ativa'
                   ? 'Encerrar atendimento'
                   : 'Atendimento encerrado',
             ),
@@ -8694,7 +8768,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 24),
 
-          blocoFicha('Gestante', [
+          blocoFicha('Paciente', [
             linhaInfo('Nome', g['nomeGestante']),
             linhaInfo('CPF', g['cpfGestante']),
             linhaInfo('Telefone', g['telefoneGestante']),
@@ -8710,12 +8784,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             linhaInfo('Diabetes gestacional', g['diabetesGestacional']),
           ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Gestante')),
 
-          blocoFicha('Pai', [
-            linhaInfo('Nome do pai', g['nomePai']),
-            linhaInfo('CPF do pai / responsável', g['cpfPai']),
-            linhaInfo('Telefone do pai', g['telefonePai']),
-            linhaInfo('E-mail do pai', g['emailPai']),
-          ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Pai')),
+          blocoFicha(
+            'Responsável / contato',
+            [
+              linhaInfo('Nome do responsável', g['nomePai']),
+              linhaInfo('CPF do responsável', g['cpfPai']),
+              linhaInfo('Telefone do responsável', g['telefonePai']),
+              linhaInfo('E-mail do responsável', g['emailPai']),
+            ],
+            onEditar: () => abrirPopupEditarSecaoGestante(g, 'Pai'),
+          ),
 
           blocoFicha('Bebê', [
             linhaInfo('Nome do bebê', g['nomeBebe']),
@@ -8768,7 +8846,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ),
             ]),
 
-          blocoFicha('Atendimentos da gestante', [
+          blocoFicha('Atendimentos do paciente', [
             if (atendimentosDaGestante.isEmpty)
               linhaInfo('Atendimentos', 'Nenhum atendimento registrado ainda')
             else
@@ -8824,7 +8902,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             listaContracoes(),
           ]),
 
-          blocoFicha('Documentos da gestante', [
+          blocoFicha('Documentos do paciente', [
             ...documentos
                 .where((d) => d['gestante'] == (g['nomeGestante'] ?? ''))
                 .map((d) {
@@ -8876,6 +8954,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaCentralGestanteClinica(Map<String, String> g) {
     final igAtual = calcularIdadeGestacional(g['dpp'] ?? '');
+    final especialidade = especialidadeDoPaciente(g);
+    final ehObstetricia = pacienteTemModuloObstetrico(g);
     final podeVerFinanceiroGestante = usuarioEhAdmin();
     final nomeGestante = (g['nomeGestante'] ?? '').trim();
     final diasRestantesDpp = diasParaDpp(g['dpp'] ?? '');
@@ -8952,7 +9032,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 label: Text(
                   (g['statusGestante'] ?? 'Gestante') == 'Gestante'
                       ? 'Transformar em puérpera'
-                      : (g['statusGestante'] ?? 'Gestante') == 'Puérpera'
+                      : (g['statusGestante'] ?? 'Gestante') == 'Puérpera' ||
+                            (g['statusGestante'] ?? 'Gestante') == 'Ativa'
                       ? 'Encerrar atendimento'
                       : 'Atendimento encerrado',
                 ),
@@ -8987,7 +9068,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: Icon(
-                    Icons.pregnant_woman_rounded,
+                    Icons.person_rounded,
                     size: 46,
                     color: NatusApp.vinho,
                   ),
@@ -8999,7 +9080,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     children: [
                       Text(
                         nomeGestante.isEmpty
-                            ? 'Central da gestante'
+                            ? 'Central do paciente'
                             : nomeGestante,
                         style: TextStyle(
                           fontSize: 34,
@@ -9015,10 +9096,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         children: [
                           badgeStatus(g['statusGestante'] ?? 'Gestante'),
                           centralClinicaTag(
-                            Icons.favorite_rounded,
-                            'IG $igAtual',
+                            Icons.medical_services_rounded,
+                            especialidade,
                           ),
-                          if ((g['dpp'] ?? '').trim().isNotEmpty)
+                          if (ehObstetricia)
+                            centralClinicaTag(
+                              Icons.favorite_rounded,
+                              'IG $igAtual',
+                            ),
+                          if (ehObstetricia &&
+                              (g['dpp'] ?? '').trim().isNotEmpty)
                             centralClinicaTag(
                               Icons.event_rounded,
                               'DPP ${g['dpp']}',
@@ -9032,7 +9119,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Painel rápido para acompanhamento clínico, exames, contrações e evolução da cliente.',
+                        'Painel rápido para acompanhamento clínico, exames, atendimentos e evolução do paciente.',
                         style: TextStyle(
                           fontSize: 14,
                           height: 1.5,
@@ -9083,34 +9170,36 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              chipAlertaCentralClinica(
-                icone: Icons.timelapse_rounded,
-                titulo: 'Contrações hoje',
-                subtitulo: contracoesHoje.isEmpty
-                    ? 'Sem registros no dia'
-                    : '${contracoesHoje.length} registro(s)',
-                cor: contracoesHoje.isEmpty
-                    ? NatusApp.textoSuave
-                    : NatusApp.vinho,
-              ),
+              if (ehObstetricia)
+                chipAlertaCentralClinica(
+                  icone: Icons.timelapse_rounded,
+                  titulo: 'Contrações hoje',
+                  subtitulo: contracoesHoje.isEmpty
+                      ? 'Sem registros no dia'
+                      : '${contracoesHoje.length} registro(s)',
+                  cor: contracoesHoje.isEmpty
+                      ? NatusApp.textoSuave
+                      : NatusApp.vinho,
+                ),
               chipAlertaCentralClinica(
                 icone: Icons.science_rounded,
                 titulo: 'Exames',
                 subtitulo: 'Acompanhe os envios recentes',
                 cor: NatusApp.marsalaSuave,
               ),
-              chipAlertaCentralClinica(
-                icone: Icons.event_available_rounded,
-                titulo: 'DPP',
-                subtitulo: diasRestantesDpp < 0
-                    ? 'DPP já passou'
-                    : diasRestantesDpp == 0
-                    ? 'DPP é hoje'
-                    : 'Faltam $diasRestantesDpp dia(s)',
-                cor: diasRestantesDpp <= 14
-                    ? Colors.orange
-                    : NatusApp.olivaSeco,
-              ),
+              if (ehObstetricia)
+                chipAlertaCentralClinica(
+                  icone: Icons.event_available_rounded,
+                  titulo: 'DPP',
+                  subtitulo: diasRestantesDpp < 0
+                      ? 'DPP já passou'
+                      : diasRestantesDpp == 0
+                      ? 'DPP é hoje'
+                      : 'Faltam $diasRestantesDpp dia(s)',
+                  cor: diasRestantesDpp <= 14
+                      ? Colors.orange
+                      : NatusApp.olivaSeco,
+                ),
               if (podeVerFinanceiroGestante)
                 chipAlertaCentralClinica(
                   icone: Icons.payments_rounded,
@@ -9129,29 +9218,32 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             spacing: 16,
             runSpacing: 16,
             children: [
-              secaoCentralClinica(
-                titulo: 'Últimas contrações',
-                largura: 350,
-                child: contracoesDaGestante.isEmpty
-                    ? vazioCentralClinica(
-                        'Nenhuma contração registrada para esta gestante.',
-                      )
-                    : Column(
-                        children: contracoesDaGestante.take(3).map((contracao) {
-                          return itemResumoCentralClinica(
-                            titulo:
-                                contracao['inicio'] ??
-                                contracao['dataRegistro'] ??
-                                'Contração registrada',
-                            subtitulo:
-                                'Duração: ${contracao['duracao'] ?? 'Não informada'}\n'
-                                'Intervalo: ${contracao['intervalo'] ?? 'Não informado'}',
-                            icone: Icons.favorite_border_rounded,
-                            cor: NatusApp.vinho,
-                          );
-                        }).toList(),
-                      ),
-              ),
+              if (ehObstetricia)
+                secaoCentralClinica(
+                  titulo: 'Últimas contrações',
+                  largura: 350,
+                  child: contracoesDaGestante.isEmpty
+                      ? vazioCentralClinica(
+                          'Nenhuma contração registrada para este paciente.',
+                        )
+                      : Column(
+                          children: contracoesDaGestante.take(3).map((
+                            contracao,
+                          ) {
+                            return itemResumoCentralClinica(
+                              titulo:
+                                  contracao['inicio'] ??
+                                  contracao['dataRegistro'] ??
+                                  'Contração registrada',
+                              subtitulo:
+                                  'Duração: ${contracao['duracao'] ?? 'Não informada'}\n'
+                                  'Intervalo: ${contracao['intervalo'] ?? 'Não informado'}',
+                              icone: Icons.favorite_border_rounded,
+                              cor: NatusApp.vinho,
+                            );
+                          }).toList(),
+                        ),
+                ),
               secaoCentralClinica(
                 titulo: 'Exames recentes',
                 largura: 350,
@@ -9181,8 +9273,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ],
           ),
           const SizedBox(height: 20),
-          blocoFicha('Gestante', [
+          blocoFicha('Paciente', [
             linhaInfo('Nome', g['nomeGestante']),
+            linhaInfo('Especialidade', especialidade),
             linhaInfo('CPF', g['cpfGestante']),
             linhaInfo('Telefone', g['telefoneGestante']),
             linhaInfo('E-mail', g['emailGestante']),
@@ -9196,25 +9289,34 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             linhaInfo('Risco gestacional', g['riscoGestacional']),
             linhaInfo('Diabetes gestacional', g['diabetesGestacional']),
           ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Gestante')),
-          blocoFicha('Pai', [
-            linhaInfo('Nome do pai', g['nomePai']),
-            linhaInfo('CPF do pai / responsável', g['cpfPai']),
-            linhaInfo('Telefone do pai', g['telefonePai']),
-            linhaInfo('E-mail do pai', g['emailPai']),
-          ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Pai')),
-          blocoFicha('Bebê', [
-            linhaInfo('Nome do bebê', g['nomeBebe']),
-            linhaInfo('Sexo', g['sexo']),
-            linhaInfo('DPP', g['dpp']),
-            linhaInfo('IG atual', igAtual),
-            linhaInfo('Data de nascimento', g['dataNascimento']),
-            linhaInfo('Via de nascimento', g['viaNascimento']),
-            linhaInfo('IG ao nascer', g['igAoNascer']),
-            linhaInfo('Peso', g['pesoBebe']),
-            linhaInfo('Golden Hour', g['goldenHour']),
-            linhaInfo('Amamentação', g['amamentacao']),
-            linhaInfo('Observações', g['observacoesBebe']),
-          ], onEditar: () => abrirPopupEditarSecaoGestante(g, 'Bebê')),
+          blocoFicha(
+            'Responsável / contato',
+            [
+              linhaInfo('Nome do responsável', g['nomePai']),
+              linhaInfo('CPF do responsável', g['cpfPai']),
+              linhaInfo('Telefone do responsável', g['telefonePai']),
+              linhaInfo('E-mail do responsável', g['emailPai']),
+            ],
+            onEditar: () => abrirPopupEditarSecaoGestante(g, 'Pai'),
+          ),
+          if (ehObstetricia)
+            blocoFicha(
+              'Acompanhamento obstétrico',
+              [
+                linhaInfo('Nome do bebê', g['nomeBebe']),
+                linhaInfo('Sexo', g['sexo']),
+                linhaInfo('DPP', g['dpp']),
+                linhaInfo('IG atual', igAtual),
+                linhaInfo('Data de nascimento', g['dataNascimento']),
+                linhaInfo('Via de nascimento', g['viaNascimento']),
+                linhaInfo('IG ao nascer', g['igAoNascer']),
+                linhaInfo('Peso', g['pesoBebe']),
+                linhaInfo('Golden Hour', g['goldenHour']),
+                linhaInfo('Amamentação', g['amamentacao']),
+                linhaInfo('Observações', g['observacoesBebe']),
+              ],
+              onEditar: () => abrirPopupEditarSecaoGestante(g, 'Bebê'),
+            ),
           if (podeVerFinanceiroGestante)
             blocoFicha('Valores', [
               linhaInfo('Plano', g['plano']),
@@ -9248,7 +9350,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
               ),
             ]),
-          blocoFicha('Atendimentos da gestante', [
+          blocoFicha('Atendimentos do paciente', [
             if (atendimentosDaGestante.isEmpty)
               linhaInfo('Atendimentos', 'Nenhum atendimento registrado ainda')
             else
@@ -9301,7 +9403,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             listaContracoes(),
           ]),
           timelineProntuario(g),
-          blocoFicha('Documentos da gestante', [
+          blocoFicha('Documentos do paciente', [
             if (documentosGeraisDaGestante.isEmpty)
               linhaInfo('Documentos', 'Nenhum documento adicional encontrado'),
             ...documentosGeraisDaGestante.map((d) {
@@ -9631,7 +9733,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = (g['id'] ?? '').trim();
 
     if (idGestante.isEmpty) {
-      return vazioCentralClinica('Gestante sem identificação para exames.');
+      return vazioCentralClinica('Paciente sem identificação para exames.');
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -9657,7 +9759,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
         if (docs.isEmpty) {
           return vazioCentralClinica(
-            'Nenhum exame enviado por esta gestante até o momento.',
+            'Nenhum exame enviado por este paciente até o momento.',
           );
         }
 
@@ -9682,7 +9784,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = (g['id'] ?? '').trim();
 
     if (idGestante.isEmpty) {
-      return vazioCentralClinica('Gestante sem identificação para exames.');
+      return vazioCentralClinica('Paciente sem identificação para exames.');
     }
 
     return StreamBuilder<QuerySnapshot>(
@@ -9708,7 +9810,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
         if (docs.isEmpty) {
           return vazioCentralClinica(
-            'Nenhum exame encontrado para esta gestante.',
+            'Nenhum exame encontrado para este paciente.',
           );
         }
 
@@ -9861,7 +9963,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
         ),
         child: Text(
-          status,
+          NatusTermos.rotuloStatusPaciente(status),
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w700,
@@ -10116,7 +10218,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isMobile = constraints.maxWidth < 700;
+        final isMobile =
+            constraints.maxWidth < 700 || NatusBreakpoints.isPhone(context);
 
         return GridView.builder(
           shrinkWrap: true,
@@ -10241,7 +10344,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     if (gestantes.isEmpty) {
       return const Center(
         child: Text(
-          'Nenhuma gestante cadastrada ainda.',
+          'Nenhum paciente cadastrado ainda.',
           style: TextStyle(fontSize: 22),
         ),
       );
@@ -10613,7 +10716,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }) {
     return bloco('Contador de contrações', [
       Text(
-        'Gestante: ${gestante['nomeGestante'] ?? 'Não informado'}',
+        'Paciente: ${gestante['nomeGestante'] ?? 'Não informado'}',
         style: TextStyle(fontWeight: FontWeight.bold, color: NatusApp.vinho),
       ),
 
@@ -10648,7 +10751,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       ]);
     }
 
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return blocoFicha('Biblioteca Natus', [
       Text(
@@ -10714,7 +10817,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaAreaGestante() {
     if (gestantes.isEmpty) {
-      return const Center(child: Text('Nenhuma gestante vinculada.'));
+      return const Center(child: Text('Nenhum paciente vinculado.'));
     }
 
     final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -10726,7 +10829,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     if (gestantesVinculadas.isEmpty) {
       return Center(
         child: Text(
-          'Nenhuma gestante vinculada a este login.',
+          'Nenhum paciente vinculado a este login.',
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
@@ -11065,12 +11168,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final gestantesAtivas = gestantesAtivasParaDocumentos();
 
     if (gestantes.isEmpty) {
-      return const Center(child: Text('Nenhuma gestante cadastrada'));
+      return const Center(child: Text('Nenhum paciente cadastrado'));
     }
 
     if (widget.tipoUsuario != 'gestante' && gestantesAtivas.isEmpty) {
       return const Center(
-        child: Text('Nenhuma gestante ativa disponível para upload.'),
+        child: Text('Nenhum paciente ativo disponível para upload.'),
       );
     }
 
@@ -11103,7 +11206,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           bloco('Novo documento', [
             if (widget.tipoUsuario != 'gestante') ...[
               dropdownGrande(
-                'Gestante',
+                'Paciente',
                 documentoGestanteSelecionada,
                 nomesGestantesAtivas,
                 (v) {
@@ -11176,7 +11279,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     } else {
       if (documentoGestanteSelecionada.isEmpty ||
           documentoGestanteSelecionada == 'Selecione') {
-        mostrarMensagem('Selecione uma gestante ativa.');
+        mostrarMensagem('Selecione um paciente ativo.');
         return;
       }
 
@@ -11187,7 +11290,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       if (gestanteSelecionada.isEmpty) {
         mostrarMensagem(
-          'Essa gestante não está ativa para receber documentos.',
+          'Esse paciente não está ativo para receber documentos.',
         );
         return;
       }
@@ -11196,7 +11299,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     if (gestanteSelecionadaNome.trim().isEmpty) {
-      mostrarMensagem('Não foi possível identificar a gestante.');
+      mostrarMensagem('Não foi possível identificar o paciente.');
       return;
     }
 
@@ -11359,7 +11462,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       ),
                     ),
                     subtitle: Text(
-                      '${widget.tipoUsuario == 'gestante' ? '' : 'Gestante: ${d['gestante'] ?? 'Não informada'}\n'}'
+                      '${widget.tipoUsuario == 'gestante' ? '' : 'Paciente: ${d['gestante'] ?? 'Não informado'}\n'}'
                       'Tipo: ${d['tipo'] ?? 'Documento'}\n'
                       'Enviado em: ${d['data'] ?? 'Sem data'}',
                     ),
@@ -11496,8 +11599,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               TextField(
                 controller: buscaContracoesController,
                 decoration: const InputDecoration(
-                  labelText: 'Buscar gestante ativa',
-                  hintText: 'Nome, telefone, e-mail, cidade, hospital...',
+                  labelText: 'Buscar paciente ativo',
+                  hintText: 'Nome, telefone, e-mail, cidade ou unidade...',
                   prefixIcon: Icon(Icons.search),
                   border: OutlineInputBorder(),
                 ),
@@ -11526,7 +11629,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     ),
                   ),
                   child: Text(
-                    'Nenhuma gestante ativa encontrada para registrar contrações.',
+                    'Nenhum paciente ativo encontrado para registrar contrações.',
                     style: TextStyle(
                       color: NatusApp.vinho,
                       fontWeight: FontWeight.w600,
@@ -11538,7 +11641,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ],
 
               dropdownGrande(
-                'Gestante',
+                'Paciente',
                 contracaoGestanteSelecionada,
                 nomesGestantes,
                 (v) {
@@ -11611,7 +11714,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   void iniciarContracao() {
     if (contracaoGestanteSelecionada == 'Selecione') {
-      mostrarMensagem('Selecione uma gestante ativa antes de iniciar.');
+      mostrarMensagem('Selecione um paciente ativo antes de iniciar.');
       return;
     }
 
@@ -11622,7 +11725,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (!gestanteAtivaSelecionada) {
       mostrarMensagem(
-        'Essa gestante não está ativa para registrar contrações.',
+        'Esse paciente não está ativo para registrar contrações.',
       );
       return;
     }
@@ -11826,7 +11929,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }).toList();
 
     if (lista.isEmpty) {
-      return const Text('Nenhuma contração registrada para esta gestante.');
+      return const Text('Nenhuma contração registrada para este paciente.');
     }
 
     lista.sort((a, b) {
@@ -11952,7 +12055,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Mostrando as 3 últimas contrações de cada gestante no dia.',
+          'Mostrando as 3 últimas contrações de cada paciente no dia.',
           style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
         ),
         const SizedBox(height: 16),
@@ -12091,16 +12194,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     for (final gestante in gestantes) {
       if (idGestante.isNotEmpty && (gestante['id'] ?? '') == idGestante) {
-        return (gestante['nomeGestante'] ?? 'Gestante não identificada').trim();
+        return (gestante['nomeGestante'] ?? 'Paciente não identificado').trim();
       }
 
       if (uidGestante.isNotEmpty &&
           (gestante['uidGestante'] ?? '') == uidGestante) {
-        return (gestante['nomeGestante'] ?? 'Gestante não identificada').trim();
+        return (gestante['nomeGestante'] ?? 'Paciente não identificado').trim();
       }
     }
 
-    return 'Gestante não identificada';
+    return 'Paciente não identificado';
   }
 
   Widget telaUsuarios() {
@@ -12258,14 +12361,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                             if (confirmar == true) {
                               try {
-                                final callable = FirebaseFunctions.instance
-                                    .httpsCallable('excluirUsuarioAuth');
+                                final callable = FirebaseFunctions.instanceFor(
+                                  region: 'us-central1',
+                                ).httpsCallable('excluirUsuarioAuth');
                                 await callable.call({'uidUsuario': doc.id});
                                 mostrarMensagem('Usuário excluído.');
                               } on FirebaseFunctionsException catch (e) {
                                 mostrarMensagem(
-                                  e.message ??
-                                      'Não foi possível excluir o usuário.',
+                                  mensagemErroFunctionsSeguro(
+                                    e,
+                                    fallback:
+                                        'Não foi possível excluir o usuário.',
+                                  ),
                                 );
                               }
                             }
@@ -12284,7 +12391,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget telaProntuario() {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -12303,7 +12410,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           const SizedBox(height: 8),
 
           Text(
-            'Área clínica da gestante com anamnese e evolução.',
+            'Prontuário clínico do paciente com anamnese e evolução.',
             style: TextStyle(fontSize: 15, color: NatusApp.textoSuave),
           ),
 
@@ -12326,7 +12433,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             child: DropdownButtonFormField<Map<String, String>>(
               initialValue: gestanteProntuarioSelecionada,
               decoration: InputDecoration(
-                labelText: 'Selecionar gestante',
+                labelText: 'Selecionar paciente',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
@@ -12335,7 +12442,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   .where((g) {
                     final status = (g['statusGestante'] ?? '').trim();
 
-                    return status == 'Gestante' || status == 'Puérpera';
+                    return status == 'Ativa' ||
+                        status == 'Gestante' ||
+                        status == 'Puérpera';
                   })
                   .map((g) {
                     return DropdownMenuItem(
@@ -12560,7 +12669,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = g['id'] ?? '';
 
     if (idGestante.isEmpty) {
-      mostrarMensagem('Erro: gestante sem ID.');
+      mostrarMensagem('Erro: paciente sem ID.');
       return;
     }
 
@@ -12603,7 +12712,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Anamnese salva como novo atendimento.');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar anamnese: $e');
+      logErroSeguro('Erro ao salvar anamnese.', e);
+      mostrarMensagem('Erro ao salvar anamnese.');
     }
   }
 
@@ -12611,7 +12721,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = g['id'] ?? '';
 
     if (idGestante.isEmpty) {
-      mostrarMensagem('Erro: gestante sem ID.');
+      mostrarMensagem('Erro: paciente sem ID.');
       return;
     }
 
@@ -12659,7 +12769,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Exame físico salvo como novo atendimento.');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar exame físico: $e');
+      logErroSeguro('Erro ao salvar exame fisico.', e);
+      mostrarMensagem('Erro ao salvar exame físico.');
     }
   }
 
@@ -12667,7 +12778,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final idGestante = g['id'] ?? '';
 
     if (idGestante.isEmpty) {
-      mostrarMensagem('Erro: gestante sem ID.');
+      mostrarMensagem('Erro: paciente sem ID.');
       return;
     }
 
@@ -12701,7 +12812,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Plano de cuidado salvo.');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar plano de cuidado: $e');
+      logErroSeguro('Erro ao salvar plano de cuidado.', e);
+      mostrarMensagem('Erro ao salvar plano de cuidado.');
     }
   }
 
@@ -12711,7 +12823,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final texto = observacaoProntuarioController.text.trim();
 
     if (idGestante.isEmpty) {
-      mostrarMensagem('Erro: gestante sem ID.');
+      mostrarMensagem('Erro: paciente sem ID.');
       return;
     }
 
@@ -12744,7 +12856,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Evolução registrada no prontuário.');
     } catch (e) {
-      mostrarMensagem('Erro ao salvar evolução: $e');
+      logErroSeguro('Erro ao salvar evolucao.', e);
+      mostrarMensagem('Erro ao salvar evolução.');
     }
   }
 
@@ -12789,7 +12902,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget blocoAnamneseProntuario(Map<String, String> g) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return blocoFicha('Anamnese', [
       infoCompactaProntuario('Nome completo', g['nomeGestante'] ?? ''),
@@ -12875,7 +12988,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget blocoExameFisicoProntuario(Map<String, String> g) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return blocoFicha('Exame físico', [
       infoCompactaProntuario('Nome completo', g['nomeGestante'] ?? ''),
@@ -12957,7 +13070,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget blocoPlanoCuidadoProntuario(Map<String, String> g) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return blocoFicha('Plano de cuidado', [
       infoCompactaProntuario('Nome completo', g['nomeGestante'] ?? ''),
@@ -13444,8 +13557,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget telaMapa() {
-    final larguraTela = MediaQuery.of(context).size.width;
-    final isMobile = larguraTela < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     if (!mapaJaCarregado && !carregandoMapa) {
       carregandoMapa = true;
@@ -13482,7 +13594,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Mapa de gestantes',
+                              'Mapa de pacientes',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -13522,7 +13634,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Mapa de gestantes',
+                          'Mapa de pacientes',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -13729,7 +13841,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           border: Border.all(color: const Color(0xFFE0B36B)),
         ),
         child: const Text(
-          'Nenhum plano ativo cadastrado. Cadastre um plano em “Planos da Natus” antes de cadastrar a gestante.',
+          'Nenhum plano ativo cadastrado. Cadastre um plano em “Planos da Natus” antes de cadastrar o paciente.',
           style: TextStyle(
             color: Color(0xFF7A4A00),
             fontWeight: FontWeight.w600,
@@ -13776,888 +13888,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  String enderecoCompletoGestante(Map<String, String> g) {
-    final rua = (g['enderecoGestante'] ?? '').trim();
-    final numero = (g['numeroGestante'] ?? '').trim();
-    final complemento = (g['complementoGestante'] ?? '').trim();
-    final bairro = (g['bairroGestante'] ?? '').trim();
-    final cidade = (g['cidadeGestante'] ?? '').trim();
-    final estado = (g['estadoGestante'] ?? 'PR').trim().isEmpty
-        ? 'PR'
-        : (g['estadoGestante'] ?? 'PR').trim();
-    final cep = (g['cepGestante'] ?? '').trim();
-
-    final linha1 = [rua, numero].where((v) => v.isNotEmpty).join(', ');
-    final partes = <String>[];
-
-    if (linha1.isNotEmpty) partes.add(linha1);
-    if (complemento.isNotEmpty) partes.add(complemento);
-    if (bairro.isNotEmpty) partes.add(bairro);
-    if (cidade.isNotEmpty || estado.isNotEmpty) {
-      partes.add([cidade, estado].where((v) => v.isNotEmpty).join(' - '));
-    }
-    if (cep.isNotEmpty) partes.add('CEP $cep');
-
-    return partes.isEmpty ? 'Endereço não informado' : partes.join('\n');
-  }
-
-  double valorTotalNfseGestante(Map<String, String> g) {
-    final valorPlano = converterValor(g['valorPlano'] ?? '0');
-    if (valorPlano > 0) return valorPlano;
-
-    final parcelas = parcelasDaGestanteFicha(g);
-    return totalParcelasPorStatusGestante(parcelas, (_) => true);
-  }
-
-  String descricaoNfseGestante(Map<String, String> g) {
-    final descricao = (g['descricaoNfse'] ?? '').trim();
-    if (descricao.isNotEmpty) return descricao;
-
-    final plano = (g['plano'] ?? '').trim();
-    if (plano.isNotEmpty) {
-      return 'Serviços de enfermagem obstétrica, acompanhamento gestacional, consultoria de amamentação e assistência materno neonatal vinculados ao plano $plano.';
-    }
-
-    return 'Serviços de enfermagem obstétrica, acompanhamento gestacional, consultoria de amamentação e assistência materno neonatal.';
-  }
-
-  Map<String, String>? notaFiscalDaGestante(
-    Map<String, String> g,
-    List<Map<String, String>> notas,
-  ) {
-    final gestanteId = (g['id'] ?? '').trim();
-    final nomeGestante = (g['nomeGestante'] ?? '').trim();
-
-    final notasGestante = notas.where((n) {
-      final notaGestanteId = (n['gestanteId'] ?? '').trim();
-      final notaNome = (n['nomeTomador'] ?? n['gestante'] ?? '').trim();
-      return (gestanteId.isNotEmpty && notaGestanteId == gestanteId) ||
-          (nomeGestante.isNotEmpty && notaNome == nomeGestante);
-    }).toList();
-
-    if (notasGestante.isEmpty) return null;
-
-    notasGestante.sort((a, b) {
-      final dataA = (a['criadoEm'] ?? '').trim();
-      final dataB = (b['criadoEm'] ?? '').trim();
-      return dataB.compareTo(dataA);
-    });
-
-    return notasGestante.first;
-  }
-
-  String statusNfseTexto(Map<String, String>? nota) {
-    final status = (nota?['status'] ?? '').trim().toUpperCase();
-
-    switch (status) {
-      case 'EMITIDA':
-      case 'AUTORIZADA':
-        return 'Emitida';
-      case 'PROCESSANDO':
-      case 'EM_PROCESSAMENTO':
-      case 'PENDENTE_FOCUS':
-      case 'PRONTA_PARA_EMISSAO':
-        return 'Pendente';
-      case 'ERRO':
-      case 'REJEITADA':
-      case 'CANCELADA':
-        return 'Erro';
-      default:
-        return 'Não emitida';
-    }
-  }
-
-  Color statusNfseCor(Map<String, String>? nota) {
-    final status = statusNfseTexto(nota);
-
-    if (status == 'Emitida') return Colors.green;
-    if (status == 'Pendente') return Colors.orange;
-    if (status == 'Erro') return Colors.red;
-    return Colors.grey;
-  }
-
-  Widget badgeNfse(Map<String, String>? nota) {
-    final texto = statusNfseTexto(nota);
-    final cor = statusNfseCor(nota);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        texto,
-        style: TextStyle(color: cor, fontWeight: FontWeight.bold, fontSize: 12),
-      ),
-    );
-  }
-
-  Future<List<Map<String, String>>> carregarNotasFiscaisNfse() async {
-    final resultado = await tenantFirestore
-        .consultaClinica('notas_fiscais')
-        .get();
-
-    return resultado.docs.map((doc) {
-      final dados = doc.data();
-      final mapa = dados.map((chave, valor) {
-        return MapEntry(chave, valor?.toString() ?? '');
-      });
-      mapa['id'] = doc.id;
-      return mapa;
-    }).toList();
-  }
-
-  Widget miniCardNfse(String titulo, String valor, IconData icone, Color cor) {
-    return Container(
-      width: 210,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: NatusApp.offWhite,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: NatusApp.vinhoProfundo.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-        border: Border.all(color: cor.withValues(alpha: 0.16)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: cor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icone, color: cor, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  titulo,
-                  style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  valor,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: NatusApp.vinho,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget telaCentralNfse() {
-    return FutureBuilder<List<Map<String, String>>>(
-      future: carregarNotasFiscaisNfse(),
-      builder: (context, snapshot) {
-        final notas = snapshot.data ?? [];
-        final totalGestantes = gestantes.length;
-        final emitidas = gestantes.where((g) {
-          final nota = notaFiscalDaGestante(g, notas);
-          return statusNfseTexto(nota) == 'Emitida';
-        }).length;
-        final pendentes = gestantes.where((g) {
-          final nota = notaFiscalDaGestante(g, notas);
-          return statusNfseTexto(nota) == 'Pendente';
-        }).length;
-        final naoEmitidas = totalGestantes - emitidas - pendentes;
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Central de NFS-e',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: NatusApp.vinho,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Gere manualmente a nota fiscal de serviço pelo valor total do plano da cliente selecionada.',
-                style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
-              ),
-              const SizedBox(height: 22),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  miniCardNfse(
-                    'Clientes',
-                    totalGestantes.toString(),
-                    Icons.people_alt_rounded,
-                    NatusApp.vinho,
-                  ),
-                  miniCardNfse(
-                    'Emitidas',
-                    emitidas.toString(),
-                    Icons.check_circle_rounded,
-                    Colors.green,
-                  ),
-                  miniCardNfse(
-                    'Pendentes',
-                    pendentes.toString(),
-                    Icons.pending_actions_rounded,
-                    Colors.orange,
-                  ),
-                  miniCardNfse(
-                    'Não emitidas',
-                    naoEmitidas.toString(),
-                    Icons.receipt_long_rounded,
-                    Colors.grey,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              bloco('Gestantes para emissão de NFS-e', [
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: CircularProgressIndicator(),
-                  )
-                else if (gestantes.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('Nenhuma gestante cadastrada.'),
-                  )
-                else
-                  ...gestantes.map((g) {
-                    final nota = notaFiscalDaGestante(g, notas);
-                    return cardGestanteNfse(g, nota);
-                  }),
-              ]),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget cardGestanteNfse(Map<String, String> g, Map<String, String>? nota) {
-    final nome = (g['nomeGestante'] ?? 'Gestante sem nome').trim();
-    final plano = (g['plano'] ?? 'Plano não informado').trim();
-    final cpf = (g['cpfGestante'] ?? '').trim();
-    final valorTotal = valorTotalNfseGestante(g);
-    final status = statusNfseTexto(nota);
-    final podeGerar = status != 'Emitida' && status != 'Pendente';
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFFBF8),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: NatusApp.vinho.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(Icons.receipt_long_rounded, color: NatusApp.vinho),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      nome,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: NatusApp.vinho,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '$plano • ${formatarMoeda(valorTotal)}',
-                      style: TextStyle(color: NatusApp.textoSuave),
-                    ),
-                    if (cpf.isNotEmpty)
-                      Text(
-                        'CPF: $cpf',
-                        style: TextStyle(color: NatusApp.textoSuave),
-                      ),
-                  ],
-                ),
-              ),
-              badgeNfse(nota),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ElevatedButton.icon(
-                onPressed: podeGerar
-                    ? () async {
-                        await abrirModalGerarNfse(g, nota);
-                      }
-                    : null,
-                icon: const Icon(Icons.add_task_rounded, size: 18),
-                label: Text(podeGerar ? 'Gerar NFS-e' : 'NFS-e em andamento'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: NatusApp.vinho,
-                  foregroundColor: (NatusApp.escuro
-                      ? NatusApp.fundo
-                      : NatusApp.offWhite),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  await abrirModalGerarNfse(g, nota, apenasVisualizar: true);
-                },
-                icon: const Icon(Icons.visibility_rounded, size: 18),
-                label: const Text('Conferir dados'),
-              ),
-              if (((nota?['pdfUrl'] ?? '').trim()).isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await abrirDocumento(nota!['pdfUrl'] ?? '');
-                  },
-                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
-                  label: const Text('Abrir PDF'),
-                ),
-              if (((nota?['xmlUrl'] ?? '').trim()).isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await abrirDocumento(nota!['xmlUrl'] ?? '');
-                  },
-                  icon: const Icon(Icons.code_rounded, size: 18),
-                  label: const Text('Abrir XML'),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> abrirModalGerarNfse(
-    Map<String, String> g,
-    Map<String, String>? nota, {
-    bool apenasVisualizar = false,
-  }) async {
-    final valorTotal = valorTotalNfseGestante(g);
-    final descricao = descricaoNfseGestante(g);
-    final endereco = enderecoCompletoGestante(g);
-    final status = statusNfseTexto(nota);
-
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(
-          apenasVisualizar ? 'Conferir dados da NFS-e' : 'Gerar NFS-e',
-        ),
-        content: SingleChildScrollView(
-          child: SizedBox(
-            width: 620,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                campoResumoNfse('Cliente', g['nomeGestante'] ?? ''),
-                campoResumoNfse('CPF', g['cpfGestante'] ?? ''),
-                campoResumoNfse('E-mail', g['emailGestante'] ?? ''),
-                campoResumoNfse('Telefone', g['telefoneGestante'] ?? ''),
-                campoResumoNfse('Endereço', endereco),
-                campoResumoNfse('Plano', g['plano'] ?? ''),
-                campoResumoNfse(
-                  'Valor total da nota',
-                  formatarMoeda(valorTotal),
-                ),
-                campoResumoNfse('Descrição NFS-e', descricao),
-                campoResumoNfse('Status atual', status),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fechar'),
-          ),
-          if (!apenasVisualizar && status != 'Emitida' && status != 'Pendente')
-            ElevatedButton.icon(
-              onPressed: () async {
-                Navigator.pop(context);
-                await prepararNfseFocus(g);
-              },
-              icon: const Icon(Icons.receipt_long_rounded),
-              label: const Text('Confirmar NFS-e'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: NatusApp.vinho,
-                foregroundColor: (NatusApp.escuro
-                    ? NatusApp.fundo
-                    : NatusApp.offWhite),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget campoResumoNfse(String titulo, String valor) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7F4),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            titulo,
-            style: TextStyle(
-              fontSize: 12,
-              color: NatusApp.textoSuave,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            valor.trim().isEmpty ? 'Não informado' : valor,
-            style: TextStyle(fontSize: 14, color: NatusApp.texto),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> prepararNfseFocus(Map<String, String> g) async {
-    final valorTotal = valorTotalNfseGestante(g);
-    final gestanteId = (g['id'] ?? '').trim();
-
-    if (valorTotal <= 0) {
-      mostrarMensagem('Informe o valor do plano antes de gerar a NFS-e.');
-      return;
-    }
-
-    if (gestanteId.isEmpty) {
-      mostrarMensagem(
-        'Gestante sem ID. Recarregue a tela antes de gerar a NFS-e.',
-      );
-      return;
-    }
-
-    if ((g['cpfGestante'] ?? '').trim().isEmpty) {
-      mostrarMensagem('Informe o CPF da gestante antes de gerar a NFS-e.');
-      return;
-    }
-
-    try {
-      mostrarMensagem('Enviando NFS-e para a Focus...');
-
-      final notaRef = await firestore
-          .collection('notas_fiscais')
-          .add(
-            tenantFirestore.prepararCriacao({
-              'empresaId': 'natus',
-              'gestanteId': gestanteId,
-              'gestante': g['nomeGestante'] ?? '',
-              'nomeTomador': g['nomeGestante'] ?? '',
-              'cpfCnpjTomador': g['cpfGestante'] ?? '',
-              'emailTomador': g['emailGestante'] ?? '',
-              'telefoneTomador': g['telefoneGestante'] ?? '',
-              'endereco': g['enderecoGestante'] ?? '',
-              'numero': g['numeroGestante'] ?? '',
-              'complemento': g['complementoGestante'] ?? '',
-              'bairro': g['bairroGestante'] ?? '',
-              'cidade': g['cidadeGestante'] ?? '',
-              'estado': g['estadoGestante'] ?? 'PR',
-              'cep': g['cepGestante'] ?? '',
-              'planoId': g['planoId'] ?? '',
-              'plano': g['plano'] ?? '',
-              'valorTotal': valorTotal,
-              'descricaoServico': descricaoNfseGestante(g),
-              'status': 'PROCESSANDO',
-              'ambiente': 'homologacao',
-              'focusRef': '',
-              'pdfUrl': '',
-              'xmlUrl': '',
-              'criadoEm': formatarDataHora(DateTime.now()),
-              'emitidoEm': '',
-              'origem': 'central_nfse_manual',
-            }),
-          );
-
-      final callable = FirebaseFunctions.instance.httpsCallable(
-        'gerarNfseFocus',
-      );
-      final resposta = await callable.call({
-        'notaFiscalId': notaRef.id,
-        'gestanteId': gestanteId,
-      });
-
-      final data = Map<String, dynamic>.from(resposta.data as Map);
-      final statusRetorno = (data['status'] ?? 'PROCESSANDO').toString();
-      final dadosAtualizados = <String, dynamic>{
-        'status': statusRetorno,
-        'focusRef': (data['focusRef'] ?? data['referencia'] ?? '').toString(),
-        'focusNumero': (data['numero'] ?? '').toString(),
-        'focusCodigoVerificacao': (data['codigoVerificacao'] ?? '').toString(),
-        'pdfUrl': (data['pdfUrl'] ?? data['urlPdf'] ?? '').toString(),
-        'xmlUrl': (data['xmlUrl'] ?? data['urlXml'] ?? '').toString(),
-        'focusMensagem': (data['mensagem'] ?? '').toString(),
-        'atualizadoEm': formatarDataHora(DateTime.now()),
-      };
-
-      if (statusRetorno.toUpperCase() == 'EMITIDA' ||
-          statusRetorno.toUpperCase() == 'AUTORIZADA') {
-        dadosAtualizados['emitidoEm'] = formatarDataHora(DateTime.now());
-      }
-
-      await firestore
-          .collection('notas_fiscais')
-          .doc(notaRef.id)
-          .update(dadosAtualizados);
-
-      setState(() {});
-      mostrarMensagem('NFS-e enviada para a Focus.');
-    } on FirebaseFunctionsException catch (e) {
-      debugPrint('❌ Erro Firebase Functions Focus: ${e.code} - ${e.message}');
-      mostrarMensagem(e.message ?? 'Erro ao gerar NFS-e na Focus.');
-    } catch (e) {
-      debugPrint('❌ Erro ao gerar NFS-e na Focus: $e');
-      mostrarMensagem('Erro ao gerar NFS-e na Focus.');
-    }
-  }
-
-  Future<List<Map<String, String>>> carregarHistoricoFiscalNfse() async {
-    final resultado = await tenantFirestore
-        .consultaClinica('notas_fiscais')
-        .get();
-
-    final notas = resultado.docs.map((doc) {
-      final dados = doc.data();
-      final mapa = dados.map((chave, valor) {
-        return MapEntry(chave, valor?.toString() ?? '');
-      });
-      mapa['id'] = doc.id;
-      return mapa;
-    }).toList();
-
-    notas.sort((a, b) {
-      final dataA = (a['emitidoEm'] ?? a['atualizadoEm'] ?? a['criadoEm'] ?? '')
-          .trim();
-      final dataB = (b['emitidoEm'] ?? b['atualizadoEm'] ?? b['criadoEm'] ?? '')
-          .trim();
-      return dataB.compareTo(dataA);
-    });
-
-    return notas;
-  }
-
-  double valorNotaFiscal(Map<String, String> nota) {
-    return converterValor(nota['valorTotal'] ?? nota['valor'] ?? '0');
-  }
-
-  String tituloStatusHistoricoNfse(Map<String, String> nota) {
-    final status = (nota['status'] ?? '').trim().toUpperCase();
-
-    if (status == 'EMITIDA' || status == 'AUTORIZADA') return 'Emitida';
-    if (status == 'PROCESSANDO' ||
-        status == 'EM_PROCESSAMENTO' ||
-        status == 'PENDENTE_FOCUS' ||
-        status == 'PRONTA_PARA_EMISSAO') {
-      return 'Processando';
-    }
-    if (status == 'CANCELADA') return 'Cancelada';
-    if (status == 'ERRO' || status == 'REJEITADA') return 'Erro';
-    return status.isEmpty ? 'Sem status' : status;
-  }
-
-  Color corStatusHistoricoNfse(Map<String, String> nota) {
-    final status = tituloStatusHistoricoNfse(nota);
-
-    if (status == 'Emitida') return Colors.green;
-    if (status == 'Processando') return Colors.orange;
-    if (status == 'Cancelada') return Colors.grey;
-    if (status == 'Erro') return Colors.red;
-    return NatusApp.vinho;
-  }
-
-  Widget badgeHistoricoNfse(Map<String, String> nota) {
-    final cor = corStatusHistoricoNfse(nota);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: cor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        tituloStatusHistoricoNfse(nota),
-        style: TextStyle(color: cor, fontSize: 12, fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-
-  Widget telaHistoricoFiscalNfse() {
-    return FutureBuilder<List<Map<String, String>>>(
-      future: carregarHistoricoFiscalNfse(),
-      builder: (context, snapshot) {
-        final notas = snapshot.data ?? [];
-        final emitidas = notas
-            .where((n) => tituloStatusHistoricoNfse(n) == 'Emitida')
-            .toList();
-        final processando = notas
-            .where((n) => tituloStatusHistoricoNfse(n) == 'Processando')
-            .length;
-        final erros = notas
-            .where((n) => tituloStatusHistoricoNfse(n) == 'Erro')
-            .length;
-        final totalEmitido = emitidas.fold<double>(
-          0,
-          (soma, nota) => soma + valorNotaFiscal(nota),
-        );
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Histórico Fiscal',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: NatusApp.vinho,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Acompanhe as NFS-e geradas pela Central Fiscal da Natus, com acesso rápido ao PDF e XML.',
-                style: TextStyle(fontSize: 14, color: NatusApp.textoSuave),
-              ),
-              const SizedBox(height: 22),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  miniCardNfse(
-                    'Total emitido',
-                    formatarMoeda(totalEmitido),
-                    Icons.payments_rounded,
-                    NatusApp.vinho,
-                  ),
-                  miniCardNfse(
-                    'Notas emitidas',
-                    emitidas.length.toString(),
-                    Icons.check_circle_rounded,
-                    Colors.green,
-                  ),
-                  miniCardNfse(
-                    'Processando',
-                    processando.toString(),
-                    Icons.pending_actions_rounded,
-                    Colors.orange,
-                  ),
-                  miniCardNfse(
-                    'Com erro',
-                    erros.toString(),
-                    Icons.error_rounded,
-                    Colors.red,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              bloco('Notas fiscais emitidas e registradas', [
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: CircularProgressIndicator(),
-                  )
-                else if (notas.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('Nenhuma NFS-e registrada ainda.'),
-                  )
-                else
-                  ...notas.map(cardHistoricoNfse),
-              ]),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget cardHistoricoNfse(Map<String, String> nota) {
-    final cliente =
-        (nota['nomeTomador'] ?? nota['gestante'] ?? 'Cliente não informado')
-            .trim();
-    final plano = (nota['plano'] ?? 'Plano não informado').trim();
-    final valor = valorNotaFiscal(nota);
-    final numero = (nota['focusNumero'] ?? nota['numero'] ?? '').trim();
-    final codigo = (nota['focusCodigoVerificacao'] ?? '').trim();
-    final data =
-        (nota['emitidoEm'] ?? nota['atualizadoEm'] ?? nota['criadoEm'] ?? '')
-            .trim();
-    final pdfUrl = (nota['pdfUrl'] ?? '').trim();
-    final xmlUrl = (nota['xmlUrl'] ?? '').trim();
-    final mensagem = (nota['focusMensagem'] ?? '').trim();
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFFBF8),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
-        boxShadow: [
-          BoxShadow(
-            color: NatusApp.vinhoProfundo.withValues(alpha: 0.035),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: NatusApp.vinho.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(Icons.receipt_long_rounded, color: NatusApp.vinho),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      cliente.isEmpty ? 'Cliente não informado' : cliente,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: NatusApp.vinho,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$plano • ${formatarMoeda(valor)}',
-                      style: TextStyle(color: NatusApp.textoSuave),
-                    ),
-                  ],
-                ),
-              ),
-              badgeHistoricoNfse(nota),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            children: [
-              chipInfoFiscal(
-                Icons.event_rounded,
-                data.isEmpty ? 'Data não informada' : data,
-              ),
-              chipInfoFiscal(
-                Icons.numbers_rounded,
-                numero.isEmpty ? 'Número não informado' : 'Nº $numero',
-              ),
-              if (codigo.isNotEmpty)
-                chipInfoFiscal(Icons.verified_rounded, 'Cód. $codigo'),
-            ],
-          ),
-          if (mensagem.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              mensagem,
-              style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
-            ),
-          ],
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (pdfUrl.isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () async => abrirDocumento(pdfUrl),
-                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
-                  label: const Text('Abrir PDF'),
-                ),
-              if (xmlUrl.isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () async => abrirDocumento(xmlUrl),
-                  icon: const Icon(Icons.code_rounded, size: 18),
-                  label: const Text('Abrir XML'),
-                ),
-              OutlinedButton.icon(
-                onPressed: () {
-                  setState(() {});
-                  mostrarMensagem('Histórico fiscal atualizado.');
-                },
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Atualizar'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget chipInfoFiscal(IconData icone, String texto) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: NatusApp.offWhite,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: NatusApp.rose.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icone, size: 14, color: NatusApp.vinho),
-          const SizedBox(width: 6),
-          Text(
-            texto,
-            style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget telaPlanosNatus() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -14674,7 +13904,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Cadastre os planos que serão usados no cadastro de gestantes, Asaas, ZapSign e NFS-e.',
+            'Cadastre os planos usados nos atendimentos e contratos.',
             style: TextStyle(fontSize: 13, color: NatusApp.textoSuave),
           ),
           const SizedBox(height: 24),
@@ -14698,8 +13928,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             const SizedBox(height: 12),
             campoFull(planoDescricaoComercialController, 'Descrição comercial'),
-            const SizedBox(height: 12),
-            campoFull(planoDescricaoNfseController, 'Descrição NFS-e'),
             const SizedBox(height: 18),
             ElevatedButton.icon(
               onPressed: salvarPlanoNatus,
@@ -14730,7 +13958,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 final nome = (p['nomePlano'] ?? '').toString();
                 final valor = converterValorDinamico(p['valor']);
                 final qtdParcelas = (p['parcelas'] ?? '1').toString();
-                final descricaoNfse = (p['descricaoNfse'] ?? '').toString();
 
                 return Card(
                   elevation: 0,
@@ -14754,9 +13981,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     subtitle: Text(
-                      '${formatarMoeda(valor)} • $qtdParcelas parcela(s)\nNFS-e: ${descricaoNfse.isEmpty ? 'sem descrição fiscal cadastrada' : descricaoNfse}',
+                      '${formatarMoeda(valor)} • $qtdParcelas parcela(s)',
                     ),
-                    isThreeLine: true,
                     trailing: Wrap(
                       spacing: 6,
                       children: [
@@ -14926,8 +14152,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     List<String> itens,
     Function(String) onChange,
   ) {
+    final larguraResponsiva = NatusBreakpoints.usarLayoutCompacto(context)
+        ? (MediaQuery.sizeOf(context).width - 80).clamp(230.0, 360.0)
+        : 360.0;
     return SizedBox(
-      width: 360,
+      width: larguraResponsiva,
       child: DropdownButtonFormField<String>(
         initialValue: valor,
         isExpanded: true,
@@ -14959,15 +14188,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  void salvarGestante() {
-    if (nomeGestante.text.trim().isEmpty || dppController.text.trim().isEmpty) {
-      mostrarMensagem('Preencha pelo menos o nome da gestante e a DPP.');
+  Future<void> salvarGestante() async {
+    if (salvandoPaciente) return;
+
+    if (nomeGestante.text.trim().isEmpty) {
+      mostrarMensagem('Informe o nome do paciente.');
       return;
     }
 
     if (planoIdSelecionado.isEmpty || plano.trim().isEmpty) {
       mostrarMensagem(
-        'Cadastre e selecione um plano antes de salvar a gestante.',
+        'Cadastre e selecione um plano antes de salvar o paciente.',
       );
       return;
     }
@@ -14985,7 +14216,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     if (valorParcelado < 0) valorParcelado = 0;
 
     double valorParcela = valorParcelado / qtdParcelas;
+    final pacienteRef = firestore.collection('gestantes').doc();
+    final pacienteId = pacienteRef.id;
     final dadosBaseGestante = <String, String>{
+      'pacienteId': pacienteId,
+      'gestanteId': pacienteId,
+      'idGestante': pacienteId,
       'nomeGestante': nomeGestante.text.trim(),
       'cpfGestante': cpfGestante.text.trim(),
       'telefoneGestante': telefoneGestante.text.trim(),
@@ -15000,6 +14236,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'hospitalGestante': hospitalGestante.text.trim(),
       'obstetraGestante': obstetraGestante.text.trim(),
       'convenioGestante': convenioGestante.text.trim(),
+      'especialidadeAcompanhamento': especialidadePaciente,
+      'tipoCadastroPaciente': especialidadePaciente,
+      'moduloObstetricoAtivo': especialidadePacienteEhObstetricia.toString(),
       'nomePai': nomePai.text.trim(),
       'cpfPai': cpfPai.text.trim(),
       'telefonePai': telefonePai.text.trim(),
@@ -15016,7 +14255,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'observacoesBebe': observacoesBebe.text.trim(),
       'planoId': planoIdSelecionado,
       'plano': plano,
-      'descricaoNfse': descricaoNfsePlano,
       'valorPlano': formatarMoeda(valorPlano),
       'descontoPercentual': descontoPercentual,
       'valorDesconto': formatarMoeda(valorDesconto),
@@ -15028,7 +14266,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'formaPagamento': formaPagamento,
       'valorParcela': formatarMoeda(valorParcela),
       'consultorio': consultorio,
-      'statusGestante': 'Gestante',
+      'statusGestante': especialidadePacienteEhObstetricia
+          ? 'Gestante'
+          : 'Ativa',
       'uid': FirebaseAuth.instance.currentUser!.uid,
     };
     final metadadosContrato = ContratoPayloadMapper.criarMetadadosIniciais(
@@ -15040,19 +14280,53 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       numeroParcelas: qtdParcelas,
     );
 
-    final novaGestante = <String, String>{...dadosBaseGestante};
+    final novaGestante = <String, String>{
+      ...dadosBaseGestante,
+      'id': pacienteId,
+    };
     final gestanteFirestore = <String, dynamic>{
       ...dadosBaseGestante,
       ...metadadosContrato,
     };
 
-    setState(() {
-      gestantes.add(novaGestante);
-      limparCampos();
-    });
+    setState(() => salvandoPaciente = true);
 
-    salvarGestanteFirestore(gestanteFirestore);
-    gerarParcelasDaGestante(novaGestante);
+    try {
+      final lancamentos = montarLancamentosFinanceiros(novaGestante);
+      final lote = firestore.batch();
+      lote.set(pacienteRef, tenantFirestore.prepararCriacao(gestanteFirestore));
+
+      for (final lancamento in lancamentos) {
+        final parcelaRef = firestore.collection('parcelas').doc();
+        lote.set(parcelaRef, tenantFirestore.prepararCriacaoTexto(lancamento));
+      }
+
+      await lote.commit();
+      if (!mounted) return;
+
+      setState(limparCampos);
+      await Future.wait([
+        carregarGestantesFirestore(),
+        carregarParcelasFirestore(),
+      ]);
+
+      if (mounted) {
+        mostrarMensagem(
+          'Paciente salvo com financeiro vinculado com segurança.',
+        );
+      }
+    } catch (e) {
+      logErroSeguro('Erro ao salvar paciente e financeiro.', e);
+      if (mounted) {
+        mostrarMensagem(
+          'Não foi possível salvar. Nenhum dado parcial foi criado.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => salvandoPaciente = false);
+      }
+    }
   }
 
   void limparCampos() {
@@ -15067,6 +14341,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     hospitalGestante.clear();
     obstetraGestante.clear();
     convenioGestante.clear();
+    especialidadePaciente = NatusEspecialidades.clinicaGeral;
 
     nomePai.clear();
     cpfPai.clear();
@@ -15089,14 +14364,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     amamentacao = 'Não informado';
     plano = '';
     planoIdSelecionado = '';
-    descricaoNfsePlano = '';
     final ativos = planosCadastrados.where((p) => p['ativo'] != false).toList();
     if (ativos.isNotEmpty) {
       final primeiro = ativos.first;
       planoIdSelecionado = (primeiro['id'] ?? '').toString();
       plano = (primeiro['nomePlano'] ?? '').toString();
       parcelas = (primeiro['parcelas'] ?? '1').toString();
-      descricaoNfsePlano = (primeiro['descricaoNfse'] ?? '').toString();
     }
     descontoPercentual = '0%';
     parcelas = '1';
@@ -15106,7 +14379,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget listaGestantes() {
     if (gestantes.isEmpty) {
-      return const Text('Nenhuma gestante cadastrada ainda.');
+      return const Text('Nenhum paciente cadastrado ainda.');
     }
 
     final busca = buscaGestantesController.text.trim();
@@ -15171,7 +14444,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }).toList();
 
     if (listaFiltrada.isEmpty) {
-      return const Text('Nenhuma gestante encontrada com esse filtro.');
+      return const Text('Nenhum paciente encontrado com esse filtro.');
     }
 
     return Column(
@@ -15224,7 +14497,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return AlertDialog(
           title: const Text('Confirmar exclusão'),
           content: const Text(
-            'Tem certeza que deseja excluir esta gestante? Esta ação não pode ser desfeita.',
+            'Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.',
           ),
           actions: [
             TextButton(
@@ -15300,11 +14573,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   });
 
                   mostrarMensagem(
-                    'Gestante e financeiro excluídos com sucesso.',
+                    'Paciente e financeiro excluídos com sucesso.',
                   );
                 } catch (e) {
-                  debugPrint('❌ Erro ao excluir gestante e financeiro: $e');
-                  mostrarMensagem('Erro ao excluir gestante e financeiro.');
+                  logErroSeguro('Erro ao excluir paciente e financeiro.', e);
+                  mostrarMensagem('Erro ao excluir paciente e financeiro.');
                 }
               },
               child: const Text('Excluir'),
@@ -15356,9 +14629,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<LatLng?> buscarCoordenada(String endereco) async {
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable(
-        'buscarCoordenadaEndereco',
-      );
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'us-central1',
+      ).httpsCallable('buscarCoordenadaEndereco');
       final resposta = await callable.call(<String, dynamic>{
         'endereco': endereco.trim(),
       });
@@ -15372,7 +14645,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       return LatLng(latitude.toDouble(), longitude.toDouble());
     } catch (e) {
-      debugPrint('Erro ao converter endereço: $e');
+      logErroSeguro('Erro ao converter endereco.', e);
       return null;
     }
   }
@@ -15400,7 +14673,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         };
       }
     } catch (e) {
-      debugPrint('Erro ao buscar CEP: $e');
+      logErroSeguro('Erro ao buscar CEP.', e);
     }
 
     return null;
@@ -15500,10 +14773,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         carregandoMapa = false;
       });
 
-      debugPrint('✅ Gestantes carregadas do Firebase');
+      logInfoSeguro('Pacientes carregados do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar gestantes: $e');
-      mostrarMensagem('Erro ao carregar gestantes do Firebase');
+      logErroSeguro('Erro ao carregar pacientes.', e);
+      mostrarMensagem('Erro ao carregar pacientes do Firebase');
     }
   }
 
@@ -15630,6 +14903,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> abrirLinkExternoMapa(Uri uri, String mensagemErro) async {
+    if (!uriExternaPermitida(
+      uri,
+      permitirTelefone: true,
+      hostsHttpsPermitidos: const {'wa.me', 'www.google.com'},
+    )) {
+      mostrarMensagem(mensagemErro);
+      return;
+    }
+
     try {
       final abriu = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!abriu) {
@@ -15643,18 +14925,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   Future<void> ligarParaGestanteMapa(String telefone) async {
     final telefoneNormalizado = normalizarTelefoneMapa(telefone);
     if (telefoneNormalizado.isEmpty) {
-      mostrarMensagem('Telefone da gestante não informado.');
+      mostrarMensagem('Telefone do paciente não informado.');
       return;
     }
 
-    final uri = Uri.parse('tel:$telefoneNormalizado');
+    final uri = Uri(scheme: 'tel', path: telefoneNormalizado);
     await abrirLinkExternoMapa(uri, 'Não foi possível iniciar a ligação.');
   }
 
   Future<void> abrirWhatsAppGestanteMapa(String telefone) async {
     final telefoneNormalizado = normalizarTelefoneMapa(telefone);
     if (telefoneNormalizado.isEmpty) {
-      mostrarMensagem('Telefone da gestante não informado.');
+      mostrarMensagem('Telefone do paciente não informado.');
       return;
     }
 
@@ -15662,14 +14944,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ? telefoneNormalizado
         : '55$telefoneNormalizado';
 
-    final uri = Uri.parse('https://wa.me/$numeroComPais');
+    final uri = Uri.https('wa.me', '/$numeroComPais');
     await abrirLinkExternoMapa(uri, 'Não foi possível abrir o WhatsApp.');
   }
 
   Future<void> abrirRotaGestanteMapa(LatLng coordenada) async {
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=${coordenada.latitude},${coordenada.longitude}&travelmode=driving',
-    );
+    final uri = Uri.https('www.google.com', '/maps/dir/', {
+      'api': '1',
+      'destination': '${coordenada.latitude},${coordenada.longitude}',
+      'travelmode': 'driving',
+    });
     await abrirLinkExternoMapa(uri, 'Não foi possível abrir a rota.');
   }
 
@@ -15855,7 +15139,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         });
                       },
                       icon: const Icon(Icons.open_in_new_rounded),
-                      label: const Text('Abrir central da gestante'),
+                      label: const Text('Abrir central do paciente'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: NatusApp.vinho,
                         foregroundColor: (NatusApp.escuro
@@ -15888,11 +15172,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final endereco = montarEnderecoMapa(g);
 
       if (endereco.isEmpty) {
-        debugPrint('⚠️ Sem endereço suficiente: ${g['nomeGestante']}');
+        logInfoSeguro('Registro sem endereco suficiente para o mapa.');
         continue;
       }
 
-      debugPrint('📍 Buscando endereço no mapa: $endereco');
+      logInfoSeguro('Buscando coordenada para o mapa.');
 
       final coordenada = await buscarCoordenada(endereco);
 
@@ -15911,7 +15195,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
         );
       } else {
-        debugPrint('❌ Não encontrou coordenada para: $endereco');
+        logInfoSeguro('Coordenada nao encontrada para um registro.');
       }
     }
 
@@ -15919,14 +15203,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       marcadores = novosMarcadores;
     });
 
-    debugPrint('✅ Total de pins no mapa: ${novosMarcadores.length}');
+    logInfoSeguro('Marcadores do mapa atualizados.');
   }
 
   Future<void> atualizarStatusGestante(Map<String, String> gestante) async {
     final id = gestante['id'];
 
     if (id == null || id.isEmpty) {
-      mostrarMensagem('Não foi possível encontrar o ID da gestante.');
+      mostrarMensagem('Não foi possível encontrar o ID do paciente.');
       return;
     }
 
@@ -15937,7 +15221,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
-    if (statusAtual == 'Puérpera') {
+    if (statusAtual == 'Puérpera' || statusAtual == 'Ativa') {
       try {
         await firestore.collection('gestantes').doc(id).update({
           'statusGestante': 'Encerrada',
@@ -15952,7 +15236,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
         mostrarMensagem('Atendimento encerrado.');
       } catch (e) {
-        debugPrint('❌ Erro ao encerrar atendimento: $e');
+        logErroSeguro('Erro ao encerrar atendimento.', e);
         mostrarMensagem('Erro ao encerrar atendimento.');
       }
 
@@ -15991,6 +15275,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final convenioTemp = TextEditingController(
       text: gestante['convenioGestante'] ?? '',
     );
+    final especialidadeTemp = TextEditingController(
+      text: especialidadeDoPaciente(gestante),
+    );
+    final ehObstetricia = pacienteTemModuloObstetrico(gestante);
 
     const opcoesRisco = [
       'Não informado',
@@ -16031,14 +15319,44 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Editar cadastro da gestante'),
+          title: const Text('Editar cadastro do paciente'),
           content: SizedBox(
             width: 420,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  campoPopup(nomeTemp, 'Nome da gestante'),
+                  campoPopup(nomeTemp, 'Nome do paciente'),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: 360,
+                    child: DropdownButtonFormField<String>(
+                      initialValue:
+                          NatusEspecialidades.opcoes.contains(
+                            especialidadeTemp.text,
+                          )
+                          ? especialidadeTemp.text
+                          : 'Outra especialidade',
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo / especialidade do acompanhamento',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: NatusEspecialidades.opcoes
+                          .map(
+                            (item) => DropdownMenuItem(
+                              value: item,
+                              child: Text(item),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (valor) {
+                        especialidadeTemp.text = valor ?? 'Clínica geral';
+                      },
+                    ),
+                  ),
 
                   const SizedBox(height: 16),
 
@@ -16080,55 +15398,54 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                   const SizedBox(height: 16),
 
-                  campoPopup(hospitalTemp, 'Maternidade / Hospital'),
+                  campoPopup(hospitalTemp, 'Unidade / Hospital'),
 
                   const SizedBox(height: 16),
 
-                  campoPopup(obstetraTemp, 'Obstetra'),
+                  campoPopup(obstetraTemp, 'Profissional responsável'),
 
                   const SizedBox(height: 16),
 
                   campoPopup(convenioTemp, 'Convênio'),
 
-                  const SizedBox(height: 16),
-
-                  SizedBox(
-                    width: 360,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: riscoTemp,
-                      decoration: const InputDecoration(
-                        labelText: 'Risco gestacional (pré-natal)',
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: OutlineInputBorder(),
+                  if (ehObstetricia) ...[
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: 360,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: riscoTemp,
+                        decoration: const InputDecoration(
+                          labelText: 'Risco gestacional (pré-natal)',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          border: OutlineInputBorder(),
+                        ),
+                        items: opcoesRisco
+                            .map(
+                              (o) => DropdownMenuItem(value: o, child: Text(o)),
+                            )
+                            .toList(),
+                        onChanged: (v) => riscoTemp = v ?? 'Não informado',
                       ),
-                      items: opcoesRisco
-                          .map(
-                            (o) => DropdownMenuItem(value: o, child: Text(o)),
-                          )
-                          .toList(),
-                      onChanged: (v) => riscoTemp = v ?? 'Não informado',
                     ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  SizedBox(
-                    width: 360,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: diabetesTemp,
-                      decoration: const InputDecoration(
-                        labelText: 'Diabetes gestacional',
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: OutlineInputBorder(),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: 360,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: diabetesTemp,
+                        decoration: const InputDecoration(
+                          labelText: 'Diabetes gestacional',
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          border: OutlineInputBorder(),
+                        ),
+                        items: opcoesDiabetes
+                            .map(
+                              (o) => DropdownMenuItem(value: o, child: Text(o)),
+                            )
+                            .toList(),
+                        onChanged: (v) => diabetesTemp = v ?? 'Não informado',
                       ),
-                      items: opcoesDiabetes
-                          .map(
-                            (o) => DropdownMenuItem(value: o, child: Text(o)),
-                          )
-                          .toList(),
-                      onChanged: (v) => diabetesTemp = v ?? 'Não informado',
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -16154,6 +15471,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   hospitalTemp.text.trim(),
                   obstetraTemp.text.trim(),
                   convenioTemp.text.trim(),
+                  especialidadeTemp.text.trim(),
                   riscoTemp,
                   diabetesTemp,
                 );
@@ -16175,7 +15493,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   ) {
     final camposPorSecao = <String, List<Map<String, String>>>{
       'Gestante': [
-        {'campo': 'nomeGestante', 'label': 'Nome da gestante'},
+        {'campo': 'nomeGestante', 'label': 'Nome do paciente'},
+        {
+          'campo': 'especialidadeAcompanhamento',
+          'label': 'Tipo / especialidade do acompanhamento',
+        },
         {'campo': 'cpfGestante', 'label': 'CPF'},
         {'campo': 'telefoneGestante', 'label': 'Telefone'},
         {'campo': 'emailGestante', 'label': 'E-mail'},
@@ -16186,8 +15508,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         {'campo': 'bairroGestante', 'label': 'Bairro'},
         {'campo': 'cidadeGestante', 'label': 'Cidade'},
         {'campo': 'estadoGestante', 'label': 'Estado'},
-        {'campo': 'hospitalGestante', 'label': 'Maternidade / Hospital'},
-        {'campo': 'obstetraGestante', 'label': 'Obstetra'},
+        {'campo': 'hospitalGestante', 'label': 'Unidade / Hospital'},
+        {'campo': 'obstetraGestante', 'label': 'Profissional responsável'},
         {'campo': 'convenioGestante', 'label': 'Convênio'},
         {
           'campo': 'riscoGestacional',
@@ -16199,10 +15521,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         },
       ],
       'Pai': [
-        {'campo': 'nomePai', 'label': 'Nome do pai'},
-        {'campo': 'cpfPai', 'label': 'CPF do pai / responsável'},
-        {'campo': 'telefonePai', 'label': 'Telefone do pai'},
-        {'campo': 'emailPai', 'label': 'E-mail do pai'},
+        {'campo': 'nomePai', 'label': 'Nome do responsável'},
+        {'campo': 'cpfPai', 'label': 'CPF do responsável'},
+        {'campo': 'telefonePai', 'label': 'Telefone do responsável'},
+        {'campo': 'emailPai', 'label': 'E-mail do responsável'},
       ],
       'Bebê': [
         {'campo': 'nomeBebe', 'label': 'Nome do bebê'},
@@ -16229,11 +15551,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         {'campo': 'valorParcela', 'label': 'Valor da parcela'},
         {'campo': 'formaPagamento', 'label': 'Forma de pagamento'},
         {'campo': 'consultorio', 'label': 'Consultório'},
-        {'campo': 'descricaoNfse', 'label': 'Descrição NFS-e'},
       ],
     };
 
-    final campos = camposPorSecao[secao] ?? [];
+    final campos = [...(camposPorSecao[secao] ?? const [])];
+    if (secao == 'Gestante' && !pacienteTemModuloObstetrico(gestante)) {
+      campos.removeWhere(
+        (item) =>
+            item['campo'] == 'riscoGestacional' ||
+            item['campo'] == 'diabetesGestacional',
+      );
+    }
     final controllers = <String, TextEditingController>{};
 
     for (final item in campos) {
@@ -16258,7 +15586,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Editar $secao'),
+          title: Text(
+            'Editar ${secao == 'Gestante'
+                ? 'Paciente'
+                : secao == 'Pai'
+                ? 'Responsável / contato'
+                : secao}',
+          ),
           content: SizedBox(
             width: 560,
             child: SingleChildScrollView(
@@ -16295,10 +15629,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           ? const TextInputType.numberWithOptions(decimal: true)
                           : null,
                       inputFormatters: mascara == null ? null : [mascara],
-                      maxLines:
-                          campo == 'descricaoNfse' || campo == 'observacoesBebe'
-                          ? 3
-                          : 1,
+                      maxLines: campo == 'observacoesBebe' ? 3 : 1,
                       onChanged: campo == 'cepGestante'
                           ? preencherEnderecoPorCep
                           : null,
@@ -16362,11 +15693,27 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final id = gestante['id'];
 
     if (id == null || id.isEmpty) {
-      mostrarMensagem('ID da gestante não encontrado.');
+      mostrarMensagem('ID do paciente não encontrado.');
       return false;
     }
 
     try {
+      final especialidade = dadosAtualizados['especialidadeAcompanhamento']
+          ?.trim();
+      if (especialidade != null && especialidade.isNotEmpty) {
+        final moduloObstetrico = NatusEspecialidades.ehObstetricia(
+          especialidade,
+        );
+        final statusAtual = gestante['statusGestante'] ?? 'Ativa';
+        dadosAtualizados['tipoCadastroPaciente'] = especialidade;
+        dadosAtualizados['moduloObstetricoAtivo'] = moduloObstetrico.toString();
+        if (statusAtual != 'Puérpera' && statusAtual != 'Encerrada') {
+          dadosAtualizados['statusGestante'] = moduloObstetrico
+              ? 'Gestante'
+              : 'Ativa';
+        }
+      }
+
       await firestore.collection('gestantes').doc(id).update(dadosAtualizados);
 
       setState(() {
@@ -16377,7 +15724,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       mostrarMensagem('Cadastro atualizado com sucesso.');
       return true;
     } catch (e) {
-      debugPrint('❌ Erro ao editar seção da gestante: $e');
+      logErroSeguro('Erro ao editar secao da paciente.', e);
       mostrarMensagem('Erro ao atualizar cadastro.');
       return false;
     }
@@ -16504,18 +15851,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (saldoPendente > 0.009 && quantidadePendentes == 0) {
         mostrarMensagem(
           'Aumente o número de parcelas para distribuir o saldo pendente.',
-        );
-        return false;
-      }
-
-      final pendentesComCobranca = documentos.where((doc) {
-        final dados = doc.data();
-        return !estaPaga(dados) &&
-            (dados['asaasPaymentId'] ?? '').toString().trim().isNotEmpty;
-      });
-      if (pendentesComCobranca.isNotEmpty) {
-        mostrarMensagem(
-          'Há cobrança Asaas ativa. Cancele-a antes de alterar o parcelamento.',
         );
         return false;
       }
@@ -16653,13 +15988,14 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       );
       return true;
     } catch (e) {
-      debugPrint('❌ Erro ao editar financeiro da paciente: $e');
+      logErroSeguro('Erro ao editar financeiro da paciente.', e);
       mostrarMensagem('Erro ao atualizar o financeiro.');
       return false;
     }
   }
 
   void abrirPopupCriarUsuario() {
+    _sessaoCriacaoUsuario.reiniciar();
     showDialog(
       context: context,
       builder: (context) {
@@ -16703,7 +16039,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           .map(
                             (tipo) => DropdownMenuItem(
                               value: tipo,
-                              child: Text(tipo),
+                              child: Text(NatusTermos.rotuloPerfil(tipo)),
                             ),
                           )
                           .toList(),
@@ -16723,7 +16059,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       DropdownButtonFormField<String>(
                         initialValue: gestanteSelecionadaLogin,
                         decoration: const InputDecoration(
-                          labelText: 'Selecionar gestante',
+                          labelText: 'Selecionar paciente',
                           border: OutlineInputBorder(),
                         ),
                         items: gestantes
@@ -16753,7 +16089,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       DropdownButtonFormField<String>(
                         initialValue: enfermeiraSelecionadaLogin,
                         decoration: const InputDecoration(
-                          labelText: 'Selecionar enfermeira',
+                          labelText: 'Selecionar profissional',
                           border: OutlineInputBorder(),
                         ),
                         items: enfermeiras
@@ -16783,7 +16119,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       DropdownButtonFormField<String>(
                         initialValue: obstetraSelecionadoLogin,
                         decoration: const InputDecoration(
-                          labelText: 'Selecionar obstetra',
+                          labelText: 'Selecionar profissional obstetra',
                           border: OutlineInputBorder(),
                         ),
                         items: obstetras
@@ -16836,17 +16172,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     if (novoTipoUsuario == 'gestante' && gestanteSelecionadaLogin == null) {
-      mostrarMensagem('Selecione a gestante para vincular ao login.');
+      mostrarMensagem('Selecione o paciente para vincular ao login.');
       return;
     }
 
     if (novoTipoUsuario == 'enfermeira' && enfermeiraSelecionadaLogin == null) {
-      mostrarMensagem('Selecione a enfermeira para vincular ao login.');
+      mostrarMensagem('Selecione o profissional para vincular ao login.');
       return;
     }
 
     if (novoTipoUsuario == 'obstetra' && obstetraSelecionadoLogin == null) {
-      mostrarMensagem('Selecione o obstetra para vincular ao login.');
+      mostrarMensagem(
+        'Selecione o profissional obstetra para vincular ao login.',
+      );
       return;
     }
 
@@ -16863,15 +16201,25 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'obstetra' => obstetraSelecionadoLogin ?? '',
         _ => '',
       };
-
-      final callable = FirebaseFunctions.instance.httpsCallable(
-        'criarUsuarioClinica',
+      final assinaturaOperacao = jsonEncode([
+        novoNomeController.text.trim(),
+        emailNovoUsuario,
+        novoTipoUsuario,
+        idVinculo,
+      ]);
+      final operacaoId = _sessaoCriacaoUsuario.idParaAssinatura(
+        assinaturaOperacao,
       );
+
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'us-central1',
+      ).httpsCallable('criarUsuarioClinica');
       final resposta = await callable.call({
         'nome': novoNomeController.text.trim(),
         'email': emailNovoUsuario,
         'tipo': novoTipoUsuario,
         'idVinculo': idVinculo,
+        'operacaoId': operacaoId,
       });
       final resultado = Map<String, dynamic>.from(resposta.data as Map);
       if (resultado['sucesso'] != true) {
@@ -16885,7 +16233,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         );
         conviteEnviado = true;
       } catch (e) {
-        debugPrint('Usuário criado, mas o convite não foi enviado: $e');
+        logErroSeguro('Usuario criado, mas o convite nao foi enviado.', e);
       }
 
       if (!mounted) return;
@@ -16897,6 +16245,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       enfermeiraSelecionadaLogin = null;
       obstetraSelecionadoLogin = null;
       novoTipoUsuario = 'gestante';
+      _sessaoCriacaoUsuario.reiniciar();
 
       await carregarEnfermeirasFirestore();
       await carregarObstetrasFirestore();
@@ -16908,9 +16257,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             : 'Usuário criado, mas o e-mail de acesso ficou pendente.',
       );
     } on FirebaseFunctionsException catch (e) {
-      mostrarMensagem(e.message ?? 'Erro ao criar usuário.');
+      logErroSeguro('Erro ao criar usuario.', e);
+      mostrarMensagem(
+        mensagemErroFunctionsSeguro(
+          e,
+          fallback: 'Não foi possível criar o usuário.',
+        ),
+      );
     } catch (e) {
-      mostrarMensagem('Erro ao criar usuário: $e');
+      logErroSeguro('Erro inesperado ao criar usuario.', e);
+      mostrarMensagem('Não foi possível criar o usuário.');
     }
   }
 
@@ -16926,17 +16282,26 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String hospital,
     String obstetra,
     String convenio,
+    String especialidade,
     String riscoGestacional,
     String diabetesGestacional,
   ) async {
     final id = gestante['id'];
 
     if (id == null || id.isEmpty) {
-      mostrarMensagem('ID da gestante não encontrado.');
+      mostrarMensagem('ID do paciente não encontrado.');
       return;
     }
 
     try {
+      final moduloObstetrico = NatusEspecialidades.ehObstetricia(especialidade);
+      final statusAtual = gestante['statusGestante'] ?? 'Ativa';
+      final statusAtualizado =
+          statusAtual == 'Puérpera' || statusAtual == 'Encerrada'
+          ? statusAtual
+          : moduloObstetrico
+          ? 'Gestante'
+          : 'Ativa';
       final dadosAtualizados = {
         'nomeGestante': nome,
         'telefoneGestante': telefone,
@@ -16948,6 +16313,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'hospitalGestante': hospital,
         'obstetraGestante': obstetra,
         'convenioGestante': convenio,
+        'especialidadeAcompanhamento': especialidade,
+        'tipoCadastroPaciente': especialidade,
+        'moduloObstetricoAtivo': moduloObstetrico.toString(),
+        'statusGestante': statusAtualizado,
         'riscoGestacional': riscoGestacional,
         'diabetesGestacional': diabetesGestacional,
       };
@@ -16961,7 +16330,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Cadastro atualizado com sucesso.');
     } catch (e) {
-      debugPrint('❌ Erro ao editar gestante: $e');
+      logErroSeguro('Erro ao editar paciente.', e);
       mostrarMensagem('Erro ao atualizar cadastro.');
     }
   }
@@ -17276,32 +16645,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         gestanteSelecionada = gestante;
       });
 
-      mostrarMensagem('Gestante transformada em puérpera com sucesso.');
-    } catch (e) {
-      debugPrint('❌ Erro ao salvar nascimento: $e');
-      mostrarMensagem('Erro ao salvar dados do nascimento.');
-    }
-  }
-
-  Future<void> salvarGestanteFirestore(Map<String, dynamic> gestante) async {
-    debugPrint('🔥 TENTANDO SALVAR NO FIREBASE');
-
-    try {
-      final docRef = await firestore
-          .collection('gestantes')
-          .add(tenantFirestore.prepararCriacao(gestante));
-
-      gestante['id'] = docRef.id;
-
-      await carregarGestantesFirestore();
-
-      debugPrint('✅ SALVO NO FIREBASE COM ID: ${docRef.id}');
       mostrarMensagem(
-        'Gestante salva no Firebase! O acesso será criado automaticamente.',
+        'Paciente atualizado para o acompanhamento pós-parto com sucesso.',
       );
     } catch (e) {
-      debugPrint('❌ ERRO FIREBASE: $e');
-      mostrarMensagem('Erro ao salvar: $e');
+      logErroSeguro('Erro ao salvar dados do procedimento.', e);
+      mostrarMensagem('Erro ao salvar dados do nascimento.');
     }
   }
 
@@ -17312,9 +16661,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await firestore
           .collection('atendimentos')
           .add(tenantFirestore.prepararCriacaoTexto(atendimento));
-      debugPrint('✅ Atendimento salvo no Firebase');
+      logInfoSeguro('Atendimento salvo no Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao salvar atendimento: $e');
+      logErroSeguro('Erro ao salvar atendimento.', e);
       mostrarMensagem('Erro ao salvar atendimento no Firebase');
     }
   }
@@ -17324,9 +16673,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await firestore
           .collection('materiais')
           .add(tenantFirestore.prepararCriacaoTexto(material));
-      debugPrint('✅ Material salvo no Firebase');
+      logInfoSeguro('Material salvo no Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao salvar material: $e');
+      logErroSeguro('Erro ao salvar material.', e);
       mostrarMensagem('Erro ao salvar material no Firebase');
     }
   }
@@ -17355,9 +16704,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         materiais.addAll(listaFirebase);
       });
 
-      debugPrint('✅ Materiais carregados do Firebase');
+      logInfoSeguro('Materiais carregados do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar materiais: $e');
+      logErroSeguro('Erro ao carregar materiais.', e);
       mostrarMensagem('Erro ao carregar materiais');
     }
   }
@@ -17423,11 +16772,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       );
       await Future<void>.delayed(const Duration(milliseconds: 900));
 
-      debugPrint('✅ Arquivo enviado: $url');
+      logInfoSeguro('Arquivo enviado com sucesso.');
 
       return url;
     } catch (e) {
-      debugPrint('❌ Erro no upload: $e');
+      logErroSeguro('Erro no upload.', e);
       controller.error(
         titulo: 'Erro no upload',
         mensagem: 'Nao foi possivel concluir o envio de ${arquivo.name}.',
@@ -17444,69 +16793,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Future<void> abrirDocumento(String url) async {
     try {
-      final uri = Uri.parse(url);
+      final uri = uriHttpsExternaSegura(url);
+      if (uri == null) {
+        mostrarMensagem('Link do documento inválido ou não seguro.');
+        return;
+      }
 
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         throw 'Não foi possível abrir o documento';
       }
     } catch (e) {
-      debugPrint('❌ Erro ao abrir documento: $e');
+      logErroSeguro('Erro ao abrir documento.', e);
       mostrarMensagem('Erro ao abrir documento');
     }
-  }
-
-  Future<void> copiarTexto(String texto, String mensagem) async {
-    final valor = texto.trim();
-
-    if (valor.isEmpty) {
-      mostrarMensagem('Nada disponível para copiar.');
-      return;
-    }
-
-    await Clipboard.setData(ClipboardData(text: valor));
-    mostrarMensagem(mensagem);
-  }
-
-  bool parcelaTemCobrancaAsaas(Map<String, String> parcela) {
-    final status = (parcela['asaasStatus'] ?? '').trim();
-    final paymentId = (parcela['asaasPaymentId'] ?? '').trim();
-    final invoiceUrl = (parcela['asaasInvoiceUrl'] ?? '').trim();
-    final bankSlipUrl = (parcela['asaasBankSlipUrl'] ?? '').trim();
-    final pixCopiaCola = (parcela['asaasPixCopiaCola'] ?? '').trim();
-
-    return status == 'GERADA' ||
-        paymentId.isNotEmpty ||
-        invoiceUrl.isNotEmpty ||
-        bankSlipUrl.isNotEmpty ||
-        pixCopiaCola.isNotEmpty;
-  }
-
-  Future<void> abrirLinkCobrancaAsaas(Map<String, String> parcela) async {
-    final invoiceUrl = (parcela['asaasInvoiceUrl'] ?? '').trim();
-    final bankSlipUrl = (parcela['asaasBankSlipUrl'] ?? '').trim();
-
-    if (invoiceUrl.isNotEmpty) {
-      await abrirDocumento(invoiceUrl);
-      return;
-    }
-
-    if (bankSlipUrl.isNotEmpty) {
-      await abrirDocumento(bankSlipUrl);
-      return;
-    }
-
-    mostrarMensagem('Link da cobrança Asaas ainda não disponível.');
-  }
-
-  Future<void> abrirBoletoAsaas(Map<String, String> parcela) async {
-    final bankSlipUrl = (parcela['asaasBankSlipUrl'] ?? '').trim();
-
-    if (bankSlipUrl.isEmpty) {
-      mostrarMensagem('Boleto ainda não disponível para esta cobrança.');
-      return;
-    }
-
-    await abrirDocumento(bankSlipUrl);
   }
 
   Future<void> carregarDocumentosFirestore() async {
@@ -17532,9 +16831,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         documentos.addAll(listaFirebase);
       });
 
-      debugPrint('✅ Documentos carregados do Firebase');
+      logInfoSeguro('Documentos carregados do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar documentos: $e');
+      logErroSeguro('Erro ao carregar documentos.', e);
       mostrarMensagem('Erro ao carregar documentos');
     }
   }
@@ -17558,7 +16857,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         try {
           await ref.delete();
         } catch (e) {
-          debugPrint('Falha ao remover arquivo órfão do documento: $e');
+          logErroSeguro('Falha ao remover arquivo orfao do documento.', e);
         }
       }
 
@@ -17568,30 +16867,24 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Documento excluído com sucesso');
     } catch (e) {
-      debugPrint('❌ Erro ao excluir documento: $e');
+      logErroSeguro('Erro ao excluir documento.', e);
       mostrarMensagem('Erro ao excluir documento');
     }
   }
 
-  Future<void> gerarParcelasDaGestante(Map<String, String> gestante) async {
+  List<Map<String, String>> montarLancamentosFinanceiros(
+    Map<String, String> gestante,
+  ) {
     final nome = gestante['nomeGestante'] ?? '';
     final gestanteId = (gestante['id'] ?? '').trim();
     final uidGestante = (gestante['uidGestante'] ?? '').trim();
-
-    final parcelasExistentes = await tenantFirestore
-        .consultaRegistrosDoPaciente(
-          'parcelas',
-          pacienteId: gestanteId,
-          campoId: 'gestanteId',
-        )
-        .get();
-
-    if (parcelasExistentes.docs.isNotEmpty) {
-      debugPrint('⚠️ Parcelas já existem para essa gestante.');
-      return;
+    if (gestanteId.isEmpty) {
+      throw ArgumentError.value(gestanteId, 'pacienteId', 'ID vazio.');
     }
 
-    final quantidadeParcelas = int.tryParse(gestante['parcelas'] ?? '1') ?? 1;
+    final quantidadeParcelas = (int.tryParse(gestante['parcelas'] ?? '1') ?? 1)
+        .clamp(1, 24)
+        .toInt();
     final valorParcela = gestante['valorParcela'] ?? 'R\$ 0,00';
     final valorEntrada = gestante['entrada'] ?? 'R\$ 0,00';
     final parcelasPagas = int.tryParse(gestante['parcelasPagas'] ?? '0') ?? 0;
@@ -17605,8 +16898,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (valoresParcelas.every((valor) => valor <= 0) &&
         converterValor(valorEntrada) <= 0) {
-      debugPrint('Lançamento financeiro ignorado: paciente sem valor.');
-      return;
+      logInfoSeguro('Lancamento financeiro ignorado: valor ausente.');
+      return const [];
     }
 
     Map<String, String> baseFinanceira({
@@ -17619,7 +16912,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }) {
       return {
         'gestante': nome,
+        'pacienteId': gestanteId,
         'gestanteId': gestanteId,
+        'idGestante': gestanteId,
+        'uidPaciente': uidGestante,
         'uidGestante': uidGestante,
         'tipo': tipo,
         'numero': numero,
@@ -17630,21 +16926,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'comprovanteNome': '',
         'comprovanteUrl': '',
         'dataPagamento': '',
-        'asaasStatus': 'NAO_GERADA',
-        'asaasBillingType': '',
-        'asaasCustomerId': '',
-        'asaasPaymentId': '',
-        'asaasInvoiceUrl': '',
-        'asaasBankSlipUrl': '',
-        'asaasPixQrCode': '',
-        'asaasPixCopiaCola': '',
-        'asaasPreparadoEm': '',
-        'asaasWebhookEvento': '',
-        'asaasWebhookRecebidoEm': '',
-        'asaasAtualizadoPorWebhook': 'false',
       };
     }
 
+    final lancamentos = <Map<String, String>>[];
     final entradaExiste = converterValor(valorEntrada) > 0;
 
     if (entradaExiste) {
@@ -17663,14 +16948,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (entradaPaga) {
         entradaFinanceira['dataPagamento'] = vencimentoEntrada;
       }
-
-      setState(() {
-        parcelasFinanceiras.add(entradaFinanceira);
-      });
-
-      await firestore
-          .collection('parcelas')
-          .add(tenantFirestore.prepararCriacaoTexto(entradaFinanceira));
+      lancamentos.add(entradaFinanceira);
     }
 
     for (int i = 1; i <= quantidadeParcelas; i++) {
@@ -17682,14 +16960,39 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         vencimento: gerarVencimentoParcelaHistorico(i, parcelasPagas),
         status: i <= parcelasPagas ? 'Pago' : 'Pendente',
       );
+      lancamentos.add(novaParcela);
+    }
 
-      setState(() {
-        parcelasFinanceiras.add(novaParcela);
-      });
+    return lancamentos;
+  }
 
-      await firestore
-          .collection('parcelas')
-          .add(tenantFirestore.prepararCriacaoTexto(novaParcela));
+  Future<void> gerarParcelasDaGestante(Map<String, String> gestante) async {
+    final gestanteId = (gestante['id'] ?? '').trim();
+    final parcelasExistentes = await tenantFirestore
+        .consultaRegistrosDoPaciente(
+          'parcelas',
+          pacienteId: gestanteId,
+          campoId: 'gestanteId',
+        )
+        .get();
+
+    if (parcelasExistentes.docs.isNotEmpty) {
+      logInfoSeguro('Parcelas ja existem para este paciente.');
+      return;
+    }
+
+    final lancamentos = montarLancamentosFinanceiros(gestante);
+    if (lancamentos.isEmpty) return;
+
+    final lote = firestore.batch();
+    for (final lancamento in lancamentos) {
+      final parcelaRef = firestore.collection('parcelas').doc();
+      lote.set(parcelaRef, tenantFirestore.prepararCriacaoTexto(lancamento));
+    }
+    await lote.commit();
+
+    if (mounted) {
+      setState(() => parcelasFinanceiras.addAll(lancamentos));
     }
   }
 
@@ -17716,9 +17019,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         parcelasFinanceiras.addAll(listaFirebase);
       });
 
-      debugPrint('✅ Parcelas carregadas do Firebase');
+      logInfoSeguro('Parcelas carregadas do Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao carregar parcelas: $e');
+      logErroSeguro('Erro ao carregar parcelas.', e);
       mostrarMensagem('Erro ao carregar parcelas');
     }
   }
@@ -17728,59 +17031,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   String rotuloParcelaFinanceira(Map<String, String> parcela) =>
       fincalc.rotuloParcelaFinanceira(parcela);
-
-  String textoStatusAsaas(Map<String, String> parcela) =>
-      fincalc.textoStatusAsaas(parcela);
-
-  String detalheWebhookAsaas(Map<String, String> parcela) {
-    final atualizadoPorWebhook =
-        (parcela['asaasAtualizadoPorWebhook'] ?? 'false').trim() == 'true';
-    final evento = (parcela['asaasWebhookEvento'] ?? '').trim();
-    final recebidoEm = (parcela['asaasWebhookRecebidoEm'] ?? '').trim();
-
-    if (!atualizadoPorWebhook && evento.isEmpty && recebidoEm.isEmpty) {
-      return '';
-    }
-
-    final partes = <String>[];
-
-    if (evento.isNotEmpty) {
-      partes.add('Evento: $evento');
-    }
-
-    if (recebidoEm.isNotEmpty) {
-      partes.add('Atualizado em: $recebidoEm');
-    }
-
-    if (partes.isEmpty) {
-      return 'Webhook Asaas: atualização automática recebida';
-    }
-
-    return 'Webhook Asaas: ${partes.join(' • ')}';
-  }
-
-  Color corStatusAsaas(Map<String, String> parcela) {
-    final status = (parcela['asaasStatus'] ?? 'NAO_GERADA').trim();
-
-    switch (status) {
-      case 'PREPARADA':
-      case 'PROCESSANDO':
-        return Colors.orange;
-      case 'GERADA':
-      case 'PENDING':
-        return Colors.blue;
-      case 'PAGA':
-      case 'RECEIVED':
-      case 'CONFIRMED':
-        return Colors.green;
-      case 'VENCIDA':
-      case 'OVERDUE':
-      case 'ERRO':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
 
   List<Map<String, String>> parcelasDaGestanteFicha(Map<String, String> g) {
     final nomeGestante = (g['nomeGestante'] ?? '').trim();
@@ -17833,7 +17083,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (pago) return 'Paga';
     if (atrasado) return 'Vencida';
-    if (parcelaTemCobrancaAsaas(parcela)) return 'Gerada';
 
     return 'Pendente';
   }
@@ -17843,7 +17092,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (status == 'Paga') return Colors.green;
     if (status == 'Vencida') return Colors.red;
-    if (status == 'Gerada') return Colors.blue;
 
     return Colors.orange;
   }
@@ -17853,7 +17101,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     if (status == 'Paga') return Icons.check_circle;
     if (status == 'Vencida') return Icons.warning_rounded;
-    if (status == 'Gerada') return Icons.account_balance_wallet_outlined;
 
     return Icons.schedule_rounded;
   }
@@ -17912,31 +17159,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Widget linhaTimelineFinanceira(String texto, IconData icone, Color cor) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icone, size: 16, color: cor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              texto,
-              style: TextStyle(fontSize: 12, color: NatusApp.textoSuave),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget cardParcelaFinanceiraGestante(Map<String, String> parcela) {
     final cor = corStatusParcelaPremium(parcela);
     final status = textoStatusParcelaPremium(parcela);
-    final detalheWebhook = detalheWebhookAsaas(parcela);
-    final temCobranca = parcelaTemCobrancaAsaas(parcela);
-    final pago = (parcela['status'] ?? '') == 'Pago';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -17997,90 +17222,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          linhaTimelineFinanceira(
-            'Asaas: ${textoStatusAsaas(parcela)}',
-            Icons.account_balance_wallet_outlined,
-            corStatusAsaas(parcela),
-          ),
-          if ((parcela['asaasGeradoEm'] ?? '').isNotEmpty)
-            linhaTimelineFinanceira(
-              'Cobrança gerada em ${parcela['asaasGeradoEm']}',
-              Icons.pix,
-              Colors.blue,
-            ),
-          if ((parcela['asaasConsultadoEm'] ?? '').isNotEmpty)
-            linhaTimelineFinanceira(
-              'Status consultado em ${parcela['asaasConsultadoEm']}',
-              Icons.sync,
-              NatusApp.vinho,
-            ),
-          if (detalheWebhook.isNotEmpty)
-            linhaTimelineFinanceira(
-              detalheWebhook,
-              Icons.bolt_rounded,
-              Colors.green,
-            ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (!pago)
-                ElevatedButton.icon(
-                  onPressed: temCobranca
-                      ? null
-                      : () async {
-                          await gerarCobrancaAsaas(parcela);
-                        },
-                  icon: const Icon(Icons.pix, size: 17),
-                  label: Text(
-                    temCobranca ? 'Cobrança gerada' : 'Gerar cobrança',
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: NatusApp.vinho,
-                    foregroundColor: (NatusApp.escuro
-                        ? NatusApp.fundo
-                        : NatusApp.offWhite),
-                  ),
-                ),
-              if (temCobranca)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await consultarStatusCobrancaAsaas(parcela);
-                  },
-                  icon: const Icon(Icons.sync, size: 17),
-                  label: const Text('Consultar status'),
-                ),
-              if (temCobranca)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await abrirLinkCobrancaAsaas(parcela);
-                  },
-                  icon: const Icon(Icons.open_in_new, size: 17),
-                  label: const Text('Abrir cobrança'),
-                ),
-              if ((parcela['asaasPixCopiaCola'] ?? '').trim().isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await copiarTexto(
-                      parcela['asaasPixCopiaCola'] ?? '',
-                      'Pix copia e cola copiado.',
-                    );
-                  },
-                  icon: const Icon(Icons.copy, size: 17),
-                  label: const Text('Copiar Pix'),
-                ),
-              if ((parcela['asaasBankSlipUrl'] ?? '').trim().isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await abrirBoletoAsaas(parcela);
-                  },
-                  icon: const Icon(Icons.receipt_long, size: 17),
-                  label: const Text('Boleto'),
-                ),
-            ],
-          ),
         ],
       ),
     );
@@ -18104,7 +17245,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       (p) => (p['status'] ?? '') != 'Pago' && !parcelaEstaAtrasada(p),
     );
 
-    return blocoFicha('Financeiro da gestante', [
+    return blocoFicha('Financeiro do paciente', [
       Wrap(
         spacing: 10,
         runSpacing: 10,
@@ -18145,7 +17286,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             borderRadius: BorderRadius.circular(14),
           ),
           child: Text(
-            'Nenhuma parcela encontrada para esta gestante.',
+            'Nenhuma parcela encontrada para este paciente.',
             style: TextStyle(color: NatusApp.textoSuave),
           ),
         )
@@ -18154,217 +17295,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     ]);
   }
 
-  Future<void> gerarCobrancaAsaas(Map<String, String> parcela) async {
-    final id = parcela['id'];
-
-    if (id == null || id.isEmpty) {
-      mostrarMensagem(
-        'Parcela sem ID. Recarregue a tela antes de gerar a cobrança.',
-      );
-      return;
-    }
-
-    if ((parcela['status'] ?? '') == 'Pago') {
-      mostrarMensagem(
-        'Esta parcela já está paga. Não é necessário gerar cobrança Asaas.',
-      );
-      return;
-    }
-
-    final asaasStatusAtual = (parcela['asaasStatus'] ?? 'NAO_GERADA').trim();
-    final asaasPaymentIdAtual = (parcela['asaasPaymentId'] ?? '').trim();
-
-    if (asaasStatusAtual == 'GERADA' && asaasPaymentIdAtual.isNotEmpty) {
-      mostrarMensagem('Esta parcela já possui cobrança Asaas gerada.');
-      return;
-    }
-
-    try {
-      mostrarMensagem('Gerando cobrança Asaas...');
-
-      await firestore.collection('parcelas').doc(id).update({
-        'asaasStatus': 'PROCESSANDO',
-        'asaasBillingType': 'PIX_BOLETO',
-        'asaasProcessandoEm': formatarDataHora(DateTime.now()),
-      });
-
-      setState(() {
-        parcela['asaasStatus'] = 'PROCESSANDO';
-        parcela['asaasBillingType'] = 'PIX_BOLETO';
-        parcela['asaasProcessandoEm'] = formatarDataHora(DateTime.now());
-      });
-
-      final callable = FirebaseFunctions.instance.httpsCallable(
-        'gerarCobrancaAsaas',
-      );
-      final resposta = await callable.call({
-        'parcelaId': id,
-        'gestanteId': parcela['gestanteId'] ?? '',
-      });
-
-      final data = Map<String, dynamic>.from(resposta.data as Map);
-      final dadosAtualizados = <String, String>{
-        'asaasStatus': (data['asaasStatus'] ?? 'GERADA').toString(),
-        'asaasBillingType': (data['asaasBillingType'] ?? 'PIX_BOLETO')
-            .toString(),
-        'asaasCustomerId': (data['asaasCustomerId'] ?? '').toString(),
-        'asaasPaymentId': (data['asaasPaymentId'] ?? '').toString(),
-        'asaasInvoiceUrl': (data['asaasInvoiceUrl'] ?? '').toString(),
-        'asaasBankSlipUrl': (data['asaasBankSlipUrl'] ?? '').toString(),
-        'asaasPixQrCode': (data['asaasPixQrCode'] ?? '').toString(),
-        'asaasPixCopiaCola': (data['asaasPixCopiaCola'] ?? '').toString(),
-        'asaasGeradoEm': formatarDataHora(DateTime.now()),
-      };
-
-      setState(() {
-        dadosAtualizados.forEach((chave, valor) {
-          parcela[chave] = valor;
-        });
-      });
-
-      mostrarMensagem('Cobrança Asaas gerada com sucesso.');
-    } on FirebaseFunctionsException catch (e) {
-      await firestore.collection('parcelas').doc(id).update({
-        'asaasStatus': 'ERRO',
-        'asaasErro': e.message ?? e.code,
-      });
-
-      setState(() {
-        parcela['asaasStatus'] = 'ERRO';
-        parcela['asaasErro'] = e.message ?? e.code;
-      });
-
-      debugPrint('❌ Erro Firebase Functions Asaas: ${e.code} - ${e.message}');
-      mostrarMensagem(e.message ?? 'Erro ao gerar cobrança Asaas.');
-    } catch (e) {
-      await firestore.collection('parcelas').doc(id).update({
-        'asaasStatus': 'ERRO',
-        'asaasErro': e.toString(),
-      });
-
-      setState(() {
-        parcela['asaasStatus'] = 'ERRO';
-        parcela['asaasErro'] = e.toString();
-      });
-
-      debugPrint('❌ Erro ao gerar cobrança Asaas: $e');
-      mostrarMensagem('Erro ao gerar cobrança Asaas.');
-    }
-  }
-
-  Future<void> consultarStatusCobrancaAsaas(Map<String, String> parcela) async {
-    final id = parcela['id'];
-    final asaasPaymentId = (parcela['asaasPaymentId'] ?? '').trim();
-
-    if (id == null || id.isEmpty) {
-      mostrarMensagem(
-        'Parcela sem ID. Recarregue a tela antes de consultar a cobrança.',
-      );
-      return;
-    }
-
-    if (asaasPaymentId.isEmpty) {
-      mostrarMensagem(
-        'Esta parcela ainda não possui cobrança Asaas para consultar.',
-      );
-      return;
-    }
-
-    try {
-      mostrarMensagem('Consultando status no Asaas...');
-
-      await firestore.collection('parcelas').doc(id).update({
-        'asaasConsultandoEm': formatarDataHora(DateTime.now()),
-      });
-
-      final callable = FirebaseFunctions.instance.httpsCallable(
-        'consultarCobrancaAsaas',
-      );
-      final resposta = await callable.call({
-        'parcelaId': id,
-        'asaasPaymentId': asaasPaymentId,
-      });
-
-      final data = Map<String, dynamic>.from(resposta.data as Map);
-      final asaasStatus =
-          (data['asaasStatus'] ?? parcela['asaasStatus'] ?? 'GERADA')
-              .toString();
-      final statusParcela = (data['statusParcela'] ?? '').toString();
-
-      final dadosAtualizados = <String, String>{
-        'asaasStatus': asaasStatus,
-        'asaasBillingType':
-            (data['asaasBillingType'] ?? parcela['asaasBillingType'] ?? '')
-                .toString(),
-        'asaasCustomerId':
-            (data['asaasCustomerId'] ?? parcela['asaasCustomerId'] ?? '')
-                .toString(),
-        'asaasPaymentId':
-            (data['asaasPaymentId'] ?? parcela['asaasPaymentId'] ?? '')
-                .toString(),
-        'asaasInvoiceUrl':
-            (data['asaasInvoiceUrl'] ?? parcela['asaasInvoiceUrl'] ?? '')
-                .toString(),
-        'asaasBankSlipUrl':
-            (data['asaasBankSlipUrl'] ?? parcela['asaasBankSlipUrl'] ?? '')
-                .toString(),
-        'asaasPixQrCode':
-            (data['asaasPixQrCode'] ?? parcela['asaasPixQrCode'] ?? '')
-                .toString(),
-        'asaasPixCopiaCola':
-            (data['asaasPixCopiaCola'] ?? parcela['asaasPixCopiaCola'] ?? '')
-                .toString(),
-        'asaasConsultadoEm': formatarDataHora(DateTime.now()),
-      };
-
-      if (statusParcela.isNotEmpty) {
-        dadosAtualizados['status'] = statusParcela;
-      } else if (asaasStatus == 'PAGA') {
-        dadosAtualizados['status'] = 'Pago';
-        dadosAtualizados['dataPagamento'] = formatarDataHora(DateTime.now());
-      } else if (asaasStatus == 'VENCIDA') {
-        dadosAtualizados['status'] = 'Pendente';
-      }
-
-      await firestore.collection('parcelas').doc(id).update(dadosAtualizados);
-
-      setState(() {
-        dadosAtualizados.forEach((chave, valor) {
-          parcela[chave] = valor;
-        });
-      });
-
-      mostrarMensagem('Status da cobrança atualizado.');
-    } on FirebaseFunctionsException catch (e) {
-      await firestore.collection('parcelas').doc(id).update({
-        'asaasErroConsulta': e.message ?? e.code,
-        'asaasConsultadoEm': formatarDataHora(DateTime.now()),
-      });
-
-      debugPrint(
-        '❌ Erro Firebase Functions consulta Asaas: ${e.code} - ${e.message}',
-      );
-      mostrarMensagem(e.message ?? 'Erro ao consultar cobrança Asaas.');
-    } catch (e) {
-      await firestore.collection('parcelas').doc(id).update({
-        'asaasErroConsulta': e.toString(),
-        'asaasConsultadoEm': formatarDataHora(DateTime.now()),
-      });
-
-      debugPrint('❌ Erro ao consultar cobrança Asaas: $e');
-      mostrarMensagem('Erro ao consultar cobrança Asaas.');
-    }
-  }
-
   Future<void> salvarContracaoFirestore(Map<String, String> contracao) async {
     try {
       await firestore
           .collection('contracoes')
           .add(tenantFirestore.prepararCriacaoTexto(contracao));
 
-      debugPrint('✅ Contração salva no Firebase');
+      logInfoSeguro('Atualizacao clinica salva no Firebase.');
     } catch (e) {
-      debugPrint('❌ Erro ao salvar contração: $e');
+      logErroSeguro('Erro ao salvar atualizacao clinica.', e);
       mostrarMensagem('Erro ao salvar contração no Firebase');
     }
   }
@@ -18383,7 +17322,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     final total = fincalc.somarValorParcelas(pendentes);
-    final temCobrancaAsaas = pendentes.any(parcelaTemCobrancaAsaas);
 
     String descontoSelecionado = '0%';
     DateTime dataQuitacaoSelecionada = DateTime.now();
@@ -18507,19 +17445,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                         ],
                       ),
                     ),
-                    if (temCobrancaAsaas) ...[
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Atenção: há cobranças Asaas geradas para parcelas '
-                        'desta gestante. Cancele-as no painel do Asaas para '
-                        'evitar cobrança em duplicidade.',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFFC07A3D),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -18738,9 +17663,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final sheet = arquivoExcel['Financeiro'];
     arquivoExcel.delete('Sheet1');
 
-    sheet.appendRow([
-      excel.TextCellValue('Relatório Financeiro - Natus Gestantes'),
-    ]);
+    sheet.appendRow([excel.TextCellValue('Relatório Financeiro - Natus')]);
 
     sheet.appendRow([
       excel.TextCellValue('Período'),
@@ -18774,7 +17697,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     sheet.appendRow([]);
 
     sheet.appendRow([
-      excel.TextCellValue('Gestante'),
+      excel.TextCellValue('Paciente'),
       excel.TextCellValue('Parcela'),
       excel.TextCellValue('Valor'),
       excel.TextCellValue('Vencimento'),
@@ -18814,9 +17737,25 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
-    mostrarMensagem(
-      'Exportação de Excel disponível apenas na versão web por enquanto.',
-    );
+    final nomeArquivo =
+        'natus_financeiro_${anoSelecionado}_${mesSelecionado.toString().padLeft(2, '0')}.xlsx';
+
+    try {
+      final salvo = await salvarArquivo(
+        nome: nomeArquivo,
+        bytes: Uint8List.fromList(bytes),
+        mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        extensoesPermitidas: const ['xlsx'],
+      );
+
+      if (salvo) {
+        mostrarMensagem('Relatório financeiro exportado com sucesso.');
+      }
+    } catch (erro) {
+      logErroSeguro('Erro ao salvar relatorio.', erro);
+      mostrarMensagem('Não foi possível salvar o relatório.');
+    }
   }
 
   Widget telaFinanceiro() {
@@ -18914,9 +17853,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 20),
 
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
+          NatusCardsResumoLayout(
             children: [
               cardResumo(
                 'Recebido no mês',
@@ -18999,24 +17936,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   rotulo: rotuloParcelaFinanceira(p),
                   pago: pago,
                   atrasado: atrasado,
-                  statusAsaasTexto: textoStatusAsaas(p),
-                  statusAsaasCor: corStatusAsaas(p),
-                  temCobrancaAsaas: parcelaTemCobrancaAsaas(p),
-                  onAbrirCobranca: () async {
-                    await abrirLinkCobrancaAsaas(p);
-                  },
-                  onConsultarStatus: () async {
-                    await consultarStatusCobrancaAsaas(p);
-                  },
-                  onCopiarPix: () async {
-                    await copiarTexto(
-                      p['asaasPixCopiaCola'] ?? '',
-                      'Pix copia e cola copiado.',
-                    );
-                  },
-                  onAbrirBoleto: () async {
-                    await abrirBoletoAsaas(p);
-                  },
                   onAbrirComprovante: () async {
                     final url = p['comprovanteUrl'];
 
@@ -19025,9 +17944,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     } else {
                       mostrarMensagem('Comprovante não encontrado.');
                     }
-                  },
-                  onGerarCobranca: () async {
-                    await gerarCobrancaAsaas(p);
                   },
                   onSelecionarComprovante: () async {
                     await selecionarArquivo();
@@ -19083,17 +17999,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 20),
 
-          blocoDashboard('Gestantes ativas por plano', [
+          blocoDashboard('Pacientes ativos por plano', [
             if (gestantesPorPlano.isEmpty)
               Text(
-                'Nenhuma gestante ativa com plano identificado no momento.',
+                'Nenhum paciente ativo com plano identificado no momento.',
                 style: TextStyle(color: NatusApp.textoSuave),
               )
             else
               LayoutBuilder(
                 builder: (context, constraints) {
                   final larguraDisponivel = constraints.maxWidth;
-                  final isMobile = larguraDisponivel < 700;
+                  final isMobile =
+                      larguraDisponivel < 700 ||
+                      NatusBreakpoints.isPhone(context);
                   const espacamento = 8.0;
                   final totalItens = gestantesPorPlano.length;
                   final colunas = isMobile
@@ -19135,31 +18053,26 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           if (usuarioEhAdmin())
             blocoDashboard('Central de alertas', [
-              Row(
+              NatusAlertasDashboardLayout(
                 children: [
-                  Expanded(
-                    child: cardAlertaDashboard(
-                      'DPP próxima',
-                      '${contarGestantesProximasDpp()} gestante(s)',
-                      Icons.warning,
-                      Colors.orange,
-                      onTap: () => abrirPacientesDoDashboard(
-                        const FiltroDashboardPacientes(
-                          tipo: TipoFiltroDashboardPacientes.dppProxima,
-                          titulo: 'DPP próxima',
-                        ),
+                  cardAlertaDashboard(
+                    'DPP próxima',
+                    '${contarGestantesProximasDpp()} paciente(s)',
+                    Icons.warning,
+                    Colors.orange,
+                    onTap: () => abrirPacientesDoDashboard(
+                      const FiltroDashboardPacientes(
+                        tipo: TipoFiltroDashboardPacientes.dppProxima,
+                        titulo: 'DPP próxima',
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: cardAlertaDashboard(
-                      'Parcelas atrasadas',
-                      '${contarParcelasAtrasadasMesSelecionado()} parcela(s)',
-                      Icons.warning_amber,
-                      Colors.red,
-                      onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
-                    ),
+                  cardAlertaDashboard(
+                    'Parcelas atrasadas',
+                    '${contarParcelasAtrasadasMesSelecionado()} parcela(s)',
+                    Icons.warning_amber,
+                    Colors.red,
+                    onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
                   ),
                 ],
               ),
@@ -19167,12 +18080,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           const SizedBox(height: 12),
 
-          blocoDashboard('Status das gestantes', [
+          blocoDashboard('Status dos pacientes', [
             Row(
               children: [
                 Expanded(
                   child: cardContagemResumo(
-                    'Gestantes',
+                    'Em acompanhamento',
                     contarGestantesPorStatusNoPeriodoDpp('Gestante'),
                     Colors.pink,
                     Icons.pregnant_woman,
@@ -19180,7 +18093,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       FiltroDashboardPacientes(
                         tipo: TipoFiltroDashboardPacientes.statusNoPeriodo,
                         titulo:
-                            'Gestantes em ${nomeMes(mesSelecionado)} / $anoSelecionado',
+                            'Pacientes em ${nomeMes(mesSelecionado)} / $anoSelecionado',
                         valor: 'Gestante',
                         mes: mesSelecionado,
                         ano: anoSelecionado,

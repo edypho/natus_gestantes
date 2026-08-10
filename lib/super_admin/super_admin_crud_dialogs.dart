@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
+import '../core/sessao_idempotencia.dart';
+import '../seguranca/log_seguro.dart';
 import 'super_admin_repository.dart';
 
 Future<void> superAdminCriarClinicaComAdminDialog({
@@ -11,6 +15,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
   final nomeAdminController = TextEditingController();
   final emailAdminController = TextEditingController();
   final valorController = TextEditingController(text: '597');
+  final sessaoCriacaoClinica = SessaoIdempotencia();
 
   String planoSelecionado = 'Clínica Start';
   var salvando = false;
@@ -147,19 +152,31 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                         setStateDialog(() => salvando = true);
                         late final bool conviteEnviado;
                         try {
+                          final operacaoId = sessaoCriacaoClinica
+                              .idParaAssinatura(
+                                jsonEncode([
+                                  nomeClinica,
+                                  nomeAdmin,
+                                  emailAdmin.toLowerCase(),
+                                  planoSelecionado,
+                                  valor,
+                                ]),
+                              );
                           conviteEnviado = await repo.criarClinicaComAdmin(
                             nomeClinica: nomeClinica,
                             nomeAdmin: nomeAdmin,
                             emailAdmin: emailAdmin,
                             plano: planoSelecionado,
                             valorAssinatura: valor,
+                            operacaoId: operacaoId,
                           );
                         } catch (e) {
+                          logErroSeguro('Erro ao criar clinica.', e);
                           if (context.mounted) {
                             setStateDialog(() => salvando = false);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Erro ao criar clínica: $e'),
+                              const SnackBar(
+                                content: Text('Erro ao criar clínica.'),
                               ),
                             );
                           }

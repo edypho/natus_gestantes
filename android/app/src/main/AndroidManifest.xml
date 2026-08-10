@@ -1,13 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
-        android:label="natus_gestantes"
+        android:label="Natus"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:usesCleartextTraffic="false">
 
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyCqR5TMORjAyw7E5Uylf8lM5ij8kG4vxnw" />
+            android:value="${GOOGLE_MAPS_ANDROID_API_KEY}" />
 
         <activity
             android:name=".MainActivity"

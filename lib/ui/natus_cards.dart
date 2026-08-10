@@ -21,10 +21,7 @@ Widget cardResumoNatus({
               Text(titulo),
               Text(
                 valor,
-                style: TextStyle(
-                  color: cor,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: cor, fontWeight: FontWeight.bold),
               ),
             ],
           ),

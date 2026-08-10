@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/natus_breakpoints.dart';
 import 'super_admin_stats.dart';
 import 'super_admin_widgets.dart';
 
@@ -99,7 +100,9 @@ class SuperAdminDashboard extends StatelessWidget {
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final larguraDisponivel = constraints.maxWidth;
-                  final isMobile = larguraDisponivel < 700;
+                  final isMobile =
+                      larguraDisponivel < 700 ||
+                      NatusBreakpoints.isPhone(context);
                   const espacamento = 8.0;
                   final totalItens = planosOrdenados.length;
                   final colunas = isMobile
