@@ -7,6 +7,11 @@ const String _recaptchaEnterpriseSiteKey = String.fromEnvironment(
   'NATUS_RECAPTCHA_ENTERPRISE_SITE_KEY',
 );
 
+const bool _webRecaptchaEnterpriseAtivo = bool.fromEnvironment(
+  'NATUS_ENABLE_WEB_APP_CHECK',
+  defaultValue: false,
+);
+
 const bool _androidPlayIntegrityAtivo = bool.fromEnvironment(
   'NATUS_ENABLE_ANDROID_APP_CHECK',
   defaultValue: false,
@@ -20,6 +25,13 @@ Future<bool> ativarFirebaseAppCheck() async {
   }.contains(defaultTargetPlatform);
 
   if (!kIsWeb && !plataformaNativaSuportada) return false;
+
+  if (kIsWeb && !kDebugMode && !_webRecaptchaEnterpriseAtivo) {
+    logInfoSeguro(
+      'App Check Web aguardando validacao do provedor no Firebase.',
+    );
+    return false;
+  }
 
   if (!kIsWeb &&
       defaultTargetPlatform == TargetPlatform.android &&

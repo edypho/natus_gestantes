@@ -183,8 +183,8 @@ try {
   )
   Assert-Natus ($googleApiKeys.Count -ge 2) `
     'O build web não contém Firebase e Maps configurados.'
-  Assert-Natus ($recaptchaKeys.Count -eq 1) `
-    'O build web não contém exatamente uma chave do App Check.'
+  Assert-Natus ($recaptchaKeys.Count -eq 0) `
+    'O App Check Web deve permanecer desligado até o provedor ser validado.'
 
   $output = Join-Path $workspace $OutputPath
   $outputDirectory = Split-Path -Parent $output
@@ -200,6 +200,7 @@ try {
     packageId = $packageId
     apkSha256 = $releaseHash
     webMainSha256 = (Get-FileHash build\web\main.dart.js -Algorithm SHA256).Hash
+    webAppCheckEnabled = $false
     indexes = $indexes.indexes.Count
     status = 'ready'
   }
