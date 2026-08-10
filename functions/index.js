@@ -5355,7 +5355,6 @@ exports.buscarCoordenadaEndereco = onCall(
 exports.reenviarLinkTrocaSenhaGestante = onRequest(
     {
       region: "us-central1",
-      invoker: "public",
     },
     async (req, res) => {
       const originAllowed = applyRestrictedCors(req, res);
