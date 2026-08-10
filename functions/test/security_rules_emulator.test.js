@@ -2,6 +2,7 @@
 /* eslint-disable max-len */
 "use strict";
 
+const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -17,10 +18,16 @@ const {
 } = require("@firebase/rules-unit-testing");
 const {
   arrayUnion,
+  collection,
   doc,
   getDoc,
+  getDocs,
+  orderBy,
+  query,
   setDoc,
+  Timestamp,
   updateDoc,
+  where,
   writeBatch,
 } = require("firebase/firestore");
 const {
@@ -195,6 +202,24 @@ async function seedFirestore(adminContext) {
           destinatariosUids: ["staff-a"],
           lidasPor: [],
           atualizadoEm: "seed",
+        }),
+    ),
+    setDoc(
+        doc(db, "agenda/event-a"),
+        tenantData("clinic-a", {
+          dataHoraInicio: Timestamp.fromDate(
+              new Date("2026-08-10T12:00:00.000Z"),
+          ),
+          pacienteId: "patient-a-record",
+        }),
+    ),
+    setDoc(
+        doc(db, "agenda/event-b"),
+        tenantData("clinic-b", {
+          dataHoraInicio: Timestamp.fromDate(
+              new Date("2026-08-10T13:00:00.000Z"),
+          ),
+          pacienteId: "patient-b-record",
         }),
     ),
     setDoc(doc(db, "_backendRateLimits/private"), {count: 1}),
@@ -415,6 +440,40 @@ test("colecoes tecnicas permanecem exclusivas do backend", {
     count: 0,
   }));
   await assertFails(getDoc(doc(adminDb, "operacoesSistema/private")));
+});
+
+test("agenda permite consulta indexada somente da propria clinica", {
+  skip: !RUN_EMULATOR_TESTS,
+}, async () => {
+  const adminDb = context("admin-a").firestore();
+  const ownAgenda = query(
+      collection(adminDb, "agenda"),
+      where("adminDonoId", "==", "clinic-a"),
+      where("clinicaId", "==", "clinic-a"),
+      where("dataHoraInicio", ">=", Timestamp.fromDate(
+          new Date("2026-08-01T00:00:00.000Z"),
+      )),
+      where("dataHoraInicio", "<=", Timestamp.fromDate(
+          new Date("2026-08-31T23:59:59.000Z"),
+      )),
+      orderBy("dataHoraInicio"),
+  );
+  const otherAgenda = query(
+      collection(adminDb, "agenda"),
+      where("adminDonoId", "==", "clinic-b"),
+      where("clinicaId", "==", "clinic-b"),
+      where("dataHoraInicio", ">=", Timestamp.fromDate(
+          new Date("2026-08-01T00:00:00.000Z"),
+      )),
+      where("dataHoraInicio", "<=", Timestamp.fromDate(
+          new Date("2026-08-31T23:59:59.000Z"),
+      )),
+      orderBy("dataHoraInicio"),
+  );
+
+  const snapshot = await assertSucceeds(getDocs(ownAgenda));
+  assert.equal(snapshot.size, 1);
+  await assertFails(getDocs(otherAgenda));
 });
 
 test("admin grava paciente e financeiro no mesmo lote sem cruzar tenant", {
