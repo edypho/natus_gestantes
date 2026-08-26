@@ -298,19 +298,22 @@ service firebase.storage {
 
     function canonicalTenantMetadata(tenantId) {
       return request.resource != null &&
-        request.resource.metadata.get('clinicaId', '') == tenantId &&
-        request.resource.metadata.get('adminDonoId', '') == tenantId;
+        request.resource.metadata.get('clinicaId', '') in ['', tenantId] &&
+        request.resource.metadata.get('adminDonoId', '') in ['', tenantId];
     }
 
     function canonicalPatientMetadata(patientId) {
       return request.resource != null &&
-        request.resource.metadata.get('pacienteId', '') == patientId;
+        request.resource.metadata.get('pacienteId', '') in ['', patientId];
     }
 
     function uploaderMetadataMatchesAuth() {
       return signedIn() &&
         request.resource != null &&
-        request.resource.metadata.get('enviadoPorUid', '') == request.auth.uid;
+        request.resource.metadata.get('enviadoPorUid', '') in [
+          '',
+          request.auth.uid
+        ];
     }
 
     // Nova hierarquia canônica de arquivos.

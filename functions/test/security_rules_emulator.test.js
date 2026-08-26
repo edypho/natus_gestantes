@@ -685,7 +685,7 @@ test("paciente le cadastro legado pelo caminho canonico do perfil", {
   await assertFails(getDoc(doc(patientDb, "gestantes/patient-a-record")));
 });
 
-test("Storage exige autenticacao, tenant e metadados canonicos", {
+test("Storage exige autenticacao e tenant e rejeita metadados divergentes", {
   skip: !RUN_EMULATOR_TESTS,
 }, async () => {
   const ownPath =
@@ -766,6 +766,11 @@ test("Storage exige autenticacao, tenant e metadados canonicos", {
       enviadoPorUid: "admin-a",
     },
   }));
+  await assertSucceeds(uploadBytes(
+      ref(adminStorage, receiptPath.replace("receipt.heic", "sem-meta.heic")),
+      heic,
+      {contentType: "image/heic"},
+  ));
   await assertSucceeds(getBytes(ref(patientStorage, receiptPath), 32));
   await assertFails(uploadBytes(
       ref(adminStorage, receiptPath.replace("patient-a-record", "patient-b")),
