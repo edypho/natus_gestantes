@@ -16795,7 +16795,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
     var dialogoAberto = false;
     Reference? referenciaEnviada;
-    StreamSubscription<TaskSnapshot>? uploadSubscription;
     var uploadConcluido = false;
 
     try {
@@ -16807,6 +16806,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       unawaited(_abrirDialogoUpload(controller));
       await Future<void>.delayed(const Duration(milliseconds: 120));
       dialogoAberto = true;
+
+      final usuarioUpload = FirebaseAuth.instance.currentUser;
+      if (usuarioUpload == null) {
+        throw FirebaseException(
+          plugin: 'firebase_storage',
+          code: 'unauthenticated',
+        );
+      }
+
+      // No Web, uma sessão mantida aberta por muito tempo pode deixar o SDK
+      // de Storage com um token anterior ao estado atual do Firebase Auth.
+      // A renovação antes do upload evita a falha genérica `Error` do JS SDK.
+      await usuarioUpload.getIdToken(true);
 
       final nomeArquivo =
           '${DateTime.now().millisecondsSinceEpoch}_${nomeArquivoSeguro(arquivo.name)}';
@@ -16821,27 +16833,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         mensagem: 'Iniciando envio de ${arquivo.name}...',
       );
 
-      final task = ref.putData(
+      controller.uploading(
+        0.1,
+        titulo: 'Enviando arquivo',
+        mensagem: 'Enviando ${arquivo.name}...',
+      );
+
+      // Aguardar diretamente a tarefa é mais estável no Flutter Web. A
+      // assinatura paralela de snapshotEvents podia emitir um Error do JS sem
+      // passar pelo FirebaseException aguardado pela operação principal.
+      await ref.putData(
         arquivo.bytes!,
         metadadosUpload(arquivo, pacienteId: pacienteId),
       );
-
-      uploadSubscription = task.snapshotEvents.listen((snapshot) {
-        final total = snapshot.totalBytes;
-        final transferred = snapshot.bytesTransferred;
-        final progress = total <= 0 ? 0.05 : transferred / total;
-
-        controller.uploading(
-          progress,
-          titulo: 'Enviando arquivo',
-          mensagem: 'Enviando ${arquivo.name} (${(progress * 100).round()}%)',
-        );
-      });
-
-      await task;
       uploadConcluido = true;
-      await uploadSubscription.cancel();
-      uploadSubscription = null;
 
       final url = obterUrlDownload ? await ref.getDownloadURL() : '';
 
@@ -16884,7 +16889,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       );
       return null;
     } finally {
-      await uploadSubscription?.cancel();
       if (dialogoAberto) {
         await _fecharDialogoUpload();
       }

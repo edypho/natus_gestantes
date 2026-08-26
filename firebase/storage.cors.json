@@ -1,0 +1,31 @@
+[
+  {
+    "origin": [
+      "https://natus-gestantes.web.app",
+      "https://natus-gestantes.firebaseapp.com"
+    ],
+    "method": [
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "DELETE"
+    ],
+    "responseHeader": [
+      "Authorization",
+      "Content-Length",
+      "Content-Type",
+      "ETag",
+      "X-Firebase-AppCheck",
+      "X-Firebase-GMPID",
+      "X-Firebase-Storage-Version",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-Header-Content-Length",
+      "X-Goog-Upload-Header-Content-Type",
+      "X-Goog-Upload-Offset",
+      "X-Goog-Upload-Protocol",
+      "X-Goog-Upload-Status"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
