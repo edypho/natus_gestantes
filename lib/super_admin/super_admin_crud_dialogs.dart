@@ -26,7 +26,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
       return StatefulBuilder(
         builder: (context, setStateDialog) {
           return AlertDialog(
-            title: const Text('Criar clínica SaaS + admin'),
+            title: const Text('Criar clínica + administrador'),
             content: SingleChildScrollView(
               child: SizedBox(
                 width: 460,
@@ -60,7 +60,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                     DropdownButtonFormField<String>(
                       initialValue: planoSelecionado,
                       decoration: const InputDecoration(
-                        labelText: 'Plano SaaS',
+                        labelText: 'Plano comercial',
                         border: OutlineInputBorder(),
                       ),
                       items: const [
@@ -208,7 +208,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                           );
                         }
                       },
-                child: const Text('Criar clínica + admin'),
+                child: const Text('Criar clínica + administrador'),
               ),
             ],
           );

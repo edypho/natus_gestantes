@@ -7,30 +7,30 @@ import 'super_admin_mensalidades_page.dart';
 import 'super_admin_financeiro_page.dart';
 import 'super_admin_criacao_page.dart';
 import 'super_admin_crescimento_page.dart';
+import 'super_admin_navigation.dart';
 
 class SuperAdminRouter {
   static Widget tela(String telaAtual) {
-    switch (telaAtual) {
-      case 'Dashboard SaaS':
-      case 'Dashboard':
+    switch (SuperAdminNavigation.resolver(telaAtual).id) {
+      case 'visao-geral':
         return const SuperAdminDashboard();
 
-      case 'Clínicas cadastradas SaaS':
+      case 'clinicas':
         return const SuperAdminClinicasPage();
 
-      case 'Usuários/clientes SaaS':
+      case 'usuarios':
         return const SuperAdminUsuariosPage();
 
-      case 'Mensalidades atrasadas SaaS':
+      case 'mensalidades':
         return const SuperAdminMensalidadesPage();
 
-      case 'Financeiro das assinaturas SaaS':
+      case 'assinaturas':
         return const SuperAdminFinanceiroPage();
 
-      case 'Criação de clínica/admin/enfermeira SaaS':
+      case 'nova-clinica':
         return const SuperAdminCriacaoPage();
 
-      case 'Crescimento de usuários por período SaaS':
+      case 'crescimento':
         return const SuperAdminCrescimentoPage();
 
       default:

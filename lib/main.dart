@@ -19,8 +19,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'super_admin/super_admin_router.dart';
 import 'super_admin/super_admin_access_guard.dart';
+import 'super_admin/super_admin_shell.dart';
 import 'super_admin/primeiro_login_saas_dialog.dart';
 import 'super_admin/primeiro_login_saas_guard.dart';
 import 'package:flutter/foundation.dart';
@@ -208,12 +208,17 @@ class AuthGate extends StatelessWidget {
                     );
                   }
 
-                  final telaPrincipal = TelaPrincipal(
-                    tipoUsuario: contextoSaaS.perfil,
-                    nomeUsuario: contextoSaaS.nomeUsuario,
-                    contextoSaaS: contextoSaaS,
-                    escopoTenant: escopoTenant,
-                  );
+                  final Widget telaPrincipal = contextoSaaS.superAdmin
+                      ? SuperAdminShell(
+                          nomeUsuario: contextoSaaS.nomeUsuario,
+                          emailUsuario: contextoSaaS.emailUsuario,
+                        )
+                      : TelaPrincipal(
+                          tipoUsuario: contextoSaaS.perfil,
+                          nomeUsuario: contextoSaaS.nomeUsuario,
+                          contextoSaaS: contextoSaaS,
+                          escopoTenant: escopoTenant,
+                        );
 
                   if (PrimeiroLoginSaaSGuard.deveTrocarSenha(dados)) {
                     return PrimeiroLoginSaaSGate(
@@ -751,12 +756,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     NatusTema.atual.addListener(aoMudarTema);
 
-    if (widget.tipoUsuario == 'superAdmin') {
-      telaAtual = 'Dashboard SaaS';
-      carregarTemaUsuario();
-      carregarPerfilUsuarioLogado();
-      return;
-    } else if (widget.tipoUsuario == 'gestante') {
+    if (widget.tipoUsuario == 'gestante') {
       telaAtual = 'Área da gestante';
     }
 
@@ -790,16 +790,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   bool get podeReceberNotificacoesInternas {
     return widget.tipoUsuario == 'admin' ||
-        widget.tipoUsuario == 'superAdmin' ||
         widget.tipoUsuario == 'enfermeira' ||
         widget.tipoUsuario == 'obstetra';
   }
 
   String tipoNotificacaoConsulta() {
-    if (widget.tipoUsuario == 'superAdmin') {
-      return 'admin';
-    }
-
     return widget.tipoUsuario;
   }
 
@@ -3100,15 +3095,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget menuLateral() {
     final menusPermitidos = {
-      'superAdmin': [
-        'Dashboard SaaS',
-        'Clínicas cadastradas SaaS',
-        'Usuários/clientes SaaS',
-        'Mensalidades atrasadas SaaS',
-        'Financeiro das assinaturas SaaS',
-        'Criação de clínica/admin/enfermeira SaaS',
-        'Crescimento de usuários por período SaaS',
-      ],
       'admin': [
         'Dashboard',
         'Agenda',
@@ -3312,26 +3298,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     final itensVisiveis = <Widget>[
-      if (menusDoUsuario.contains('Dashboard SaaS'))
-        itemMenu(Icons.dashboard_rounded, 'Dashboard SaaS'),
-      if (menusDoUsuario.contains('Clínicas cadastradas SaaS'))
-        itemMenu(Icons.apartment_rounded, 'Clínicas cadastradas SaaS'),
-      if (menusDoUsuario.contains('Usuários/clientes SaaS'))
-        itemMenu(Icons.people_alt_rounded, 'Usuários/clientes SaaS'),
-      if (menusDoUsuario.contains('Mensalidades atrasadas SaaS'))
-        itemMenu(Icons.warning_amber_rounded, 'Mensalidades atrasadas SaaS'),
-      if (menusDoUsuario.contains('Financeiro das assinaturas SaaS'))
-        itemMenu(Icons.payments_rounded, 'Financeiro das assinaturas SaaS'),
-      if (menusDoUsuario.contains('Criação de clínica/admin/enfermeira SaaS'))
-        itemMenu(
-          Icons.add_business_rounded,
-          'Criação de clínica/admin/enfermeira SaaS',
-        ),
-      if (menusDoUsuario.contains('Crescimento de usuários por período SaaS'))
-        itemMenu(
-          Icons.trending_up_rounded,
-          'Crescimento de usuários por período SaaS',
-        ),
       if (menusDoUsuario.contains('Dashboard'))
         itemMenu(Icons.dashboard, 'Dashboard'),
       if (menusDoUsuario.contains('Agenda'))
@@ -3511,22 +3477,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   bool exibirMenuInferiorCoracao() {
-    return widget.tipoUsuario != 'superAdmin';
+    return true;
   }
 
   List<String> menusPermitidosUsuarioMobile() {
-    if (widget.tipoUsuario == 'superAdmin') {
-      return const [
-        'Dashboard SaaS',
-        'Clínicas cadastradas SaaS',
-        'Usuários/clientes SaaS',
-        'Mensalidades atrasadas SaaS',
-        'Financeiro das assinaturas SaaS',
-        'Criação de clínica/admin/enfermeira SaaS',
-        'Crescimento de usuários por período SaaS',
-      ];
-    }
-
     if (widget.tipoUsuario == 'admin') {
       return const [
         'Dashboard',
@@ -4098,15 +4052,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaConteudo() {
     switch (telaAtual) {
-      case 'Dashboard SaaS':
-      case 'Clínicas cadastradas SaaS':
-      case 'Usuários/clientes SaaS':
-      case 'Mensalidades atrasadas SaaS':
-      case 'Financeiro das assinaturas SaaS':
-      case 'Criação de clínica/admin/enfermeira SaaS':
-      case 'Crescimento de usuários por período SaaS':
-        return SuperAdminRouter.tela(telaAtual);
-
       case 'Dashboard':
         return telaDashboard();
 
