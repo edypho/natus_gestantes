@@ -66,7 +66,7 @@ Future<bool> ativarFirebaseAppCheck() async {
     await FirebaseAppCheck.instance.setTokenAutoRefreshEnabled(true);
     return true;
   } catch (erro) {
-    logErroSeguro('Nao foi possivel ativar o App Check.', erro);
+    logErroSeguro('Não foi possível ativar o App Check.', erro);
     return false;
   }
 }

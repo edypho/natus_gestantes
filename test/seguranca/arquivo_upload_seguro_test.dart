@@ -35,10 +35,24 @@ void main() {
     );
     expect(
       arquivoPossuiAssinaturaPermitida(
-        Uint8List.fromList([0, 0, 0, 24, ...'ftyp'.codeUnits]),
+        Uint8List.fromList([0, 0, 0, 24, ...'ftypisom'.codeUnits]),
         'video/mp4',
       ),
       isTrue,
+    );
+    expect(
+      arquivoPossuiAssinaturaPermitida(
+        Uint8List.fromList([0, 0, 0, 24, ...'ftypheic'.codeUnits]),
+        'image/heic',
+      ),
+      isTrue,
+    );
+    expect(
+      arquivoPossuiAssinaturaPermitida(
+        Uint8List.fromList([0, 0, 0, 24, ...'ftypheic'.codeUnits]),
+        'video/mp4',
+      ),
+      isFalse,
     );
   });
 
@@ -49,6 +63,8 @@ void main() {
       'image/jpeg',
       'image/png',
       'image/webp',
+      'image/heic',
+      'image/heif',
       'video/mp4',
     ]) {
       expect(arquivoPossuiAssinaturaPermitida(executavel, mime), isFalse);

@@ -36,14 +36,20 @@ import 'gestantes/gestantes_regras.dart' as gregras;
 import 'gestantes/maternidades_regras.dart' as mregras;
 import 'kpis/kpis_calculos.dart' as kpis;
 import 'dashboard/dashboard_cards_natus.dart';
+import 'dashboard/dashboard_clinica_resumo.dart';
 import 'dashboard/dashboard_destino_filtros.dart';
 import 'dados/natus_data_source.dart' as dados;
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
+import 'auth/acesso_paciente_mensagem.dart';
+import 'auth/autenticacao_mensagens.dart';
 import 'features/contratos/contratos.dart';
 import 'navigation/menu_inferior_coracao.dart';
 import 'notificacoes/notificacoes_central_page.dart';
+import 'pacientes/paciente_identidade.dart';
+import 'prontuario/atendimento_prontuario_apresentacao.dart';
+import 'prontuario/prontuario_identidade.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
 import 'services/push_notifications_service.dart';
 import 'services/arquivo_download_service.dart';
@@ -56,6 +62,8 @@ import 'seguranca/erro_publico.dart';
 import 'seguranca/firebase_app_check_config.dart';
 import 'seguranca/log_seguro.dart';
 import 'seguranca/url_externa_segura.dart';
+import 'uploads/arquivo_upload_resultado.dart';
+import 'uploads/upload_erro_mensagem.dart';
 import 'uploads/upload_progress_dialog.dart';
 
 export 'core/firebase_globals.dart';
@@ -72,7 +80,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
     } catch (erro) {
       logErroSeguro(
-        'Nao foi possivel limitar a persistencia da sessao Web.',
+        'Não foi possível limitar a persistência da sessão Web.',
         erro,
       );
     }
@@ -363,6 +371,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'jpg' || 'jpeg' => 'image/jpeg',
       'png' => 'image/png',
       'webp' => 'image/webp',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
       'mp4' => 'video/mp4',
       _ => null,
     };
@@ -377,7 +387,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final contentType = tipoMimeArquivo(arquivo);
     if (contentType == null) {
       throw const FormatException(
-        'Tipo de arquivo não permitido. Use PDF, JPG, PNG, WebP ou MP4.',
+        'Tipo de arquivo não permitido. Use PDF, JPG, PNG, WebP, HEIC, '
+        'HEIF ou MP4.',
       );
     }
     final bytes = arquivo.bytes;
@@ -521,6 +532,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         email: emailNormalizado,
       );
       mostrarMensagem('E-mail de definição de senha enviado.');
+    } on FirebaseAuthException catch (e) {
+      logErroSeguro('Erro ao enviar e-mail de acesso.', e.code);
+      mostrarMensagem(mensagemErroEnvioAcessoParaEquipe(e.code));
     } catch (e) {
       logErroSeguro('Erro ao enviar e-mail de acesso.', e);
       mostrarMensagem('Não foi possível enviar o e-mail de acesso.');
@@ -2864,16 +2878,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   bool pacienteTemModuloObstetrico(Map<String, String> paciente) {
-    final especialidade =
-        (paciente['especialidadeAcompanhamento'] ??
-                paciente['tipoCadastroPaciente'] ??
-                '')
-            .toLowerCase();
-    final status = statusGestanteNormalizado(paciente);
-    return NatusEspecialidades.ehObstetricia(especialidade) ||
-        (paciente['dpp'] ?? '').trim().isNotEmpty ||
-        status == 'Gestante' ||
-        status == 'Puérpera';
+    return pacienteTemModuloObstetriciaDashboard(paciente);
   }
 
   @override
@@ -4453,7 +4458,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return nomeSalvo;
     }
 
-    final idGestante = (dados['idGestante'] ?? '').toString().trim();
+    final idGestante = pacienteIdDoRegistro(dados);
     if (idGestante.isNotEmpty) {
       final gestantePorId = gestantes.firstWhere(
         (g) => (g['id'] ?? '').trim() == idGestante,
@@ -4466,7 +4471,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       }
     }
 
-    final uidGestante = (dados['uidGestante'] ?? '').toString().trim();
+    final uidGestante = pacienteUidDoRegistro(dados);
     if (uidGestante.isNotEmpty) {
       final gestantePorUid = gestantes.firstWhere(
         (g) => (g['uidGestante'] ?? '').trim() == uidGestante,
@@ -4500,41 +4505,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
-    final resultado = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
-      withData: true,
-    );
-
-    if (resultado == null) return;
-
-    final arquivo = resultado.files.first;
-
+    final arquivo = await escolherArquivoClinico();
+    if (arquivo == null) return;
     final nomeArquivo = arquivo.name;
-    final bytes = arquivo.bytes;
-
-    if (bytes == null) {
-      mostrarMensagem('Erro ao ler arquivo.');
-      return;
-    }
+    final upload = await uploadArquivo(
+      arquivo,
+      pasta: 'pacientes/$idGestante/exames',
+      pacienteId: idGestante,
+    );
+    if (upload == null) return;
 
     try {
-      final nomeFinal =
-          '${DateTime.now().millisecondsSinceEpoch}_${nomeArquivoSeguro(nomeArquivo)}';
-
-      final ref = storage.ref().child(
-        tenantFirestore.caminhoStorage(
-          'pacientes/$idGestante/exames/$nomeFinal',
-        ),
-      );
-
-      await ref.putData(
-        bytes,
-        metadadosUpload(arquivo, pacienteId: idGestante),
-      );
-
-      final url = await ref.getDownloadURL();
-
       await firestore
           .collection('exames')
           .add(
@@ -4544,15 +4525,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               'uidGestante': uidGestante,
               'nomeGestante': nomeGestante,
               'nomeArquivo': nomeArquivo,
-              'url': url,
+              'url': upload.url,
+              'arquivoCaminho': upload.caminho,
               'criadoEm': DateTime.now().toIso8601String(),
             }),
           );
 
       mostrarMensagem('Exame enviado com sucesso!');
     } catch (e) {
+      await removerUploadOrfao(upload, 'exame');
       logErroSeguro('Erro ao enviar exame.', e);
-      mostrarMensagem('Erro ao enviar exame.');
+      mostrarMensagem('O exame não foi salvo e o envio foi desfeito.');
     }
   }
 
@@ -4569,32 +4552,40 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     List<String> campos,
   ) => gregras.primeiraDataPreenchida(dados, campos);
 
-  int contarBebesPorAno(String ano) => kpis.contarBebesPorAno(gestantes, ano);
+  int contarBebesPorAno(String ano, [List<Map<String, String>>? pacientes]) =>
+      kpis.contarBebesPorAno(pacientes ?? gestantes, ano);
 
-  Map<int, int> contarBebesPorMes(String ano) =>
-      kpis.contarBebesPorMes(gestantes, ano);
+  Map<int, int> contarBebesPorMes(
+    String ano, [
+    List<Map<String, String>>? pacientes,
+  ]) => kpis.contarBebesPorMes(pacientes ?? gestantes, ano);
 
-  kpis.CrescimentoNascimentosKpis calcularCrescimentoNascimentos() =>
-      kpis.calcularCrescimentoNascimentos(gestantes);
+  kpis.CrescimentoNascimentosKpis calcularCrescimentoNascimentos([
+    List<Map<String, String>>? pacientes,
+  ]) => kpis.calcularCrescimentoNascimentos(pacientes ?? gestantes);
 
-  kpis.ObstetraMetricasCompletas metricasDoObstetraLogado() =>
-      kpis.calcularMetricasObstetra(gestantes, nomeEoLogada());
+  kpis.ObstetraMetricasCompletas metricasDoObstetraLogado([
+    List<Map<String, String>>? pacientes,
+  ]) => kpis.calcularMetricasObstetra(pacientes ?? gestantes, nomeEoLogada());
 
-  List<kpis.ObstetraMetricasCompletas> metricasDeTodosObstetras() =>
-      kpis.calcularMetricasTodosObstetras(gestantes, obstetras);
+  List<kpis.ObstetraMetricasCompletas> metricasDeTodosObstetras([
+    List<Map<String, String>>? pacientes,
+  ]) => kpis.calcularMetricasTodosObstetras(pacientes ?? gestantes, obstetras);
 
-  int contarBebesNoPeriodoSelecionado() => kpis.contarBebesNoPeriodoSelecionado(
-    gestantes,
-    mesSelecionado,
-    anoSelecionado,
-  );
-
-  int contarEncerradasOuHistoricoNoPeriodoDpp() =>
-      kpis.contarEncerradasOuHistoricoNoPeriodoDpp(
-        gestantes,
+  int contarBebesNoPeriodoSelecionado([List<Map<String, String>>? pacientes]) =>
+      kpis.contarBebesNoPeriodoSelecionado(
+        pacientes ?? gestantes,
         mesSelecionado,
         anoSelecionado,
       );
+
+  int contarEncerradasOuHistoricoNoPeriodoDpp([
+    List<Map<String, String>>? pacientes,
+  ]) => kpis.contarEncerradasOuHistoricoNoPeriodoDpp(
+    pacientes ?? gestantes,
+    mesSelecionado,
+    anoSelecionado,
+  );
 
   Map<int, int> contarGestantesPorMes(String ano) =>
       kpis.contarGestantesPorMes(gestantes, ano);
@@ -4605,16 +4596,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   bool gestanteEhDoPeriodoSelecionadoPelaDpp(Map<String, String> g) => kpis
       .gestanteEhDoPeriodoSelecionadoPelaDpp(g, mesSelecionado, anoSelecionado);
 
-  int contarGestantesPorStatusNoPeriodoDpp(String status) =>
-      kpis.contarGestantesPorStatusNoPeriodoDpp(
-        gestantes,
-        status,
-        mesSelecionado,
-        anoSelecionado,
-      );
+  int contarGestantesPorStatusNoPeriodoDpp(
+    String status, [
+    List<Map<String, String>>? pacientes,
+  ]) => kpis.contarGestantesPorStatusNoPeriodoDpp(
+    pacientes ?? gestantes,
+    status,
+    mesSelecionado,
+    anoSelecionado,
+  );
 
-  int contarGestantesProximasDpp() =>
-      kpis.contarGestantesProximasDpp(gestantes);
+  int contarGestantesProximasDpp([List<Map<String, String>>? pacientes]) =>
+      kpis.contarGestantesProximasDpp(pacientes ?? gestantes);
 
   int diasParaDpp(String dpp) => gregras.diasParaDpp(dpp);
 
@@ -4718,10 +4711,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   DateTime calcularQuintoDiaUtil(int ano, int mes) =>
       fincalc.calcularQuintoDiaUtil(ano, mes);
 
-  Map<String, int> contarAmamentacao() {
+  Map<String, int> contarAmamentacao([
+    Iterable<Map<String, String>>? pacientes,
+  ]) {
     Map<String, int> dados = {'AME': 0, 'Mista': 0, 'Fórmula': 0};
 
-    for (var g in gestantes) {
+    for (var g in pacientes ?? gestantes) {
       String tipo = g['amamentacao'] ?? '';
 
       tipo = tipo.trim().toLowerCase();
@@ -4799,7 +4794,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return lista;
   }
 
-  Map<String, int> contarViaNascimento() {
+  Map<String, int> contarViaNascimento([
+    Iterable<Map<String, String>>? pacientes,
+  ]) {
     final dados = {
       'Normal': 0,
       'Cesárea': 0,
@@ -4807,7 +4804,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'Não informado': 0,
     };
 
-    for (var g in gestantes) {
+    for (var g in pacientes ?? gestantes) {
       final via = normalizarViaNascimentoDashboard(g['viaNascimento']);
       dados[via] = (dados[via] ?? 0) + 1;
     }
@@ -4815,10 +4812,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return dados;
   }
 
-  Map<String, int> contarRiscoGestacional() {
+  Map<String, int> contarRiscoGestacional([
+    Iterable<Map<String, String>>? pacientes,
+  ]) {
     final dados = {'Habitual': 0, 'Intermediário': 0, 'Alto Risco': 0};
 
-    for (var g in gregras.gestantesAtivas(gestantes)) {
+    for (var g in gregras.gestantesAtivas((pacientes ?? gestantes).toList())) {
       final risco = (g['riscoGestacional'] ?? '').trim().toLowerCase();
 
       if (risco.contains('alto')) {
@@ -4833,10 +4832,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     return dados;
   }
 
-  Map<String, int> contarDiabetesGestacional() {
+  Map<String, int> contarDiabetesGestacional([
+    Iterable<Map<String, String>>? pacientes,
+  ]) {
     final dados = {'Sim': 0, 'Não': 0};
 
-    for (var g in gregras.gestantesAtivas(gestantes)) {
+    for (var g in gregras.gestantesAtivas((pacientes ?? gestantes).toList())) {
       final dg = (g['diabetesGestacional'] ?? '').trim().toLowerCase();
 
       if (dg.startsWith('sim')) {
@@ -7453,7 +7454,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final url = await ref.getDownloadURL();
 
       controller.success(
-        titulo: 'Upload concluido',
+        titulo: 'Upload concluído',
         mensagem: '${arquivo.name} foi enviado com sucesso.',
       );
 
@@ -7466,7 +7467,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       logErroSeguro('Erro ao enviar material da biblioteca.', e);
       controller.error(
         titulo: 'Erro no upload',
-        mensagem: 'Nao foi possivel concluir o envio de ${arquivo.name}.',
+        mensagem: 'Não foi possível concluir o envio de ${arquivo.name}.',
       );
 
       if (gerenciarDialogo) {
@@ -7566,6 +7567,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                     'jpeg',
                                     'png',
                                     'webp',
+                                    'heic',
+                                    'heif',
                                     'mp4',
                                   ],
                                   withData: true,
@@ -7617,7 +7620,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'PDF, JPG, PNG, WebP ou vídeo MP4.',
+                                        'PDF, JPG, PNG, WebP, HEIC/HEIF ou '
+                                        'vídeo MP4.',
                                         style: TextStyle(
                                           color: NatusApp.textoSuave,
                                           fontSize: 12,
@@ -8605,19 +8609,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
-      final telefoneLimpo = telefoneValidado.replaceAll(RegExp(r'[^0-9]'), '');
-
-      final mensagem = Uri.encodeComponent(
-        'Olá, $nomeValidado! 🤍\n\n'
-        'Enviamos para $emailValidado um e-mail seguro para criar ou trocar '
-        'sua senha de acesso ao Portal Natus.\n\n'
-        'Confira também a caixa de spam. Por segurança, o link não é enviado '
-        'pelo WhatsApp.\n\n'
-        'Com carinho,\n'
-        'Equipe Natus',
+      final url = uriWhatsAppRedefinicaoSenhaPaciente(
+        telefone: telefoneValidado,
+        nome: nomeValidado,
+        email: emailValidado,
       );
-
-      final url = Uri.https('wa.me', '/55$telefoneLimpo', {'text': mensagem});
 
       if (!uriExternaPermitida(url, hostsHttpsPermitidos: const {'wa.me'})) {
         mostrarMensagem('Não foi possível abrir o canal de atendimento.');
@@ -8632,6 +8628,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           fallback: 'Não foi possível solicitar a redefinição de senha.',
         ),
       );
+    } on FirebaseAuthException catch (e) {
+      logErroSeguro('Erro ao enviar redefinicao de senha.', e.code);
+      mostrarMensagem(mensagemErroEnvioAcessoParaEquipe(e.code));
     } catch (e) {
       logErroSeguro('Erro ao solicitar redefinicao de senha.', e);
       mostrarMensagem('Erro ao solicitar redefinição de senha.');
@@ -11321,13 +11320,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     mostrarMensagem('Enviando arquivo...');
 
-    final urlArquivo = await uploadArquivo(
+    final upload = await uploadArquivo(
       arquivoSelecionado!,
       pasta: 'pacientes/$pacienteId/documentos',
       pacienteId: pacienteId,
     );
 
-    if (urlArquivo == null) {
+    if (upload == null) {
       mostrarMensagem('Não foi possível enviar o arquivo');
       return;
     }
@@ -11340,9 +11339,24 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'pacienteId': pacienteId,
       'uidGestante': uidPaciente,
       'arquivoNome': arquivoSelecionado!.name,
-      'arquivoUrl': urlArquivo,
+      'arquivoUrl': upload.url,
+      'arquivoCaminho': upload.caminho,
       'data': formatarDataHora(DateTime.now()),
     };
+
+    try {
+      final referencia = await firestore
+          .collection('documentos')
+          .add(tenantFirestore.prepararCriacaoTexto(novoDocumento));
+      novoDocumento['id'] = referencia.id;
+    } catch (e) {
+      await removerUploadOrfao(upload, 'documento');
+      logErroSeguro('Erro ao registrar documento após o upload.', e);
+      mostrarMensagem(
+        'O arquivo não foi salvo e o envio foi desfeito com segurança.',
+      );
+      return;
+    }
 
     setState(() {
       documentos.add(novoDocumento);
@@ -11350,10 +11364,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       documentoGestanteSelecionada = 'Selecione';
       arquivoSelecionado = null;
     });
-
-    await firestore
-        .collection('documentos')
-        .add(tenantFirestore.prepararCriacaoTexto(novoDocumento));
 
     mostrarMensagem('Documento salvo com arquivo!');
   }
@@ -12678,8 +12688,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           .collection('prontuario_atendimentos')
           .add(
             tenantFirestore.prepararCriacao({
-              'idGestante': idGestante,
-              'uidGestante': g['uidGestante'] ?? '',
+              ...identidadePacienteProntuario(
+                pacienteId: idGestante,
+                pacienteUid: g['uidGestante'],
+              ),
               'nomeGestante': g['nomeGestante'] ?? '',
               'tipo': 'Anamnese',
               'queixaPrincipal': anamneseQueixaController.text.trim(),
@@ -12730,8 +12742,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           .collection('prontuario_atendimentos')
           .add(
             tenantFirestore.prepararCriacao({
-              'idGestante': idGestante,
-              'uidGestante': g['uidGestante'] ?? '',
+              ...identidadePacienteProntuario(
+                pacienteId: idGestante,
+                pacienteUid: g['uidGestante'],
+              ),
               'nomeGestante': g['nomeGestante'] ?? '',
               'tipo': 'Exame físico',
               'pa': examePaController.text.trim(),
@@ -12787,8 +12801,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           .collection('prontuario_atendimentos')
           .add(
             tenantFirestore.prepararCriacao({
-              'idGestante': idGestante,
-              'uidGestante': g['uidGestante'] ?? '',
+              ...identidadePacienteProntuario(
+                pacienteId: idGestante,
+                pacienteUid: g['uidGestante'],
+              ),
               'nomeGestante': g['nomeGestante'] ?? '',
               'tipo': 'Plano de cuidado',
               'condutas': planoCondutasController.text.trim(),
@@ -12837,8 +12853,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           .collection('prontuarios')
           .add(
             tenantFirestore.prepararCriacao({
-              'idGestante': idGestante,
-              'uidGestante': g['uidGestante'] ?? '',
+              ...identidadePacienteProntuario(
+                pacienteId: idGestante,
+                pacienteUid: g['uidGestante'],
+              ),
               'nomeGestante': nomeGestante,
               'texto': texto,
               'data': formatarDataHora(DateTime.now()),
@@ -13151,23 +13169,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ]);
         }
 
-        final atendimentos = docs.map((d) {
-          final dados = d.data() as Map<String, dynamic>;
-
-          return dados.map((k, v) {
-            return MapEntry(k, v.toString());
-          });
-        }).toList();
+        final atendimentos = docs
+            .map(
+              (d) =>
+                  Map<String, dynamic>.from(d.data() as Map<String, dynamic>),
+            )
+            .toList();
 
         atendimentos.sort((a, b) {
-          return (b['criadoEm'] ?? '').compareTo(a['criadoEm'] ?? '');
+          return (b['criadoEm'] ?? '').toString().compareTo(
+            (a['criadoEm'] ?? '').toString(),
+          );
         });
 
         return blocoFicha('Histórico clínico', [
           ...atendimentos.map((a) {
-            final tipo = a['tipo'] ?? '';
-            final eo = a['eo'] ?? '';
-            final data = a['data'] ?? '';
+            final tipo = (a['tipo'] ?? '').toString().trim();
+            final eo = (a['eo'] ?? '').toString().trim();
+            final data = (a['data'] ?? '').toString().trim();
+            final autoria = [
+              data,
+              eo,
+            ].where((valor) => valor.isNotEmpty).join(' — ');
+            final camposClinicos = camposClinicosDoAtendimento(a);
 
             return Container(
               width: double.infinity,
@@ -13200,7 +13224,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              tipo,
+                              tipo.isEmpty ? 'Atendimento clínico' : tipo,
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 17,
@@ -13208,10 +13232,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                               ),
                             ),
 
-                            Text(
-                              '$data — $eo',
-                              style: TextStyle(color: NatusApp.textoSuave),
-                            ),
+                            if (autoria.isNotEmpty)
+                              Text(
+                                autoria,
+                                style: TextStyle(color: NatusApp.textoSuave),
+                              ),
                           ],
                         ),
                       ),
@@ -13220,44 +13245,30 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
                   const SizedBox(height: 14),
 
-                  ...a.entries
-                      .where((e) {
-                        return ![
-                          'idGestante',
-                          'nomeGestante',
-                          'tipo',
-                          'eo',
-                          'data',
-                          'criadoEm',
-                        ].contains(e.key);
-                      })
-                      .map((e) {
-                        if (e.value.trim().isEmpty) {
-                          return const SizedBox();
-                        }
-
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: RichText(
-                            text: TextSpan(
-                              style: TextStyle(
-                                color: NatusApp.texto,
-                                fontSize: 14,
-                              ),
-                              children: [
-                                TextSpan(
-                                  text: '${e.key}: ',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: NatusApp.vinho,
-                                  ),
-                                ),
-                                TextSpan(text: e.value),
-                              ],
-                            ),
+                  ...camposClinicos.map((campoClinico) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: RichText(
+                        text: TextSpan(
+                          style: TextStyle(
+                            color: NatusApp.texto,
+                            fontSize: 14,
+                            height: 1.35,
                           ),
-                        );
-                      }),
+                          children: [
+                            TextSpan(
+                              text: '${campoClinico.rotulo}: ',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: NatusApp.vinho,
+                              ),
+                            ),
+                            TextSpan(text: campoClinico.valor),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
                 ],
               ),
             );
@@ -14269,6 +14280,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       'statusGestante': especialidadePacienteEhObstetricia
           ? 'Gestante'
           : 'Ativa',
+      'criadoEm': DateTime.now().toIso8601String(),
       'uid': FirebaseAuth.instance.currentUser!.uid,
     };
     final metadadosContrato = ContratoPayloadMapper.criarMetadadosIniciais(
@@ -14717,21 +14729,65 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   PlatformFile? arquivoSelecionado;
+  final Map<String, PlatformFile> comprovantesSelecionados = {};
+  final Set<String> parcelasComUploadEmAndamento = {};
+
+  Future<PlatformFile?> escolherArquivoClinico() async {
+    try {
+      final resultado = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: [
+          'pdf',
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+          'heic',
+          'heif',
+        ],
+        withData: true,
+      );
+      if (resultado == null || resultado.files.isEmpty) return null;
+
+      final arquivo = resultado.files.first;
+      metadadosUpload(arquivo);
+      return arquivo;
+    } on FormatException catch (e) {
+      mostrarMensagem(e.message);
+      return null;
+    } catch (e) {
+      logErroSeguro('Erro ao selecionar arquivo.', e);
+      mostrarMensagem('Não foi possível ler o arquivo selecionado.');
+      return null;
+    }
+  }
 
   Future<void> selecionarArquivo() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
-      withData: true,
-    );
-
-    if (result != null && result.files.isNotEmpty) {
+    final arquivo = await escolherArquivoClinico();
+    if (arquivo != null) {
       setState(() {
-        arquivoSelecionado = result.files.first;
+        arquivoSelecionado = arquivo;
       });
 
       mostrarMensagem('Arquivo selecionado: ${arquivoSelecionado!.name}');
     }
+  }
+
+  String chaveParcelaFinanceira(Map<String, String> parcela) {
+    return (parcela['id'] ?? '').trim();
+  }
+
+  Future<void> selecionarComprovanteParcela(Map<String, String> parcela) async {
+    final chave = chaveParcelaFinanceira(parcela);
+    if (chave.isEmpty) {
+      mostrarMensagem('Não foi possível identificar a parcela.');
+      return;
+    }
+
+    final arquivo = await escolherArquivoClinico();
+    if (arquivo == null) return;
+    setState(() => comprovantesSelecionados[chave] = arquivo);
+    mostrarMensagem('Comprovante selecionado: ${arquivo.name}');
   }
 
   Future<void> carregarGestantesFirestore() async {
@@ -15195,7 +15251,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           ),
         );
       } else {
-        logInfoSeguro('Coordenada nao encontrada para um registro.');
+        logInfoSeguro('Coordenada não encontrada para um registro.');
       }
     }
 
@@ -15777,7 +15833,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     try {
       final snapshot = await tenantFirestore.consultaClinica('parcelas').get();
       final documentos = snapshot.docs.where((doc) {
-        final dados = doc.data();
+        final dados = identidadePacienteCanonica(
+          doc.data(),
+          pacienteId: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.pacienteId
+              : null,
+          pacienteUid: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.uidUsuario
+              : null,
+        );
         final idVinculado = (dados['gestanteId'] ?? '').toString().trim();
         final nomeVinculado = (dados['gestante'] ?? '').toString().trim();
         return (idVinculado.isNotEmpty && idVinculado == gestanteId) ||
@@ -15796,7 +15860,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       }
 
       final entradasPagas = documentos.where((doc) {
-        final dados = doc.data();
+        final dados = identidadePacienteCanonica(
+          doc.data(),
+          pacienteId: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.pacienteId
+              : null,
+          pacienteUid: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.uidUsuario
+              : null,
+        );
         return ehEntrada(dados) && estaPaga(dados);
       }).toList();
       final parcelasPagas = documentos.where((doc) {
@@ -16711,16 +16783,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<String?> uploadArquivo(
+  Future<ArquivoUploadResultado?> uploadArquivo(
     PlatformFile arquivo, {
     String pasta = 'arquivos',
     String? pacienteId,
+    bool obterUrlDownload = true,
   }) async {
     final controller = UploadProgressController(
       titulo: 'Enviando arquivo',
       mensagem: 'Preparando arquivo para envio...',
     );
     var dialogoAberto = false;
+    Reference? referenciaEnviada;
+    StreamSubscription<TaskSnapshot>? uploadSubscription;
+    var uploadConcluido = false;
 
     try {
       if (arquivo.bytes == null) {
@@ -16738,6 +16814,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       final ref = storage.ref().child(
         tenantFirestore.caminhoStorage('$pasta/$nomeArquivo'),
       );
+      referenciaEnviada = ref;
 
       controller.preparing(
         titulo: 'Enviando arquivo',
@@ -16749,7 +16826,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         metadadosUpload(arquivo, pacienteId: pacienteId),
       );
 
-      final subscription = task.snapshotEvents.listen((snapshot) {
+      uploadSubscription = task.snapshotEvents.listen((snapshot) {
         final total = snapshot.totalBytes;
         final transferred = snapshot.bytesTransferred;
         final progress = total <= 0 ? 0.05 : transferred / total;
@@ -16762,32 +16839,67 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       });
 
       await task;
-      await subscription.cancel();
+      uploadConcluido = true;
+      await uploadSubscription.cancel();
+      uploadSubscription = null;
 
-      final url = await ref.getDownloadURL();
+      final url = obterUrlDownload ? await ref.getDownloadURL() : '';
 
       controller.success(
-        titulo: 'Upload concluido',
+        titulo: 'Upload concluído',
         mensagem: '${arquivo.name} foi enviado com sucesso.',
       );
       await Future<void>.delayed(const Duration(milliseconds: 900));
 
       logInfoSeguro('Arquivo enviado com sucesso.');
 
-      return url;
+      return ArquivoUploadResultado(url: url, caminho: ref.fullPath);
+    } on FirebaseException catch (e) {
+      if (uploadConcluido && referenciaEnviada != null) {
+        try {
+          await referenciaEnviada.delete();
+        } catch (erroRemocao) {
+          logErroSeguro(
+            'Falha ao remover arquivo após erro de finalização do upload.',
+            erroRemocao,
+          );
+        }
+      }
+
+      final mensagem = mensagemErroUpload(e.code);
+      logErroSeguro('Erro do Firebase Storage no upload.', e.code);
+      controller.error(titulo: 'Erro no upload', mensagem: mensagem);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      mostrarMensagem(mensagem);
+      return null;
     } catch (e) {
       logErroSeguro('Erro no upload.', e);
       controller.error(
         titulo: 'Erro no upload',
-        mensagem: 'Nao foi possivel concluir o envio de ${arquivo.name}.',
+        mensagem: 'Não foi possível concluir o envio de ${arquivo.name}.',
       );
       await Future<void>.delayed(const Duration(milliseconds: 1100));
-      mostrarMensagem('Erro ao enviar arquivo');
+      mostrarMensagem(
+        'Não foi possível enviar o comprovante. Tente novamente.',
+      );
       return null;
     } finally {
+      await uploadSubscription?.cancel();
       if (dialogoAberto) {
         await _fecharDialogoUpload();
       }
+      controller.dispose();
+    }
+  }
+
+  Future<void> removerUploadOrfao(
+    ArquivoUploadResultado upload,
+    String contexto,
+  ) async {
+    try {
+      await storage.ref(upload.caminho).delete();
+    } catch (e) {
+      logErroSeguro('Falha ao remover upload órfão de $contexto.', e);
     }
   }
 
@@ -16815,7 +16927,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           .get();
 
       final listaFirebase = resultado.docs.map((doc) {
-        final dados = doc.data();
+        final dados = identidadePacienteCanonica(
+          doc.data(),
+          pacienteId: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.pacienteId
+              : null,
+          pacienteUid: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.uidUsuario
+              : null,
+        );
 
         final mapa = dados.map((chave, valor) {
           return MapEntry(chave, valor.toString());
@@ -17003,7 +17123,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           .get();
 
       final listaFirebase = resultado.docs.map((doc) {
-        final dados = doc.data();
+        final dados = identidadePacienteCanonica(
+          doc.data(),
+          pacienteId: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.pacienteId
+              : null,
+          pacienteUid: widget.escopoTenant.ehPaciente
+              ? widget.escopoTenant.uidUsuario
+              : null,
+        );
 
         final mapa = dados.map((chave, valor) {
           return MapEntry(chave, valor.toString());
@@ -17038,7 +17166,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     final lista = parcelasFinanceiras.where((p) {
       final parcelaGestante = (p['gestante'] ?? '').trim();
-      final parcelaGestanteId = (p['gestanteId'] ?? '').trim();
+      final parcelaGestanteId = pacienteIdDoRegistro(p);
 
       final pertencePaciente =
           (nomeGestante.isNotEmpty && parcelaGestante == nomeGestante) ||
@@ -17551,54 +17679,117 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> darBaixaParcela(Map<String, String> parcela) async {
-    if (arquivoSelecionado == null) {
-      mostrarMensagem('Selecione o comprovante Pix antes de dar baixa.');
+    final id = chaveParcelaFinanceira(parcela);
+    if (id.isEmpty) {
+      mostrarMensagem('Não foi possível identificar a parcela.');
+      return;
+    }
+
+    if (!usuarioEhAdmin()) {
+      mostrarMensagem(
+        'Somente o administrador da clínica pode enviar comprovantes.',
+      );
+      return;
+    }
+
+    if (parcelasComUploadEmAndamento.contains(id)) {
+      mostrarMensagem('O comprovante desta parcela já está sendo enviado.');
+      return;
+    }
+
+    final arquivo = comprovantesSelecionados[id];
+    if (arquivo == null) {
+      mostrarMensagem('Selecione o comprovante antes de dar baixa.');
+      return;
+    }
+
+    String pacienteId;
+    try {
+      pacienteId = pacienteIdDoRegistro(parcela);
+    } on FormatException {
+      mostrarMensagem('A parcela possui um vínculo de paciente inconsistente.');
+      return;
+    }
+    if (pacienteId.isEmpty) {
+      mostrarMensagem('Não foi possível identificar o paciente da parcela.');
       return;
     }
 
     mostrarMensagem('Enviando comprovante...');
+    setState(() => parcelasComUploadEmAndamento.add(id));
 
-    final urlComprovante = await uploadArquivo(
-      arquivoSelecionado!,
-      pasta: 'financeiro/comprovantes',
-    );
+    try {
+      final upload = await uploadArquivo(
+        arquivo,
+        pasta: 'financeiro/pacientes/$pacienteId/comprovantes',
+        pacienteId: pacienteId,
+        obterUrlDownload: false,
+      );
 
-    if (urlComprovante == null) {
-      mostrarMensagem('Erro ao enviar comprovante.');
+      if (upload == null) return;
+
+      final dataPagamento = formatarDataHora(DateTime.now());
+      final dadosAtualizados = <String, String>{
+        'status': 'Pago',
+        'comprovanteNome': arquivo.name,
+        'comprovanteCaminho': upload.caminho,
+        'dataPagamento': dataPagamento,
+        'valorRecebido': parcela['valor'] ?? 'R\$ 0,00',
+      };
+
+      try {
+        await firestore
+            .collection('parcelas')
+            .doc(id)
+            .update(tenantFirestore.prepararAtualizacaoTexto(dadosAtualizados));
+      } catch (e) {
+        await removerUploadOrfao(upload, 'comprovante');
+        logErroSeguro('Erro ao registrar a baixa da parcela.', e);
+        mostrarMensagem(
+          'A baixa não foi salva e o comprovante enviado foi removido.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        parcela.addAll(dadosAtualizados);
+        comprovantesSelecionados.remove(id);
+      });
+
+      mostrarMensagem('Parcela baixada com sucesso!');
+    } finally {
+      parcelasComUploadEmAndamento.remove(id);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> abrirComprovanteParcela(Map<String, String> parcela) async {
+    final caminho = (parcela['comprovanteCaminho'] ?? '').trim();
+    if (caminho.isNotEmpty) {
+      try {
+        final urlAtual = await storage.ref(caminho).getDownloadURL();
+        await abrirDocumento(urlAtual);
+        return;
+      } catch (e) {
+        logErroSeguro('Erro ao obter comprovante autenticado.', e);
+        mostrarMensagem('Não foi possível acessar o comprovante.');
+        return;
+      }
+    }
+
+    final urlLegada = (parcela['comprovanteUrl'] ?? '').trim();
+    if (urlLegada.isEmpty) {
+      mostrarMensagem('Comprovante não encontrado.');
       return;
     }
-
-    final id = parcela['id'];
-
-    final dadosAtualizados = {
-      'status': 'Pago',
-      'comprovanteNome': arquivoSelecionado!.name,
-      'comprovanteUrl': urlComprovante,
-      'dataPagamento': formatarDataHora(DateTime.now()),
-      'valorRecebido': parcela['valor'] ?? 'R\$ 0,00',
-    };
-
-    if (id != null && id.isNotEmpty) {
-      await firestore.collection('parcelas').doc(id).update(dadosAtualizados);
-    }
-
-    setState(() {
-      parcela['status'] = 'Pago';
-      parcela['comprovanteNome'] = arquivoSelecionado!.name;
-      parcela['comprovanteUrl'] = urlComprovante;
-      parcela['dataPagamento'] = formatarDataHora(DateTime.now());
-      parcela['valorRecebido'] = parcela['valor'] ?? 'R\$ 0,00';
-
-      arquivoSelecionado = null;
-    });
-
-    mostrarMensagem('Parcela baixada com sucesso!');
+    await abrirDocumento(urlLegada);
   }
 
   Map<String, String>? pacienteDaParcelaFinanceira(
     Map<String, String> parcela,
   ) {
-    final pacienteId = (parcela['gestanteId'] ?? '').trim();
+    final pacienteId = pacienteIdDoRegistro(parcela);
     final nomePaciente = (parcela['gestante'] ?? '').trim().toLowerCase();
 
     for (final paciente in gestantes) {
@@ -17620,7 +17811,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void abrirAlteracaoParcelas(Map<String, String> parcela) {
     final paciente = pacienteDaParcelaFinanceira(parcela);
     if (paciente == null) {
-      mostrarMensagem('Paciente vinculada à parcela não encontrada.');
+      mostrarMensagem('Paciente vinculado à parcela não encontrado.');
       return;
     }
 
@@ -17936,17 +18127,18 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   rotulo: rotuloParcelaFinanceira(p),
                   pago: pago,
                   atrasado: atrasado,
+                  comprovanteSelecionadoNome:
+                      comprovantesSelecionados[chaveParcelaFinanceira(p)]
+                          ?.name ??
+                      '',
+                  processando: parcelasComUploadEmAndamento.contains(
+                    chaveParcelaFinanceira(p),
+                  ),
                   onAbrirComprovante: () async {
-                    final url = p['comprovanteUrl'];
-
-                    if (url != null && url.isNotEmpty) {
-                      await abrirDocumento(url);
-                    } else {
-                      mostrarMensagem('Comprovante não encontrado.');
-                    }
+                    await abrirComprovanteParcela(p);
                   },
                   onSelecionarComprovante: () async {
-                    await selecionarArquivo();
+                    await selecionarComprovanteParcela(p);
                   },
                   onDarBaixa: () async {
                     await darBaixaParcela(p);
@@ -17965,525 +18157,583 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Widget telaDashboard() {
-    final amamentacaoDados = contarAmamentacao();
-    final crescimentoNascimentos = calcularCrescimentoNascimentos();
-
-    final viaNascimentoDados = contarViaNascimento();
-    final riscoDados = contarRiscoGestacional();
-    final dgDados = contarDiabetesGestacional();
-    final gestantesPorPlano = contarGestantesAtivasPorPlano();
-
-    List<MapEntry<String, int>> top5Maternidades() {
-      final dados = mregras.contarPacientesPorMaternidade(gestantes);
-
-      final lista = dados.entries.toList();
-
-      lista.sort((a, b) => b.value.compareTo(a.value));
-
-      return lista.take(5).toList();
-    }
-
+    final pacientesObstetricia = gestantes
+        .where(pacienteTemModuloObstetrico)
+        .toList(growable: false);
+    final resumo = DashboardClinicaResumo.calcular(
+      gestantes,
+      mes: mesSelecionado,
+      ano: anoSelecionado,
+    );
+    final pacientesPorPlano = contarGestantesAtivasPorPlano();
     final recebidoMes = calcularValorRecebidoMesAtual();
     final aReceberMes = calcularValorAReceberReal();
     final atrasadoMes = calcularValorAtrasadoMesAtual();
 
+    final alertas = <Widget>[
+      if (usuarioEhAdmin())
+        cardAlertaDashboard(
+          'Parcelas atrasadas',
+          '${contarParcelasAtrasadasMesSelecionado()} parcela(s)',
+          Icons.warning_amber_rounded,
+          Colors.red,
+          onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
+        ),
+      if (resumo.pacientesSemEspecialidade > 0)
+        cardAlertaDashboard(
+          'Especialidade pendente',
+          '${resumo.pacientesSemEspecialidade} paciente(s)',
+          Icons.category_outlined,
+          Colors.orange,
+          onTap: () => abrirPacientesDoDashboard(
+            const FiltroDashboardPacientes(
+              tipo: TipoFiltroDashboardPacientes.semEspecialidade,
+              titulo: 'Pacientes sem especialidade',
+            ),
+          ),
+        ),
+      if (resumo.pacientesSemProfissional > 0)
+        cardAlertaDashboard(
+          'Profissional não vinculado',
+          '${resumo.pacientesSemProfissional} paciente(s)',
+          Icons.person_search_rounded,
+          Colors.orange,
+          onTap: () => abrirPacientesDoDashboard(
+            const FiltroDashboardPacientes(
+              tipo: TipoFiltroDashboardPacientes.semProfissional,
+              titulo: 'Pacientes sem profissional responsável',
+            ),
+          ),
+        ),
+      if (resumo.possuiModuloObstetricia)
+        cardAlertaDashboard(
+          'DPP próxima',
+          '${contarGestantesProximasDpp(pacientesObstetricia)} paciente(s)',
+          Icons.event_available_rounded,
+          NatusApp.marsala,
+          onTap: () => abrirPacientesDoDashboard(
+            const FiltroDashboardPacientes(
+              tipo: TipoFiltroDashboardPacientes.dppProxima,
+              titulo: 'DPP próxima',
+            ),
+          ),
+        ),
+    ];
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(NatusBreakpoints.isPhone(context) ? 16 : 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           NatusSaudacaoDashboard(
             nomeEoLogada().trim().isEmpty ? 'equipe Natus' : nomeEoLogada(),
-            subtitulo: 'Período: ${nomeMes(mesSelecionado)} / $anoSelecionado',
+            subtitulo: 'Visão geral da clínica',
           ),
-
+          const SizedBox(height: 16),
+          NatusFiltroPeriodoDashboard(
+            mes: mesSelecionado,
+            ano: anoSelecionado,
+            onMesAlterado: (mes) => setState(() => mesSelecionado = mes),
+            onAnoAlterado: (ano) => setState(() => anoSelecionado = ano),
+          ),
           const SizedBox(height: 20),
-
+          blocoDashboard('Visão geral da clínica', [
+            NatusCardsResumoLayout(
+              children: [
+                cardContagemResumo(
+                  'Pacientes cadastrados',
+                  resumo.totalPacientes,
+                  NatusApp.vinho,
+                  Icons.people_alt_rounded,
+                  onTap: () => abrirPacientesDoDashboard(
+                    const FiltroDashboardPacientes(
+                      tipo: TipoFiltroDashboardPacientes.todos,
+                      titulo: 'Todos os pacientes',
+                    ),
+                  ),
+                ),
+                cardContagemResumo(
+                  'Pacientes ativos',
+                  resumo.pacientesAtivos,
+                  NatusApp.olivaSeco,
+                  Icons.favorite_outline_rounded,
+                  onTap: () => abrirPacientesDoDashboard(
+                    const FiltroDashboardPacientes(
+                      tipo: TipoFiltroDashboardPacientes.ativos,
+                      titulo: 'Pacientes ativos',
+                    ),
+                  ),
+                ),
+                cardContagemResumo(
+                  'Novos no período',
+                  resumo.cadastrosNoPeriodo,
+                  Colors.blueGrey,
+                  Icons.person_add_alt_1_rounded,
+                  onTap: () => abrirPacientesDoDashboard(
+                    FiltroDashboardPacientes(
+                      tipo: TipoFiltroDashboardPacientes.cadastroNoPeriodo,
+                      titulo:
+                          'Novos pacientes em ${nomeMes(mesSelecionado)} / $anoSelecionado',
+                      mes: mesSelecionado,
+                      ano: anoSelecionado,
+                    ),
+                  ),
+                ),
+                cardContagemResumo(
+                  'Acompanhamentos encerrados',
+                  resumo.acompanhamentosEncerrados,
+                  Colors.green,
+                  Icons.task_alt_rounded,
+                  onTap: () => abrirPacientesDoDashboard(
+                    const FiltroDashboardPacientes(
+                      tipo: TipoFiltroDashboardPacientes.encerrados,
+                      titulo: 'Acompanhamentos encerrados',
+                    ),
+                  ),
+                ),
+                cardContagemResumo(
+                  'Especialidades ativas',
+                  resumo.especialidadesAtivas,
+                  NatusApp.douradoEscuro,
+                  Icons.medical_information_outlined,
+                ),
+              ],
+            ),
+          ]),
+          blocoDashboard('Carteira por especialidade', [
+            if (resumo.pacientesAtivosPorEspecialidade.isEmpty)
+              Text(
+                'Nenhum paciente ativo no momento.',
+                style: TextStyle(color: NatusApp.textoSuave),
+              )
+            else
+              NatusCardsResumoLayout(
+                children: resumo.pacientesAtivosPorEspecialidade
+                    .map(
+                      (item) => cardContagemResumo(
+                        item.key,
+                        item.value,
+                        item.key == especialidadeNaoInformadaDashboard
+                            ? Colors.orange
+                            : NatusApp.marsala,
+                        Icons.health_and_safety_outlined,
+                        onTap: () => abrirPacientesDoDashboard(
+                          FiltroDashboardPacientes(
+                            tipo: TipoFiltroDashboardPacientes.especialidade,
+                            titulo: 'Pacientes de ${item.key}',
+                            valor: item.key,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+          ]),
+          if (alertas.isNotEmpty)
+            blocoDashboard('Central de atenção', [
+              NatusCardsResumoLayout(children: alertas),
+            ]),
           blocoDashboard('Pacientes ativos por plano', [
-            if (gestantesPorPlano.isEmpty)
+            if (pacientesPorPlano.isEmpty)
               Text(
                 'Nenhum paciente ativo com plano identificado no momento.',
                 style: TextStyle(color: NatusApp.textoSuave),
               )
             else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final larguraDisponivel = constraints.maxWidth;
-                  final isMobile =
-                      larguraDisponivel < 700 ||
-                      NatusBreakpoints.isPhone(context);
-                  const espacamento = 8.0;
-                  final totalItens = gestantesPorPlano.length;
-                  final colunas = isMobile
-                      ? (larguraDisponivel >= 540 ? 3 : 2).clamp(1, totalItens)
-                      : totalItens <= 7
-                      ? totalItens
-                      : ((larguraDisponivel + espacamento) /
-                                (104.0 + espacamento))
-                            .floor()
-                            .clamp(1, 7);
-                  final larguraCard =
-                      (larguraDisponivel - ((colunas - 1) * espacamento)) /
-                      colunas;
-
-                  return Wrap(
-                    spacing: espacamento,
-                    runSpacing: espacamento,
-                    children: gestantesPorPlano
-                        .map(
-                          (item) => SizedBox(
-                            width: larguraCard,
-                            child: cardContagemResumo(
-                              item.key,
-                              item.value,
-                              NatusApp.olivaSeco,
-                              Icons.workspace_premium_rounded,
-                              onTap: () =>
-                                  abrirGestantesPorPlanoDashboard(item.key),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
+              NatusCardsResumoLayout(
+                children: pacientesPorPlano
+                    .map(
+                      (item) => cardContagemResumo(
+                        item.key,
+                        item.value,
+                        NatusApp.olivaSeco,
+                        Icons.workspace_premium_rounded,
+                        onTap: () => abrirGestantesPorPlanoDashboard(item.key),
+                      ),
+                    )
+                    .toList(),
               ),
           ]),
-
-          const SizedBox(height: 12),
-
-          if (usuarioEhAdmin())
-            blocoDashboard('Central de alertas', [
-              NatusAlertasDashboardLayout(
-                children: [
-                  cardAlertaDashboard(
-                    'DPP próxima',
-                    '${contarGestantesProximasDpp()} paciente(s)',
-                    Icons.warning,
-                    Colors.orange,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.dppProxima,
-                        titulo: 'DPP próxima',
+          blocoDashboard('Distribuição por profissional responsável', [
+            if (resumo.pacientesAtivosPorProfissional.isEmpty)
+              Text(
+                'Nenhum profissional está vinculado aos pacientes ativos.',
+                style: TextStyle(color: NatusApp.textoSuave),
+              )
+            else
+              NatusCardsResumoLayout(
+                children: resumo.pacientesAtivosPorProfissional
+                    .map(
+                      (item) => cardContagemResumo(
+                        item.key,
+                        item.value,
+                        NatusApp.vinho,
+                        Icons.badge_outlined,
+                        onTap: () => abrirPacientesDoDashboard(
+                          FiltroDashboardPacientes(
+                            tipo: TipoFiltroDashboardPacientes
+                                .profissionalResponsavel,
+                            titulo: 'Pacientes de ${item.key}',
+                            valor: item.key,
+                          ),
+                        ),
                       ),
-                    ),
+                    )
+                    .toList(),
+              ),
+          ]),
+          if (usuarioEhAdmin())
+            blocoDashboard('Financeiro do período', [
+              NatusCardsResumoLayout(
+                children: [
+                  cardFinanceiroResumo(
+                    'Recebido',
+                    recebidoMes,
+                    Colors.green,
+                    Icons.check_circle_rounded,
+                    onTap: () => abrirFinanceiroDoDashboard('Pagos'),
                   ),
-                  cardAlertaDashboard(
-                    'Parcelas atrasadas',
-                    '${contarParcelasAtrasadasMesSelecionado()} parcela(s)',
-                    Icons.warning_amber,
+                  cardFinanceiroResumo(
+                    'A receber',
+                    aReceberMes,
+                    Colors.orange,
+                    Icons.pending_actions_rounded,
+                    onTap: () => abrirFinanceiroDoDashboard('Pendentes'),
+                  ),
+                  cardFinanceiroResumo(
+                    'Atrasado',
+                    atrasadoMes,
                     Colors.red,
+                    Icons.warning_rounded,
+                    onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
+                  ),
+                  cardFinanceiroResumo(
+                    'Inadimplência',
+                    calcularPercentualInadimplencia(),
+                    corInadimplencia(calcularPercentualInadimplencia()),
+                    Icons.percent_rounded,
+                    sufixo: '%',
                     onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
                   ),
                 ],
               ),
             ]),
-
-          const SizedBox(height: 12),
-
-          blocoDashboard('Status dos pacientes', [
-            Row(
-              children: [
-                Expanded(
-                  child: cardContagemResumo(
-                    'Em acompanhamento',
-                    contarGestantesPorStatusNoPeriodoDpp('Gestante'),
-                    Colors.pink,
-                    Icons.pregnant_woman,
-                    onTap: () => abrirPacientesDoDashboard(
-                      FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.statusNoPeriodo,
-                        titulo:
-                            'Pacientes em ${nomeMes(mesSelecionado)} / $anoSelecionado',
-                        valor: 'Gestante',
-                        mes: mesSelecionado,
-                        ano: anoSelecionado,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Puérperas',
-                    contarGestantesPorStatusNoPeriodoDpp('Puérpera'),
-                    Colors.orange,
-                    Icons.child_friendly,
-                    onTap: () => abrirPacientesDoDashboard(
-                      FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.statusNoPeriodo,
-                        titulo:
-                            'Puérperas em ${nomeMes(mesSelecionado)} / $anoSelecionado',
-                        valor: 'Puérpera',
-                        mes: mesSelecionado,
-                        ano: anoSelecionado,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Encerradas',
-                    contarEncerradasOuHistoricoNoPeriodoDpp(),
-                    Colors.green,
-                    Icons.check_circle,
-                    onTap: () => abrirPacientesDoDashboard(
-                      FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes
-                            .encerradasOuHistoricoNoPeriodo,
-                        titulo:
-                            'Encerradas em ${nomeMes(mesSelecionado)} / $anoSelecionado',
-                        mes: mesSelecionado,
-                        ano: anoSelecionado,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ]),
-
-          const SizedBox(height: 12),
-
-          blocoDashboard('Risco gestacional (pré-natal)', [
-            Row(
-              children: [
-                Expanded(
-                  child: cardContagemResumo(
-                    'Risco habitual',
-                    riscoDados['Habitual'] ?? 0,
-                    Colors.green,
-                    Icons.verified_user,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.riscoGestacional,
-                        titulo: 'Risco habitual',
-                        valor: 'Habitual',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Risco intermediário',
-                    riscoDados['Intermediário'] ?? 0,
-                    Colors.orange,
-                    Icons.report_problem,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.riscoGestacional,
-                        titulo: 'Risco intermediário',
-                        valor: 'Intermediário',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Alto risco',
-                    riscoDados['Alto Risco'] ?? 0,
-                    Colors.red,
-                    Icons.emergency,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.riscoGestacional,
-                        titulo: 'Alto risco',
-                        valor: 'Alto Risco',
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ]),
-
-          const SizedBox(height: 12),
-
-          blocoDashboard('Diabetes gestacional', [
-            Row(
-              children: [
-                Expanded(
-                  child: cardContagemResumo(
-                    'Com diabetes gestacional',
-                    dgDados['Sim'] ?? 0,
-                    Colors.red,
-                    Icons.bloodtype,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.diabetesGestacional,
-                        titulo: 'Com diabetes gestacional',
-                        valor: 'Sim',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Sem diabetes gestacional',
-                    dgDados['Não'] ?? 0,
-                    Colors.green,
-                    Icons.health_and_safety,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.diabetesGestacional,
-                        titulo: 'Sem diabetes gestacional',
-                        valor: 'Não',
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ]),
-
-          const SizedBox(height: 12),
-
-          blocoDashboard('Nascimentos', [
-            Row(
-              children: [
-                Expanded(
-                  child: cardContagemResumo(
-                    'Nascimentos do mês',
-                    contarBebesNoPeriodoSelecionado(),
-                    Colors.purple,
-                    Icons.baby_changing_station,
-                    onTap: () => abrirPacientesDoDashboard(
-                      FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.nascimentoNoPeriodo,
-                        titulo:
-                            'Nascimentos em ${nomeMes(mesSelecionado)} / $anoSelecionado',
-                        mes: mesSelecionado,
-                        ano: anoSelecionado,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Bebês $anoSelecionado',
-                    contarBebesPorAno(anoSelecionado.toString()),
-                    NatusApp.vinho,
-                    Icons.child_care,
-                    onTap: () => abrirPacientesDoDashboard(
-                      FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.nascimentoNoAno,
-                        titulo: 'Bebês $anoSelecionado',
-                        ano: anoSelecionado,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: cardContagemResumo(
-                    'Bebês 2025',
-                    contarBebesPorAno('2025'),
-                    Colors.grey,
-                    Icons.child_care,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.nascimentoNoAno,
-                        titulo: 'Bebês 2025',
-                        ano: 2025,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ]),
-
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              blocoDashboard('Crescimento anual', [
-                Text(
-                  ' ',
-                  style: TextStyle(fontSize: 12.5, color: NatusApp.textoSuave),
-                ),
-
-                const SizedBox(height: 16),
-
-                NatusPainelCrescimento(crescimentoNascimentos),
-
-                const SizedBox(height: 22),
-
-                NatusGraficoLinhaCrescimento(
-                  anos: crescimentoNascimentos.anosDisponiveis,
-                  dadosPorAno: {
-                    for (final ano in crescimentoNascimentos.anosDisponiveis)
-                      ano: contarBebesPorMes(ano.toString()),
-                  },
-                ),
-              ]),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          if (usuarioEhAdmin())
-            blocoDashboard('Financeiro do mês', [
-              Row(
-                children: [
-                  Expanded(
-                    child: cardFinanceiroResumo(
-                      'Recebido',
-                      recebidoMes,
-                      Colors.green,
-                      Icons.check_circle,
-                      onTap: () => abrirFinanceiroDoDashboard('Pagos'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: cardFinanceiroResumo(
-                      'A receber',
-                      aReceberMes,
-                      Colors.orange,
-                      Icons.pending_actions,
-                      onTap: () => abrirFinanceiroDoDashboard('Pendentes'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: cardFinanceiroResumo(
-                      'Atrasado',
-                      atrasadoMes,
-                      Colors.red,
-                      Icons.warning,
-                      onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: cardFinanceiroResumo(
-                      'Inadimplência',
-                      calcularPercentualInadimplencia(),
-                      corInadimplencia(calcularPercentualInadimplencia()),
-                      Icons.percent,
-                      sufixo: '%',
-                      onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
-                    ),
-                  ),
-                ],
-              ),
-            ]),
-
-          const SizedBox(height: 8),
-
-          blocoDashboard('Amamentação', [
-            NatusGraficoAmamentacao(amamentacaoDados),
-          ]),
-
-          blocoDashboard('Partos e cesáreas', [
-            Row(
-              children: [
-                Expanded(
-                  child: cardContagemResumo(
-                    'Partos normais',
-                    (viaNascimentoDados['Vaginal'] ?? 0) +
-                        (viaNascimentoDados['Parto'] ?? 0) +
-                        (viaNascimentoDados['Normal'] ?? 0),
-                    Colors.green,
-                    Icons.favorite,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.viaNascimento,
-                        titulo: 'Partos normais',
-                        valor: 'Normal',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: cardContagemResumo(
-                    'Cesáreas',
-                    (viaNascimentoDados['Cesárea'] ?? 0) +
-                        (viaNascimentoDados['Cesareana'] ?? 0),
-                    Colors.orange,
-                    Icons.local_hospital,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.viaNascimento,
-                        titulo: 'Cesáreas',
-                        valor: 'Cesárea',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: cardContagemResumo(
-                    'Não informado',
-                    viaNascimentoDados['Não informado'] ?? 0,
-                    Colors.grey,
-                    Icons.help_outline,
-                    onTap: () => abrirPacientesDoDashboard(
-                      const FiltroDashboardPacientes(
-                        tipo: TipoFiltroDashboardPacientes.viaNascimento,
-                        titulo: 'Partos sem via informada',
-                        valor: 'Não informado',
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ]),
-
-          if (widget.tipoUsuario == 'obstetra')
-            NatusBlocoMetricasObstetra(metricasDoObstetraLogado())
-          else
-            blocoDashboard('Top 5 obstetras — base total de pacientes', [
-              podiumTop5(
-                dados: () {
-                  final lista = metricasDeTodosObstetras()
-                      .map((m) => MapEntry(m.nomeObstetra, m.totalCarteira))
-                      .where((e) => e.value > 0)
-                      .toList();
-
-                  lista.sort((a, b) => b.value.compareTo(a.value));
-
-                  return lista.take(5).toList();
-                }(),
-                icone: Icons.medical_services,
-                cor: NatusApp.vinho,
-                rotulo: 'pacientes',
-                onSelecionar: (nome) => abrirPacientesDoDashboard(
-                  FiltroDashboardPacientes(
-                    tipo: TipoFiltroDashboardPacientes.obstetra,
-                    titulo: 'Pacientes de $nome',
-                    valor: nome,
-                  ),
-                ),
-              ),
-            ]),
-
-          blocoDashboard('Top 5 maternidades mais atendidas', [
-            podiumTop5(
-              dados: top5Maternidades(),
-              icone: Icons.local_hospital,
-              cor: NatusApp.marsalaSuave,
-              onSelecionar: (nome) => abrirPacientesDoDashboard(
-                FiltroDashboardPacientes(
-                  tipo: TipoFiltroDashboardPacientes.maternidade,
-                  titulo: 'Pacientes em $nome',
-                  valor: nome,
-                ),
+          if (resumo.possuiModuloObstetricia)
+            NatusModuloDashboard(
+              titulo: 'Módulo Obstetrícia',
+              subtitulo:
+                  '${resumo.pacientesObstetricia} paciente(s) com acompanhamento obstétrico',
+              icone: Icons.pregnant_woman_rounded,
+              inicialmenteAberto: widget.tipoUsuario == 'obstetra',
+              children: _conteudoModuloObstetriciaDashboard(
+                pacientesObstetricia,
               ),
             ),
-          ]),
         ],
       ),
     );
+  }
+
+  List<Widget> _conteudoModuloObstetriciaDashboard(
+    List<Map<String, String>> pacientesObstetricia,
+  ) {
+    final amamentacaoDados = contarAmamentacao(pacientesObstetricia);
+    final crescimentoNascimentos = calcularCrescimentoNascimentos(
+      pacientesObstetricia,
+    );
+    final viaNascimentoDados = contarViaNascimento(pacientesObstetricia);
+    final riscoDados = contarRiscoGestacional(pacientesObstetricia);
+    final dgDados = contarDiabetesGestacional(pacientesObstetricia);
+    final maternidades =
+        mregras
+            .contarPacientesPorMaternidade(pacientesObstetricia)
+            .entries
+            .toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+
+    return [
+      blocoDashboard('Status do acompanhamento obstétrico', [
+        NatusCardsResumoLayout(
+          children: [
+            cardContagemResumo(
+              'DPP no período',
+              contarGestantesPorStatusNoPeriodoDpp(
+                'Gestante',
+                pacientesObstetricia,
+              ),
+              NatusApp.marsala,
+              Icons.event_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.statusNoPeriodo,
+                  titulo: 'DPP em ${nomeMes(mesSelecionado)} / $anoSelecionado',
+                  valor: 'Gestante',
+                  mes: mesSelecionado,
+                  ano: anoSelecionado,
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Pós-parto no período',
+              contarGestantesPorStatusNoPeriodoDpp(
+                'Puérpera',
+                pacientesObstetricia,
+              ),
+              Colors.orange,
+              Icons.child_friendly_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.statusNoPeriodo,
+                  titulo:
+                      'Pós-parto em ${nomeMes(mesSelecionado)} / $anoSelecionado',
+                  valor: 'Puérpera',
+                  mes: mesSelecionado,
+                  ano: anoSelecionado,
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Encerrados no período',
+              contarEncerradasOuHistoricoNoPeriodoDpp(pacientesObstetricia),
+              Colors.green,
+              Icons.task_alt_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes
+                      .encerradasOuHistoricoNoPeriodo,
+                  titulo: 'Acompanhamentos obstétricos encerrados no período',
+                  mes: mesSelecionado,
+                  ano: anoSelecionado,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ]),
+      blocoDashboard('Risco gestacional (pré-natal)', [
+        NatusCardsResumoLayout(
+          children: [
+            cardContagemResumo(
+              'Risco habitual',
+              riscoDados['Habitual'] ?? 0,
+              Colors.green,
+              Icons.verified_user_outlined,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.riscoGestacional,
+                  titulo: 'Risco habitual',
+                  valor: 'Habitual',
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Risco intermediário',
+              riscoDados['Intermediário'] ?? 0,
+              Colors.orange,
+              Icons.report_problem_outlined,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.riscoGestacional,
+                  titulo: 'Risco intermediário',
+                  valor: 'Intermediário',
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Alto risco',
+              riscoDados['Alto Risco'] ?? 0,
+              Colors.red,
+              Icons.emergency_outlined,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.riscoGestacional,
+                  titulo: 'Alto risco',
+                  valor: 'Alto Risco',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ]),
+      blocoDashboard('Diabetes gestacional', [
+        NatusCardsResumoLayout(
+          children: [
+            cardContagemResumo(
+              'Com diabetes gestacional',
+              dgDados['Sim'] ?? 0,
+              Colors.red,
+              Icons.bloodtype_outlined,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.diabetesGestacional,
+                  titulo: 'Com diabetes gestacional',
+                  valor: 'Sim',
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Sem diabetes gestacional',
+              dgDados['Não'] ?? 0,
+              Colors.green,
+              Icons.health_and_safety_outlined,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.diabetesGestacional,
+                  titulo: 'Sem diabetes gestacional',
+                  valor: 'Não',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ]),
+      blocoDashboard('Nascimentos', [
+        NatusCardsResumoLayout(
+          children: [
+            cardContagemResumo(
+              'Nascimentos no período',
+              contarBebesNoPeriodoSelecionado(pacientesObstetricia),
+              Colors.purple,
+              Icons.baby_changing_station_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.nascimentoNoPeriodo,
+                  titulo:
+                      'Nascimentos em ${nomeMes(mesSelecionado)} / $anoSelecionado',
+                  mes: mesSelecionado,
+                  ano: anoSelecionado,
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Nascimentos em $anoSelecionado',
+              contarBebesPorAno(
+                anoSelecionado.toString(),
+                pacientesObstetricia,
+              ),
+              NatusApp.vinho,
+              Icons.child_care_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.nascimentoNoAno,
+                  titulo: 'Nascimentos em $anoSelecionado',
+                  ano: anoSelecionado,
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Total histórico',
+              crescimentoNascimentos.totalHistorico,
+              Colors.blueGrey,
+              Icons.history_rounded,
+            ),
+          ],
+        ),
+      ]),
+      blocoDashboard('Crescimento anual de nascimentos', [
+        NatusPainelCrescimento(crescimentoNascimentos),
+        const SizedBox(height: 22),
+        NatusGraficoLinhaCrescimento(
+          anos: crescimentoNascimentos.anosDisponiveis,
+          dadosPorAno: {
+            for (final ano in crescimentoNascimentos.anosDisponiveis)
+              ano: contarBebesPorMes(ano.toString(), pacientesObstetricia),
+          },
+        ),
+      ]),
+      blocoDashboard('Amamentação', [
+        NatusGraficoAmamentacao(amamentacaoDados),
+      ]),
+      blocoDashboard('Partos e cesáreas', [
+        NatusCardsResumoLayout(
+          children: [
+            cardContagemResumo(
+              'Partos normais',
+              viaNascimentoDados['Normal'] ?? 0,
+              Colors.green,
+              Icons.favorite_outline_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.viaNascimento,
+                  titulo: 'Partos normais',
+                  valor: 'Normal',
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Cesáreas',
+              viaNascimentoDados['Cesárea'] ?? 0,
+              Colors.orange,
+              Icons.local_hospital_outlined,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.viaNascimento,
+                  titulo: 'Cesáreas',
+                  valor: 'Cesárea',
+                ),
+              ),
+            ),
+            cardContagemResumo(
+              'Via não informada',
+              viaNascimentoDados['Não informado'] ?? 0,
+              Colors.grey,
+              Icons.help_outline_rounded,
+              onTap: () => abrirPacientesDoDashboard(
+                const FiltroDashboardPacientes(
+                  tipo: TipoFiltroDashboardPacientes.viaNascimento,
+                  titulo: 'Partos sem via informada',
+                  valor: 'Não informado',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ]),
+      if (widget.tipoUsuario == 'obstetra')
+        NatusBlocoMetricasObstetra(
+          metricasDoObstetraLogado(pacientesObstetricia),
+        )
+      else
+        blocoDashboard('Top 5 obstetras', [
+          podiumTop5(
+            dados: () {
+              final lista = metricasDeTodosObstetras(pacientesObstetricia)
+                  .map(
+                    (metrica) =>
+                        MapEntry(metrica.nomeObstetra, metrica.totalCarteira),
+                  )
+                  .where((item) => item.value > 0)
+                  .toList();
+              lista.sort((a, b) => b.value.compareTo(a.value));
+              return lista.take(5).toList();
+            }(),
+            icone: Icons.medical_services_outlined,
+            cor: NatusApp.vinho,
+            rotulo: 'pacientes',
+            onSelecionar: (nome) => abrirPacientesDoDashboard(
+              FiltroDashboardPacientes(
+                tipo: TipoFiltroDashboardPacientes.obstetra,
+                titulo: 'Pacientes de $nome',
+                valor: nome,
+              ),
+            ),
+          ),
+        ]),
+      blocoDashboard('Top 5 maternidades mais atendidas', [
+        podiumTop5(
+          dados: maternidades.take(5).toList(),
+          icone: Icons.local_hospital_outlined,
+          cor: NatusApp.marsalaSuave,
+          onSelecionar: (nome) => abrirPacientesDoDashboard(
+            FiltroDashboardPacientes(
+              tipo: TipoFiltroDashboardPacientes.maternidade,
+              titulo: 'Pacientes em $nome',
+              valor: nome,
+            ),
+          ),
+        ),
+      ]),
+    ];
   }
 
   void mostrarMensagem(String texto) {

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../pacientes/paciente_identidade.dart';
 import '../saas/tenant_access_scope.dart';
 
 class TenantFirestoreService {
@@ -61,29 +62,33 @@ class TenantFirestoreService {
   }
 
   Map<String, dynamic> prepararCriacao(Map<String, dynamic> dados) {
+    final dadosCanonicos = identidadePacienteCanonica(dados);
     return _escopo.aplicarEmDados({
-      ...dados,
+      ...dadosCanonicos,
       'criadoPorUid': _escopo.uidUsuario,
     });
   }
 
   Map<String, String> prepararCriacaoTexto(Map<String, String> dados) {
+    final dadosCanonicos = identidadePacienteCanonicaTexto(dados);
     return _escopo.aplicarEmTextos({
-      ...dados,
+      ...dadosCanonicos,
       'criadoPorUid': _escopo.uidUsuario,
     });
   }
 
   Map<String, dynamic> prepararAtualizacao(Map<String, dynamic> dados) {
+    final dadosCanonicos = identidadePacienteCanonica(dados);
     return <String, dynamic>{
-      ..._escopo.protegerAtualizacao(dados),
+      ..._escopo.protegerAtualizacao(dadosCanonicos),
       'atualizadoPorUid': _escopo.uidUsuario,
     };
   }
 
   Map<String, String> prepararAtualizacaoTexto(Map<String, String> dados) {
+    final dadosCanonicos = identidadePacienteCanonicaTexto(dados);
     return <String, String>{
-      ..._escopo.protegerAtualizacaoTexto(dados),
+      ..._escopo.protegerAtualizacaoTexto(dadosCanonicos),
       'atualizadoPorUid': _escopo.uidUsuario,
     };
   }

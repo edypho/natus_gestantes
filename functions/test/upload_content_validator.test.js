@@ -27,6 +27,14 @@ test("validador reconhece assinaturas aceitas e rejeita MIME forjado", () => {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       "image/png",
   ), true);
+  assert.equal(uploadContentMatchesMime(
+      Buffer.from([0, 0, 0, 24, ...Buffer.from("ftypheic")]),
+      "image/heic",
+  ), true);
+  assert.equal(uploadContentMatchesMime(
+      Buffer.from([0, 0, 0, 24, ...Buffer.from("ftypheic")]),
+      "video/mp4",
+  ), false);
 });
 
 test("inspeciona somente objetos da hierarquia canonica", () => {
@@ -62,6 +70,17 @@ test("metadados canonicos vinculam tenant, paciente, autor e tamanho", () => {
     metadata: {...valid.metadata, clinicaId: "clinic-b"},
   }), false);
   assert.equal(canonicalUploadMetadataValid({...valid, size: "0"}), false);
+  const receipt = {
+    ...valid,
+    name: "clinicas/clinic-a/financeiro/pacientes/patient-a/" +
+      "comprovantes/receipt.heic",
+    contentType: "image/heic",
+  };
+  assert.equal(canonicalUploadMetadataValid(receipt), true);
+  assert.equal(canonicalUploadMetadataValid({
+    ...receipt,
+    metadata: {...receipt.metadata, pacienteId: "patient-b"},
+  }), false);
 });
 
 test("remove geracao invalida sem expor nome ou conteudo", async () => {

@@ -475,6 +475,7 @@ function canonicalDocumentId(definition, sourceDocumentId, options = {}) {
 }
 
 const GLOBAL_ROOT_COLLECTIONS = Object.freeze([
+  "_backendRateLimits",
   "admins",
   "checkoutRateLimits",
   "integracoes",

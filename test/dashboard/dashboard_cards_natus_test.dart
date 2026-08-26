@@ -46,6 +46,22 @@ Widget _appCardsResumo() {
   );
 }
 
+Widget _appFiltroPeriodo() {
+  return MaterialApp(
+    home: Scaffold(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: NatusFiltroPeriodoDashboard(
+          mes: 8,
+          ano: 2026,
+          onMesAlterado: (_) {},
+          onAnoAlterado: (_) {},
+        ),
+      ),
+    ),
+  );
+}
+
 void main() {
   testWidgets('alertas ficam empilhados no iPhone', (tester) async {
     tester.view.devicePixelRatio = 1;
@@ -111,6 +127,39 @@ void main() {
     expect(primeiro.width, 185);
     expect(segundo.left, greaterThan(primeiro.right));
     expect(segundo.top, primeiro.top);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resumos permanecem lado a lado em 1024x900', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1024, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(_appCardsResumo());
+
+    final primeiro = tester.getRect(find.byKey(const Key('primeiro')));
+    final segundo = tester.getRect(find.byKey(const Key('segundo')));
+
+    expect(segundo.left, greaterThan(primeiro.right));
+    expect(segundo.top, primeiro.top);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('filtro de período quebra linha sem overflow em tela estreita', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 568);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(_appFiltroPeriodo());
+
+    final mes = tester.getRect(find.byKey(const Key('dashboard-filtro-mes')));
+    final ano = tester.getRect(find.byKey(const Key('dashboard-filtro-ano')));
+
+    expect(ano.top, greaterThan(mes.bottom));
     expect(tester.takeException(), isNull);
   });
 }

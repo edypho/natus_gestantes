@@ -12,6 +12,18 @@ class ItemMenuInferior {
   String get rotulo => NatusTermos.rotuloMenu(titulo);
 }
 
+abstract final class NatusMenuInferiorMetricas {
+  static const double alturaBarra = 72;
+  static const double diametroCoracao = 74;
+  static const double margemRecorte = 10;
+  static const double margemHorizontal = 10;
+  static const double margemInferior = 10;
+  static const double espacoCentral = diametroCoracao + (margemRecorte * 2);
+
+  static const Key chaveBarra = ValueKey<String>('natus-bottom-bar');
+  static const Key chaveCoracao = ValueKey<String>('natus-bottom-bar-heart');
+}
+
 class _NatusRoundedNotchedShape extends NotchedShape {
   static const _borderRadius = BorderRadius.all(Radius.circular(28));
 
@@ -123,30 +135,59 @@ class NatusMenuInferiorCoracao extends StatelessWidget {
     );
   }
 
+  Widget _grupoAbas(
+    List<ItemMenuInferior> itens, {
+    double recuoEsquerdo = 0,
+    double recuoDireito = 0,
+  }) {
+    return Expanded(
+      child: Padding(
+        padding: EdgeInsets.only(left: recuoEsquerdo, right: recuoDireito),
+        child: Row(children: [_botaoAba(itens[0]), _botaoAba(itens[1])]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final areaSegura = MediaQuery.viewPaddingOf(context);
+    final recuoEsquerdo =
+        areaSegura.left > NatusMenuInferiorMetricas.margemHorizontal
+        ? areaSegura.left - NatusMenuInferiorMetricas.margemHorizontal
+        : 0.0;
+    final recuoDireito =
+        areaSegura.right > NatusMenuInferiorMetricas.margemHorizontal
+        ? areaSegura.right - NatusMenuInferiorMetricas.margemHorizontal
+        : 0.0;
+
     return SafeArea(
       top: false,
+      left: false,
+      right: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        padding: const EdgeInsets.fromLTRB(
+          NatusMenuInferiorMetricas.margemHorizontal,
+          0,
+          NatusMenuInferiorMetricas.margemHorizontal,
+          NatusMenuInferiorMetricas.margemInferior,
+        ),
         child: BottomAppBar(
+          key: NatusMenuInferiorMetricas.chaveBarra,
           color: NatusApp.offWhite.withValues(alpha: 0.94),
           surfaceTintColor: Colors.transparent,
           shadowColor: Colors.black.withValues(alpha: 0.18),
           shape: const _NatusRoundedNotchedShape(),
-          notchMargin: 10,
+          notchMargin: NatusMenuInferiorMetricas.margemRecorte,
           elevation: 8,
           clipBehavior: Clip.antiAlias,
           padding: EdgeInsets.zero,
           child: SizedBox(
-            height: 72,
+            height: NatusMenuInferiorMetricas.alturaBarra,
             child: Row(
               children: [
-                _botaoAba(itensEsquerda[0]),
-                _botaoAba(itensEsquerda[1]),
-                const SizedBox(width: 94),
-                _botaoAba(itensDireita[0]),
-                _botaoAba(itensDireita[1]),
+                _grupoAbas(itensEsquerda, recuoEsquerdo: recuoEsquerdo),
+                const SizedBox(width: NatusMenuInferiorMetricas.espacoCentral),
+                _grupoAbas(itensDireita, recuoDireito: recuoDireito),
               ],
             ),
           ),
@@ -175,8 +216,9 @@ class NatusFabCoracao extends StatelessWidget {
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       child: Container(
-        width: 74,
-        height: 74,
+        key: NatusMenuInferiorMetricas.chaveCoracao,
+        width: NatusMenuInferiorMetricas.diametroCoracao,
+        height: NatusMenuInferiorMetricas.diametroCoracao,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           boxShadow: [

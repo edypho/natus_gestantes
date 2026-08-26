@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../shared/natus_app.dart';
 import '../shared/natus_logo.dart';
 import '../shared/natus_premium_visual.dart';
+import 'autenticacao_mensagens.dart';
 
 class TelaLogin extends StatefulWidget {
   const TelaLogin({super.key});
@@ -19,10 +20,12 @@ class _TelaLoginState extends State<TelaLogin> {
   final senhaController = TextEditingController();
 
   bool carregando = false;
+  bool recuperandoSenha = false;
+
+  bool get processando => carregando || recuperandoSenha;
 
   Future<void> fazerLogin() async {
-    if (emailController.text.trim().isEmpty ||
-        senhaController.text.trim().isEmpty) {
+    if (emailController.text.trim().isEmpty || senhaController.text.isEmpty) {
       mostrarErro('Informe e-mail e senha.');
       return;
     }
@@ -32,18 +35,50 @@ class _TelaLoginState extends State<TelaLogin> {
     });
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: emailController.text.trim(),
-        password: senhaController.text.trim(),
+      final credenciais = credenciaisAcesso(
+        email: emailController.text,
+        senha: senhaController.text,
       );
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: credenciais.email,
+        password: credenciais.senha,
+      );
+    } on FirebaseAuthException catch (e) {
+      mostrarErro(mensagemErroLogin(e.code));
     } catch (_) {
-      mostrarErro('E-mail ou senha inválidos.');
+      mostrarErro(mensagemErroLogin(''));
     } finally {
       senhaController.clear();
       if (mounted) {
         setState(() {
           carregando = false;
         });
+      }
+    }
+  }
+
+  Future<void> solicitarRedefinicaoSenha() async {
+    final email = normalizarEmailAcesso(emailController.text);
+    if (!emailAcessoValido(email)) {
+      mostrarErro('Informe um e-mail válido para redefinir a senha.');
+      return;
+    }
+
+    setState(() => recuperandoSenha = true);
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      mostrarErro(mensagemRedefinicaoSenhaSolicitada);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      mostrarErro(mensagemErroRedefinicaoSenha(e.code));
+    } catch (_) {
+      if (!mounted) return;
+      mostrarErro(mensagemErroRedefinicaoSenha(''));
+    } finally {
+      if (mounted) {
+        setState(() => recuperandoSenha = false);
       }
     }
   }
@@ -62,7 +97,7 @@ class _TelaLoginState extends State<TelaLogin> {
   }
 
   Future<void> baixarAplicativoAndroid() async {
-    final url = Uri.base.resolve('/downloads/natus-android-1.1.0.apk');
+    final url = Uri.base.resolve('/downloads/natus-android-1.1.2.apk');
     final abriuDownload = await launchUrl(url, webOnlyWindowName: '_self');
     if (!abriuDownload && mounted) {
       mostrarErro('Não foi possível iniciar o download do aplicativo.');
@@ -113,7 +148,7 @@ class _TelaLoginState extends State<TelaLogin> {
                           const SizedBox(height: 24),
 
                           Text(
-                            'Bem Vinda',
+                            'Boas-vindas',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -168,13 +203,32 @@ class _TelaLoginState extends State<TelaLogin> {
                             ),
                           ),
 
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 8),
+
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: processando
+                                  ? null
+                                  : solicitarRedefinicaoSenha,
+                              child: recuperandoSenha
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Esqueci minha senha'),
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
 
                           SizedBox(
                             width: double.infinity,
                             height: 48,
                             child: ElevatedButton(
-                              onPressed: carregando ? null : fazerLogin,
+                              onPressed: processando ? null : fazerLogin,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: NatusApp.marsala,
                                 foregroundColor: Theme.of(

@@ -1018,6 +1018,18 @@ test("colecao raiz desconhecida bloqueia a liberacao", () => {
   assert.equal(report.summary.releaseReady, false);
 });
 
+test("colecao tecnica de rate limit e reconhecida pelo auditor", () => {
+  const fixture = validFixture();
+  fixture.rootCollections.push("_backendRateLimits");
+
+  const report = analyzeMultiTenantData(fixture);
+  const finding = report.findings.find((item) =>
+    item.code === "UNKNOWN_COLLECTION" &&
+    item.location.collection === "_backendRateLimits");
+
+  assert.equal(finding, undefined);
+});
+
 test("subcolecao canonica desconhecida bloqueia a liberacao", () => {
   const fixture = validFixture();
   fixture.unknownCanonicalCollections = [

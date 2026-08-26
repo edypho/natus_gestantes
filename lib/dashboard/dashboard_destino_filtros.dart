@@ -1,8 +1,17 @@
 import '../gestantes/gestantes_regras.dart' as gregras;
 import '../gestantes/indicadores_gestacionais.dart' as indicadores;
 import '../gestantes/maternidades_regras.dart' as maternidades;
+import 'dashboard_clinica_resumo.dart';
 
 enum TipoFiltroDashboardPacientes {
+  todos,
+  ativos,
+  encerrados,
+  cadastroNoPeriodo,
+  especialidade,
+  profissionalResponsavel,
+  semEspecialidade,
+  semProfissional,
   dppProxima,
   statusNoPeriodo,
   encerradasOuHistoricoNoPeriodo,
@@ -32,31 +41,68 @@ class FiltroDashboardPacientes {
 
   bool corresponde(Map<String, String> paciente) {
     switch (tipo) {
+      case TipoFiltroDashboardPacientes.todos:
+        return true;
+
+      case TipoFiltroDashboardPacientes.ativos:
+        return gregras.gestanteEstaAtiva(paciente);
+
+      case TipoFiltroDashboardPacientes.encerrados:
+        return !gregras.gestanteEstaAtiva(paciente);
+
+      case TipoFiltroDashboardPacientes.cadastroNoPeriodo:
+        final data = dataCadastroPacienteDashboard(paciente);
+        return data != null && data.month == mes && data.year == ano;
+
+      case TipoFiltroDashboardPacientes.especialidade:
+        return especialidadePacienteDashboard(paciente).toLowerCase() ==
+            (valor ?? '').trim().toLowerCase();
+
+      case TipoFiltroDashboardPacientes.profissionalResponsavel:
+        return gregras.normalizarNomeProfissional(
+              profissionalResponsavelDashboard(paciente),
+            ) ==
+            gregras.normalizarNomeProfissional(valor ?? '');
+
+      case TipoFiltroDashboardPacientes.semEspecialidade:
+        return gregras.gestanteEstaAtiva(paciente) &&
+            especialidadePacienteDashboard(paciente) ==
+                especialidadeNaoInformadaDashboard;
+
+      case TipoFiltroDashboardPacientes.semProfissional:
+        return gregras.gestanteEstaAtiva(paciente) &&
+            profissionalResponsavelDashboard(paciente).isEmpty;
+
       case TipoFiltroDashboardPacientes.dppProxima:
-        final status = paciente['statusGestante'] ?? 'Gestante';
-        return status == 'Gestante' &&
+        final status = paciente['statusGestante'] ?? '';
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            status == 'Gestante' &&
             gregras.diasParaDpp(paciente['dpp'] ?? '') <= 14;
 
       case TipoFiltroDashboardPacientes.statusNoPeriodo:
-        return (paciente['statusGestante'] ?? 'Gestante') == valor &&
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            (paciente['statusGestante'] ?? '') == valor &&
             _dppNoPeriodo(paciente);
 
       case TipoFiltroDashboardPacientes.encerradasOuHistoricoNoPeriodo:
         final status = (paciente['statusGestante'] ?? 'Gestante').trim();
-        return (status == 'Encerrada' ||
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            (status == 'Encerrada' ||
                 status == 'Historico' ||
                 status == 'Histórico') &&
             _dppNoPeriodo(paciente);
 
       case TipoFiltroDashboardPacientes.riscoGestacional:
-        return gregras.gestanteEstaAtiva(paciente) &&
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            gregras.gestanteEstaAtiva(paciente) &&
             indicadores.normalizarRiscoGestacional(
                   paciente['riscoGestacional'],
                 ) ==
                 valor;
 
       case TipoFiltroDashboardPacientes.diabetesGestacional:
-        return gregras.gestanteEstaAtiva(paciente) &&
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            gregras.gestanteEstaAtiva(paciente) &&
             indicadores.normalizarDiabetesGestacional(
                   paciente['diabetesGestacional'],
                 ) ==
@@ -64,24 +110,32 @@ class FiltroDashboardPacientes {
 
       case TipoFiltroDashboardPacientes.nascimentoNoPeriodo:
         final data = _dataNascimento(paciente);
-        return data != null && data.month == mes && data.year == ano;
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            data != null &&
+            data.month == mes &&
+            data.year == ano;
 
       case TipoFiltroDashboardPacientes.nascimentoNoAno:
         final data = _dataNascimento(paciente);
-        return data != null && data.year == ano;
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            data != null &&
+            data.year == ano;
 
       case TipoFiltroDashboardPacientes.viaNascimento:
-        return _normalizarViaNascimento(paciente['viaNascimento']) == valor;
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            _normalizarViaNascimento(paciente['viaNascimento']) == valor;
 
       case TipoFiltroDashboardPacientes.obstetra:
-        return gregras.gestantePertenceAoObstetra(paciente, valor ?? '');
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            gregras.gestantePertenceAoObstetra(paciente, valor ?? '');
 
       case TipoFiltroDashboardPacientes.maternidade:
         final maternidadePaciente = maternidades.normalizarMaternidade(
           paciente['hospitalGestante'],
         );
         final maternidadeFiltro = maternidades.normalizarMaternidade(valor);
-        return maternidadePaciente != null &&
+        return pacienteTemModuloObstetriciaDashboard(paciente) &&
+            maternidadePaciente != null &&
             maternidadeFiltro != null &&
             maternidadePaciente.chave == maternidadeFiltro.chave;
     }

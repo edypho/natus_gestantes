@@ -102,6 +102,15 @@ async function seedFirestore(adminContext) {
       uidGestante: "patient-a",
       gestanteUid: "patient-a",
     }],
+    ["patient-legacy", "clinic-a", "paciente", {
+      pacienteId: "patient-legacy-record",
+      gestanteId: "patient-legacy-record",
+      idGestante: "patient-legacy-record",
+      uidPaciente: "patient-legacy",
+      pacienteUid: "patient-legacy",
+      uidGestante: "patient-legacy",
+      gestanteUid: "patient-legacy",
+    }],
     ["admin-b", "clinic-b", "admin", {}],
     ["patient-b", "clinic-b", "paciente", {
       pacienteId: "patient-b-record",
@@ -160,6 +169,98 @@ async function seedFirestore(adminContext) {
         }),
     ),
     setDoc(
+        doc(db, "gestantes/patient-a-record"),
+        tenantData("clinic-a", {
+          pacienteId: "patient-a-record",
+          gestanteId: "patient-a-record",
+          idGestante: "patient-a-record",
+          uidPaciente: "patient-a",
+          pacienteUid: "patient-a",
+          uidGestante: "patient-a",
+          gestanteUid: "patient-a",
+          nomeGestante: "Paciente A",
+        }),
+    ),
+    setDoc(
+        doc(db, "gestantes/patient-b-record"),
+        tenantData("clinic-b", {
+          pacienteId: "patient-b-record",
+          gestanteId: "patient-b-record",
+          idGestante: "patient-b-record",
+          uidPaciente: "patient-b",
+          pacienteUid: "patient-b",
+          uidGestante: "patient-b",
+          gestanteUid: "patient-b",
+          nomeGestante: "Paciente B",
+        }),
+    ),
+    setDoc(
+        doc(db, "gestantes/patient-legacy-record"),
+        tenantData("clinic-a", {
+          pacienteId: "patient-legacy-record",
+          uidPaciente: "patient-legacy",
+          nomeGestante: "Paciente legado",
+        }),
+    ),
+    setDoc(
+        doc(db, "contracoes/contraction-a"),
+        tenantData("clinic-a", {
+          pacienteId: "patient-a-record",
+          gestanteId: "patient-a-record",
+          idGestante: "patient-a-record",
+          uidPaciente: "patient-a",
+          pacienteUid: "patient-a",
+          uidGestante: "patient-a",
+          gestanteUid: "patient-a",
+          data: "2026-08-17T00:20:00.000Z",
+        }),
+    ),
+    setDoc(
+        doc(db, "contracoes/contraction-b"),
+        tenantData("clinic-b", {
+          pacienteId: "patient-b-record",
+          gestanteId: "patient-b-record",
+          idGestante: "patient-b-record",
+          uidPaciente: "patient-b",
+          pacienteUid: "patient-b",
+          uidGestante: "patient-b",
+          gestanteUid: "patient-b",
+          data: "2026-08-17T00:21:00.000Z",
+        }),
+    ),
+    setDoc(
+        doc(db, "parcelas/installment-a"),
+        tenantData("clinic-a", {
+          pacienteId: "patient-a-record",
+          gestanteId: "patient-a-record",
+          uidGestante: "patient-a",
+          valor: "100.00",
+          status: "Pendente",
+        }),
+    ),
+    setDoc(
+        doc(db, "parcelas/installment-b"),
+        tenantData("clinic-b", {
+          pacienteId: "patient-b-record",
+          gestanteId: "patient-b-record",
+          uidGestante: "patient-b",
+          valor: "200.00",
+          status: "Pendente",
+        }),
+    ),
+    setDoc(
+        doc(db, "documentos/conflicting-patient-aliases"),
+        tenantData("clinic-a", {
+          pacienteId: "patient-a-record",
+          gestanteId: "patient-a-record",
+          uidPaciente: "patient-a",
+          pacienteUid: "patient-b",
+          uidGestante: "patient-a",
+          gestanteUid: "patient-a",
+          nome: "Documento inconsistente",
+        }),
+    ),
+    setDoc(
         doc(db, "clinicas/clinic-a/pacientes/patient-a-record/exames/exam-a"),
         tenantData("clinic-a", {
           pacienteId: "patient-a-record",
@@ -211,6 +312,8 @@ async function seedFirestore(adminContext) {
               new Date("2026-08-10T12:00:00.000Z"),
           ),
           pacienteId: "patient-a-record",
+          gestanteId: "patient-a-record",
+          gestanteUid: "patient-a",
         }),
     ),
     setDoc(
@@ -220,6 +323,8 @@ async function seedFirestore(adminContext) {
               new Date("2026-08-10T13:00:00.000Z"),
           ),
           pacienteId: "patient-b-record",
+          gestanteId: "patient-b-record",
+          gestanteUid: "patient-b",
         }),
     ),
     setDoc(doc(db, "_backendRateLimits/private"), {count: 1}),
@@ -338,6 +443,61 @@ test("bloqueia leitura cruzada e prontuario para paciente", {
   await assertFails(getDoc(doc(
       adminDb,
       "clinicas/clinic-b/pacientes/patient-b-record/exames/exam-b",
+  )));
+});
+
+test("portal consulta paciente e contracoes legadas apos migracao", {
+  skip: !RUN_EMULATOR_TESTS,
+}, async () => {
+  const patientDb = context("patient-a").firestore();
+  const ownPatient = query(
+      collection(patientDb, "gestantes"),
+      where("adminDonoId", "==", "clinic-a"),
+      where("clinicaId", "==", "clinic-a"),
+      where("uidGestante", "==", "patient-a"),
+  );
+  const ownContractions = query(
+      collection(patientDb, "contracoes"),
+      where("adminDonoId", "==", "clinic-a"),
+      where("clinicaId", "==", "clinic-a"),
+      where("uidGestante", "==", "patient-a"),
+  );
+  const ownAgenda = query(
+      collection(patientDb, "agenda"),
+      where("adminDonoId", "==", "clinic-a"),
+      where("clinicaId", "==", "clinic-a"),
+      where("gestanteUid", "==", "patient-a"),
+  );
+  const ownInstallments = query(
+      collection(patientDb, "parcelas"),
+      where("adminDonoId", "==", "clinic-a"),
+      where("clinicaId", "==", "clinic-a"),
+      where("uidGestante", "==", "patient-a"),
+  );
+  const otherTenant = query(
+      collection(patientDb, "gestantes"),
+      where("adminDonoId", "==", "clinic-b"),
+      where("clinicaId", "==", "clinic-b"),
+      where("uidGestante", "==", "patient-b"),
+  );
+  const patientSnapshot = await assertSucceeds(getDocs(ownPatient));
+  const contractionsSnapshot = await assertSucceeds(getDocs(ownContractions));
+  const agendaSnapshot = await assertSucceeds(getDocs(ownAgenda));
+  const installmentsSnapshot = await assertSucceeds(getDocs(ownInstallments));
+  assert.equal(patientSnapshot.size, 1);
+  assert.equal(contractionsSnapshot.size, 1);
+  assert.equal(agendaSnapshot.size, 1);
+  assert.equal(installmentsSnapshot.size, 1);
+  await assertFails(getDocs(otherTenant));
+});
+
+test("nega leitura direta com aliases UID de pacientes conflitantes", {
+  skip: !RUN_EMULATOR_TESTS,
+}, async () => {
+  const patientDb = context("patient-a").firestore();
+  await assertFails(getDoc(doc(
+      patientDb,
+      "documentos/conflicting-patient-aliases",
   )));
 });
 
@@ -515,6 +675,16 @@ test("admin grava paciente e financeiro no mesmo lote sem cruzar tenant", {
   await assertFails(crossTenantBatch.commit());
 });
 
+test("paciente le cadastro legado pelo caminho canonico do perfil", {
+  skip: !RUN_EMULATOR_TESTS,
+}, async () => {
+  const patientDb = context("patient-legacy").firestore();
+  await assertSucceeds(getDoc(
+      doc(patientDb, "gestantes/patient-legacy-record"),
+  ));
+  await assertFails(getDoc(doc(patientDb, "gestantes/patient-a-record")));
+});
+
 test("Storage exige autenticacao, tenant e metadados canonicos", {
   skip: !RUN_EMULATOR_TESTS,
 }, async () => {
@@ -526,6 +696,7 @@ test("Storage exige autenticacao, tenant e metadados canonicos", {
       .unauthenticatedContext()
       .storage(BUCKET_URL);
   const patientStorage = context("patient-a").storage(BUCKET_URL);
+  const adminStorage = context("admin-a").storage(BUCKET_URL);
 
   await assertFails(getBytes(ref(anonymousStorage, ownPath), 32));
   await assertSucceeds(getBytes(ref(patientStorage, ownPath), 32));
@@ -577,6 +748,35 @@ test("Storage exige autenticacao, tenant e metadados canonicos", {
           adminDonoId: "clinic-a",
           pacienteId: "patient-a-record",
           enviadoPorUid: "patient-a",
+        },
+      },
+  ));
+  const receiptPath = "clinicas/clinic-a/financeiro/pacientes/" +
+    "patient-a-record/comprovantes/receipt.heic";
+  const heic = new Uint8Array([
+    0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70,
+    0x68, 0x65, 0x69, 0x63,
+  ]);
+  await assertSucceeds(uploadBytes(ref(adminStorage, receiptPath), heic, {
+    contentType: "image/heic",
+    customMetadata: {
+      clinicaId: "clinic-a",
+      adminDonoId: "clinic-a",
+      pacienteId: "patient-a-record",
+      enviadoPorUid: "admin-a",
+    },
+  }));
+  await assertSucceeds(getBytes(ref(patientStorage, receiptPath), 32));
+  await assertFails(uploadBytes(
+      ref(adminStorage, receiptPath.replace("patient-a-record", "patient-b")),
+      heic,
+      {
+        contentType: "image/heic",
+        customMetadata: {
+          clinicaId: "clinic-a",
+          adminDonoId: "clinic-a",
+          pacienteId: "patient-a-record",
+          enviadoPorUid: "admin-a",
         },
       },
   ));

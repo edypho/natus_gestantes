@@ -15,6 +15,11 @@ function asciiAt(bytes, offset, length) {
   return bytes.subarray(offset, offset + length).toString("ascii");
 }
 
+function isoFileHasBrand(bytes, allowedBrands) {
+  return asciiAt(bytes, 4, 4) === "ftyp" &&
+    allowedBrands.has(asciiAt(bytes, 8, 4).toLowerCase());
+}
+
 function uploadContentMatchesMime(bytes, contentType) {
   switch (String(contentType || "").toLowerCase()) {
     case "application/pdf":
@@ -28,8 +33,15 @@ function uploadContentMatchesMime(bytes, contentType) {
     case "image/webp":
       return asciiAt(bytes, 0, 4) === "RIFF" &&
         asciiAt(bytes, 8, 4) === "WEBP";
+    case "image/heic":
+    case "image/heif":
+      return isoFileHasBrand(bytes, new Set([
+        "heic", "heix", "hevc", "hevx", "mif1", "msf1",
+      ]));
     case "video/mp4":
-      return asciiAt(bytes, 4, 4) === "ftyp";
+      return isoFileHasBrand(bytes, new Set([
+        "isom", "iso2", "mp41", "mp42", "avc1", "dash", "3gp4",
+      ]));
     default:
       return false;
   }
@@ -61,8 +73,11 @@ function canonicalUploadMetadataValid(objectData) {
     return false;
   }
 
-  if (parts[2] === "pacientes") {
-    const patientId = parts[3] || "";
+  const patientId = parts[2] === "pacientes" ?
+    (parts[3] || "") :
+    (parts[2] === "financeiro" && parts[3] === "pacientes" ?
+      (parts[4] || "") : "");
+  if (patientId) {
     return patientId && String(metadata.pacienteId || "") === patientId;
   }
 

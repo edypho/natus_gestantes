@@ -796,7 +796,7 @@ class _AgendaPageState extends State<AgendaPage> {
                 'id': pacienteDoEventoId,
                 'uidGestante': evento.gestanteUid,
                 'nomeGestante': evento.gestanteNome.isEmpty
-                    ? 'Paciente vinculada'
+                    ? 'Paciente vinculado'
                     : evento.gestanteNome,
               },
       );

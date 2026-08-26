@@ -15,12 +15,15 @@ const _itensDireita = <ItemMenuInferior>[
 Widget _appDeTeste({
   required ValueChanged<String> onSelecionarTela,
   double escalaTexto = 1,
+  EdgeInsets areaSegura = EdgeInsets.zero,
 }) {
   return MaterialApp(
     builder: (context, child) => MediaQuery(
-      data: MediaQuery.of(
-        context,
-      ).copyWith(textScaler: TextScaler.linear(escalaTexto)),
+      data: MediaQuery.of(context).copyWith(
+        textScaler: TextScaler.linear(escalaTexto),
+        padding: areaSegura,
+        viewPadding: areaSegura,
+      ),
       child: child!,
     ),
     home: Scaffold(
@@ -47,6 +50,31 @@ void _configurarTelaIPhone(WidgetTester tester) {
   tester.view.physicalSize = const Size(320, 568);
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
+}
+
+void _configurarTela(WidgetTester tester, {required Size tamanho}) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = tamanho;
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPhysicalSize);
+}
+
+void _esperarCentroPerfeito(WidgetTester tester) {
+  final barra = tester.getRect(
+    find.byKey(NatusMenuInferiorMetricas.chaveBarra),
+  );
+  final coracao = tester.getRect(
+    find.byKey(NatusMenuInferiorMetricas.chaveCoracao),
+  );
+  final centroViewport = tester.view.physicalSize.width / 2;
+
+  expect(barra.center.dx, closeTo(centroViewport, 0.01));
+  expect(coracao.center.dx, closeTo(centroViewport, 0.01));
+  expect(barra.center.dx, closeTo(coracao.center.dx, 0.01));
+  expect(
+    tester.getSize(find.byKey(NatusMenuInferiorMetricas.chaveCoracao)),
+    const Size.square(NatusMenuInferiorMetricas.diametroCoracao),
+  );
 }
 
 void main() {
@@ -109,5 +137,63 @@ void main() {
 
     expect(find.byType(NatusMenuInferiorCoracao), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Android mantém barra, recorte e coração no mesmo centro', (
+    tester,
+  ) async {
+    _configurarTela(tester, tamanho: const Size(360, 800));
+    await tester.pumpWidget(
+      _appDeTeste(
+        onSelecionarTela: (_) {},
+        areaSegura: const EdgeInsets.only(bottom: 24),
+      ),
+    );
+
+    _esperarCentroPerfeito(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('iOS não desloca a barra com safe area lateral assimétrica', (
+    tester,
+  ) async {
+    _configurarTela(tester, tamanho: const Size(390, 844));
+    await tester.pumpWidget(
+      _appDeTeste(
+        onSelecionarTela: (_) {},
+        areaSegura: const EdgeInsets.only(left: 47, bottom: 34),
+      ),
+    );
+
+    _esperarCentroPerfeito(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Web responsiva preserva o centro matemático da viewport', (
+    tester,
+  ) async {
+    _configurarTela(tester, tamanho: const Size(412, 915));
+    await tester.pumpWidget(_appDeTeste(onSelecionarTela: (_) {}));
+
+    _esperarCentroPerfeito(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('referência visual mantém o coração encaixado no recorte', (
+    tester,
+  ) async {
+    _configurarTela(tester, tamanho: const Size(390, 844));
+    await tester.pumpWidget(
+      _appDeTeste(
+        onSelecionarTela: (_) {},
+        areaSegura: const EdgeInsets.only(bottom: 34),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(Scaffold),
+      matchesGoldenFile('goldens/menu_inferior_coracao_390x844.png'),
+    );
   });
 }

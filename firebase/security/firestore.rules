@@ -1,16 +1,11 @@
 rules_version = '2';
 
-// STAGED ONLY — este arquivo não está referenciado por firebase.json.
-// Antes da ativação, conclua o roteiro em docs/MIGRACAO_MULTI_CLINICA.md.
+// Regras ativas via firebase.json. Toda alteração deve passar pela auditoria
+// multi-tenant e pelos testes no Emulator antes da publicação.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null;
-    }
-
-    function userExists() {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
     }
 
     function userData() {
@@ -174,6 +169,39 @@ service cloud.firestore {
         tenantActive(tenantId);
     }
 
+    // Compatibilidade de leitura para o portal após a migração multi-tenant.
+    //
+    // A validação completa de vínculos continua nas escritas e na auditoria da
+    // migração. Em consultas legadas ela ultrapassa o limite de expressões do
+    // Firestore Rules antes de avaliar os documentos. Este gate recebe o campo
+    // exato usado pela consulta do portal e exige: usuário paciente ativo,
+    // clínica ativa, os dois aliases do tenant iguais e nenhum alias UID
+    // conflitante. Assim a consulta permanece isolada por clínica e paciente
+    // sem transformar as regras em filtro.
+    function migratedPatientCanReadLegacy(data, queriedPatientUid) {
+      let currentUser = userData();
+      let tenantId = currentUser.get('clinicaId', '');
+      return signedIn() &&
+        currentUser.get('status', '') == 'ativo' &&
+        currentUser.get('tipo', '') in ['paciente', 'gestante'] &&
+        currentUser.get('tipoUsuario', '') in ['paciente', 'gestante'] &&
+        tenantId is string &&
+        tenantId.size() > 0 &&
+        currentUser.get('adminDonoId', '') == tenantId &&
+        data.get('adminDonoId', '') == tenantId &&
+        data.get('clinicaId', '') == tenantId &&
+        queriedPatientUid == request.auth.uid &&
+        (data.get('uidPaciente', '') == '' ||
+          data.get('uidPaciente', '') == request.auth.uid) &&
+        (data.get('pacienteUid', '') == '' ||
+          data.get('pacienteUid', '') == request.auth.uid) &&
+        (data.get('uidGestante', '') == '' ||
+          data.get('uidGestante', '') == request.auth.uid) &&
+        (data.get('gestanteUid', '') == '' ||
+          data.get('gestanteUid', '') == request.auth.uid) &&
+        tenantActive(tenantId);
+    }
+
     function isTenantMember(tenantId) {
       return signedIn() && hasTenantRole(userData(), tenantId, [
         'admin',
@@ -196,11 +224,6 @@ service cloud.firestore {
         'enfermeira',
         'obstetra'
       ]);
-    }
-
-    function isTenantPatient(tenantId) {
-      return signedIn() &&
-        isPatientTenantUser(userData(), tenantId);
     }
 
     function optionalPatientAliasIsString(data, field) {
@@ -228,18 +251,6 @@ service cloud.firestore {
         patientAliasPairCompatible(data, 'pacienteUid', 'uidGestante') &&
         patientAliasPairCompatible(data, 'pacienteUid', 'gestanteUid') &&
         patientAliasPairCompatible(data, 'uidGestante', 'gestanteUid');
-    }
-
-    function currentPatientUidAliasesValid(data) {
-      return patientUidAliasesCompatible(data) &&
-        (data.get('uidPaciente', '') == '' ||
-          data.get('uidPaciente', '') == request.auth.uid) &&
-        (data.get('pacienteUid', '') == '' ||
-          data.get('pacienteUid', '') == request.auth.uid) &&
-        (data.get('uidGestante', '') == '' ||
-          data.get('uidGestante', '') == request.auth.uid) &&
-        (data.get('gestanteUid', '') == '' ||
-          data.get('gestanteUid', '') == request.auth.uid);
     }
 
     function patientIdMatchesUser(data, patientId) {
@@ -273,10 +284,6 @@ service cloud.firestore {
         (pacienteUid == '' || pacienteUid == request.auth.uid) &&
         (uidGestante == '' || uidGestante == request.auth.uid) &&
         (gestanteUid == '' || gestanteUid == request.auth.uid);
-    }
-
-    function currentPatientIdMatches(patientId) {
-      return signedIn() && patientIdMatchesUser(userData(), patientId);
     }
 
     function patientUidMatches(data) {
@@ -485,12 +492,12 @@ service cloud.firestore {
         (isSuperAdmin() || isTenantAdmin(tenantId));
     }
 
-    function legacyClinicalRead(data) {
+    function legacyClinicalRead(data, queriedPatientUid) {
       let tenantId = tenantIdFrom(data);
       return isSuperAdmin() ||
         (belongsToTenantDualRead(data, tenantId) &&
           (isTenantStaff(tenantId) ||
-            legacyRecordOwnedByCurrentPatient(data)));
+            migratedPatientCanReadLegacy(data, queriedPatientUid)));
     }
 
     function legacyClinicalCreate(data, collectionName) {
@@ -514,12 +521,12 @@ service cloud.firestore {
         (isSuperAdmin() || isTenantAdmin(tenantId));
     }
 
-    function legacyFinancialRead(data) {
+    function legacyFinancialRead(data, queriedPatientUid) {
       let tenantId = tenantIdFrom(data);
       return isSuperAdmin() ||
         (belongsToTenantDualRead(data, tenantId) &&
           (isTenantAdmin(tenantId) ||
-            legacyRecordOwnedByCurrentPatient(data)));
+            migratedPatientCanReadLegacy(data, queriedPatientUid)));
     }
 
     function legacyFinancialWrite(oldData, newData, isCreate) {
@@ -898,10 +905,24 @@ service cloud.firestore {
     // create/update já precisa gravar os dois campos iguais.
     // ------------------------------------------------------------------
     match /gestantes/{patientId} {
-      allow read: if isSuperAdmin() ||
+      allow get: if isSuperAdmin() ||
         (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
           (isTenantStaff(tenantIdFrom(resource.data)) ||
-            legacyRecordOwnedByCurrentPatient(resource.data)));
+            patientPathOwnedByCurrentUser(
+              tenantIdFrom(resource.data),
+              patientId
+            ) ||
+            migratedPatientCanReadLegacy(
+              resource.data,
+              resource.data.get('uidGestante', '')
+            )));
+      allow list: if isSuperAdmin() ||
+        (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
+          (isTenantStaff(tenantIdFrom(resource.data)) ||
+            migratedPatientCanReadLegacy(
+              resource.data,
+              resource.data.get('uidGestante', '')
+            )));
       allow create: if canonicalTenantWrite(
           request.resource.data,
           tenantIdFrom(request.resource.data)
@@ -949,7 +970,10 @@ service cloud.firestore {
       allow read: if isSuperAdmin() ||
         (belongsToTenantDualRead(resource.data, tenantIdFrom(resource.data)) &&
           (isTenantStaff(tenantIdFrom(resource.data)) ||
-            legacyRecordOwnedByCurrentPatient(resource.data)));
+            migratedPatientCanReadLegacy(
+              resource.data,
+              resource.data.get('uidGestante', '')
+            )));
       allow create: if canonicalTenantWrite(
           request.resource.data,
           tenantIdFrom(request.resource.data)
@@ -1038,7 +1062,10 @@ service cloud.firestore {
     }
 
     match /atendimentos/{documentId} {
-      allow read: if legacyClinicalRead(resource.data);
+      allow read: if legacyClinicalRead(
+        resource.data,
+        resource.data.get('uidGestante', '')
+      );
       allow create: if legacyClinicalCreate(
         request.resource.data,
         'atendimentos'
@@ -1051,7 +1078,10 @@ service cloud.firestore {
     }
 
     match /exames/{documentId} {
-      allow read: if legacyClinicalRead(resource.data);
+      allow read: if legacyClinicalRead(
+        resource.data,
+        resource.data.get('uidGestante', '')
+      );
       allow create: if legacyClinicalCreate(
         request.resource.data,
         'exames'
@@ -1064,7 +1094,10 @@ service cloud.firestore {
     }
 
     match /documentos/{documentId} {
-      allow read: if legacyClinicalRead(resource.data);
+      allow read: if legacyClinicalRead(
+        resource.data,
+        resource.data.get('uidGestante', '')
+      );
       allow create: if legacyClinicalCreate(
         request.resource.data,
         'documentos'
@@ -1077,7 +1110,10 @@ service cloud.firestore {
     }
 
     match /agenda/{documentId} {
-      allow read: if legacyClinicalRead(resource.data);
+      allow read: if legacyClinicalRead(
+        resource.data,
+        resource.data.get('gestanteUid', '')
+      );
       allow create: if legacyClinicalCreate(
         request.resource.data,
         'agenda'
@@ -1112,7 +1148,10 @@ service cloud.firestore {
     }
 
     match /parcelas/{documentId} {
-      allow read: if legacyFinancialRead(resource.data);
+      allow read: if legacyFinancialRead(
+        resource.data,
+        resource.data.get('uidGestante', '')
+      );
       allow create: if legacyFinancialWrite({}, request.resource.data, true);
       allow update: if legacyFinancialWrite(
         resource.data,
@@ -1123,7 +1162,10 @@ service cloud.firestore {
     }
 
     match /parcelasFinanceiras/{documentId} {
-      allow read: if legacyFinancialRead(resource.data);
+      allow read: if legacyFinancialRead(
+        resource.data,
+        resource.data.get('uidGestante', '')
+      );
       allow create: if legacyFinancialWrite({}, request.resource.data, true);
       allow update: if legacyFinancialWrite(
         resource.data,

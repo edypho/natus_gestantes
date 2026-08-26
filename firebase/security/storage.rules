@@ -1,7 +1,7 @@
 rules_version = '2';
 
-// STAGED ONLY — este arquivo não está referenciado por firebase.json.
-// Antes da ativação, conclua o roteiro em docs/MIGRACAO_MULTI_CLINICA.md.
+// Regras ativas via firebase.json. Toda alteração deve passar pelos testes no
+// Emulator antes da publicação.
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
@@ -263,7 +263,9 @@ service firebase.storage {
           'application/pdf',
           'image/jpeg',
           'image/png',
-          'image/webp'
+          'image/webp',
+          'image/heic',
+          'image/heif'
         ];
     }
 
@@ -273,7 +275,9 @@ service firebase.storage {
         request.resource.contentType in [
           'image/jpeg',
           'image/png',
-          'image/webp'
+          'image/webp',
+          'image/heic',
+          'image/heif'
         ];
     }
 
@@ -284,7 +288,9 @@ service firebase.storage {
               'application/pdf',
               'image/jpeg',
               'image/png',
-              'image/webp'
+              'image/webp',
+              'image/heic',
+              'image/heif'
             ]) ||
           (request.resource.size < 250 * 1024 * 1024 &&
             request.resource.contentType == 'video/mp4'));

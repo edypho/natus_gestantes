@@ -1,4 +1,5 @@
 import '../core/firebase_globals.dart';
+import '../pacientes/paciente_identidade.dart';
 import '../saas/tenant_access_scope.dart';
 import '../services/tenant_firestore_service.dart';
 
@@ -22,7 +23,11 @@ Future<List<Map<String, String>>> buscarContracoes(
       .get();
 
   return resultado.docs.map((doc) {
-    final dados = doc.data();
+    final dados = identidadePacienteCanonica(
+      doc.data(),
+      pacienteId: escopo.ehPaciente ? escopo.pacienteId : null,
+      pacienteUid: escopo.ehPaciente ? escopo.uidUsuario : null,
+    );
 
     return dados.map((chave, valor) {
       return MapEntry(chave, valor.toString());
@@ -132,19 +137,43 @@ Future<List<Map<String, String>>> buscarAtendimentos(
 Future<List<Map<String, String>>> buscarGestantes(
   TenantAccessScope escopo,
 ) async {
-  final resultado = await _tenant(
-    escopo,
-  ).consultaDoPaciente('gestantes', campoUid: 'uidGestante').get();
+  if (escopo.ehPaciente) {
+    final documento = await firestore
+        .collection('gestantes')
+        .doc(escopo.pacienteId)
+        .get();
+    if (!documento.exists) return const <Map<String, String>>[];
+
+    final dadosOriginais = documento.data() ?? <String, dynamic>{};
+    if (!escopo.pertenceAoTenant(dadosOriginais)) {
+      throw const TenantScopeException(
+        'Cadastro de paciente fora da clínica autenticada.',
+      );
+    }
+
+    final dados = identidadePacienteCanonica(
+      dadosOriginais,
+      pacienteId: documento.id,
+      pacienteUid: escopo.uidUsuario,
+    );
+    final mapa = dados.map(
+      (chave, valor) => MapEntry(chave, (valor ?? '').toString()),
+    );
+    mapa['id'] = documento.id;
+    return <Map<String, String>>[mapa];
+  }
+
+  final resultado = await _tenant(escopo).consultaClinica('gestantes').get();
 
   return resultado.docs.map((doc) {
-    final dados = doc.data();
+    final dados = identidadePacienteCanonica(doc.data(), pacienteId: doc.id);
 
     final mapa = dados.map((chave, valor) {
       return MapEntry(chave, valor.toString());
     });
 
     mapa['id'] = doc.id;
-    mapa['uidGestante'] = dados['uidGestante'] ?? '';
+    mapa['uidGestante'] = (dados['uidGestante'] ?? '').toString();
 
     return mapa;
   }).toList();

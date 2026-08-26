@@ -1,3 +1,5 @@
+import '../../../pacientes/paciente_identidade.dart';
+
 class ContratoRegistro {
   final String id;
   final String pacienteId;
@@ -24,7 +26,7 @@ class ContratoRegistro {
   factory ContratoRegistro.fromMap(Map<String, dynamic> map) {
     return ContratoRegistro(
       id: map['id']?.toString() ?? '',
-      pacienteId: map['pacienteId']?.toString() ?? '',
+      pacienteId: pacienteIdDoRegistro(map),
       templateKey: map['templateKey']?.toString() ?? '',
       status: map['status']?.toString() ?? 'pendente',
       zapsignDocumentId: map['zapsignDocumentId']?.toString() ?? '',
@@ -38,9 +40,8 @@ class ContratoRegistro {
   }
 
   Map<String, dynamic> toMap() {
-    return {
+    return identidadePacienteCanonica({
       'id': id,
-      'pacienteId': pacienteId,
       'templateKey': templateKey,
       'status': status,
       'zapsignDocumentId': zapsignDocumentId,
@@ -48,6 +49,6 @@ class ContratoRegistro {
       'criadoEm': criadoEm,
       'atualizadoEm': atualizadoEm,
       'payload': payload,
-    };
+    }, pacienteId: pacienteId);
   }
 }

@@ -46,7 +46,12 @@
       text-align: center;
       transition: opacity 180ms ease;
     }
-    #natus-loading img { width: 88px; height: 88px; margin: auto; }
+    #natus-loading img {
+      width: auto;
+      height: 120px;
+      margin: auto;
+      object-fit: contain;
+    }
     #natus-loading::after {
       content: "";
       width: 32px;
@@ -67,7 +72,7 @@
 </head>
 <body>
   <div id="natus-loading" role="status" aria-live="polite">
-    <img src="icons/Icon-192.png" alt="Natus">
+    <img src="assets/assets/logo.png" alt="Natus">
     <span>Preparando seu ambiente Natus…</span>
   </div>
   <script>

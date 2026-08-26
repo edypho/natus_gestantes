@@ -22,9 +22,30 @@ bool arquivoPossuiAssinaturaPermitida(Uint8List bytes, String mimeType) {
     ]),
     'image/webp' =>
       _textoAscii(bytes, 0, 4) == 'RIFF' && _textoAscii(bytes, 8, 4) == 'WEBP',
-    'video/mp4' => _textoAscii(bytes, 4, 4) == 'ftyp',
+    'image/heic' || 'image/heif' => _arquivoIsoComMarca(bytes, const {
+      'heic',
+      'heix',
+      'hevc',
+      'hevx',
+      'mif1',
+      'msf1',
+    }),
+    'video/mp4' => _arquivoIsoComMarca(bytes, const {
+      'isom',
+      'iso2',
+      'mp41',
+      'mp42',
+      'avc1',
+      'dash',
+      '3gp4',
+    }),
     _ => false,
   };
+}
+
+bool _arquivoIsoComMarca(Uint8List bytes, Set<String> marcasPermitidas) {
+  return _textoAscii(bytes, 4, 4) == 'ftyp' &&
+      marcasPermitidas.contains(_textoAscii(bytes, 8, 4).toLowerCase());
 }
 
 bool _comecaCom(Uint8List bytes, List<int> assinatura) {

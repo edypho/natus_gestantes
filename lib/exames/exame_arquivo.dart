@@ -1,3 +1,5 @@
+import '../pacientes/paciente_identidade.dart';
+
 enum OrigemExameArquivo { exames, documentos }
 
 class ExameArquivo {
@@ -25,8 +27,8 @@ class ExameArquivo {
     return ExameArquivo(
       id: id,
       origem: OrigemExameArquivo.exames,
-      idGestante: _primeiroValor(dados, ['idGestante', 'gestanteId']),
-      uidGestante: _primeiroValor(dados, ['uidGestante', 'gestanteUid']),
+      idGestante: pacienteIdDoRegistro(dados),
+      uidGestante: pacienteUidDoRegistro(dados),
       nomeGestante: _primeiroValor(dados, ['nomeGestante', 'gestante']),
       nomeArquivo: _primeiroValor(dados, [
         'nomeArquivo',
@@ -42,8 +44,8 @@ class ExameArquivo {
     return ExameArquivo(
       id: dados['id'] ?? '',
       origem: OrigemExameArquivo.documentos,
-      idGestante: dados['idGestante'] ?? dados['gestanteId'] ?? '',
-      uidGestante: dados['uidGestante'] ?? dados['gestanteUid'] ?? '',
+      idGestante: pacienteIdDoRegistro(dados),
+      uidGestante: pacienteUidDoRegistro(dados),
       nomeGestante: dados['nomeGestante'] ?? dados['gestante'] ?? '',
       nomeArquivo:
           dados['arquivoNome'] ??
@@ -65,7 +67,7 @@ class ExameArquivo {
       return true;
     }
 
-    final uid = (gestante['uidGestante'] ?? '').trim();
+    final uid = pacienteUidDoRegistro(gestante);
     if (uidGestante.isNotEmpty && uid.isNotEmpty && uidGestante == uid) {
       return true;
     }

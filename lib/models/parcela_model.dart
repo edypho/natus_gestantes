@@ -1,3 +1,5 @@
+import '../pacientes/paciente_identidade.dart';
+
 class ParcelaModel {
   final String id;
   final String gestanteId;
@@ -20,7 +22,7 @@ class ParcelaModel {
 
     return ParcelaModel(
       id: map['id']?.toString() ?? '',
-      gestanteId: map['gestanteId']?.toString() ?? '',
+      gestanteId: pacienteIdDoRegistro(map),
       nomeGestante: map['nomeGestante']?.toString() ?? '',
       valor: valorBruto is num ? valorBruto.toDouble() : 0,
       status: map['status']?.toString() ?? 'Pendente',
@@ -29,13 +31,12 @@ class ParcelaModel {
   }
 
   Map<String, dynamic> toMap() {
-    return {
+    return identidadePacienteCanonica({
       'id': id,
-      'gestanteId': gestanteId,
       'nomeGestante': nomeGestante,
       'valor': valor,
       'status': status,
       'adminDonoId': adminDonoId,
-    };
+    }, pacienteId: gestanteId);
   }
 }
