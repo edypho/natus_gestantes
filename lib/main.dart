@@ -421,13 +421,25 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       );
     }
 
+    final uidAutenticado = FirebaseAuth.instance.currentUser?.uid.trim() ?? '';
+    if (uidAutenticado.isEmpty) {
+      throw const TenantScopeException(
+        'Sua sessão não está disponível para enviar arquivos.',
+      );
+    }
+    if (widget.escopoTenant.uidUsuario.trim() != uidAutenticado) {
+      throw const TenantScopeException(
+        'A sessão mudou. Atualize a página antes de enviar o arquivo.',
+      );
+    }
+
     final idPaciente = (pacienteId ?? '').trim();
     return SettableMetadata(
       contentType: contentType,
       customMetadata: <String, String>{
         'clinicaId': tenantId,
         'adminDonoId': tenantId,
-        'enviadoPorUid': widget.escopoTenant.uidUsuario,
+        'enviadoPorUid': uidAutenticado,
         if (idPaciente.isNotEmpty) 'pacienteId': idPaciente,
       },
     );
@@ -16796,6 +16808,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     var dialogoAberto = false;
     Reference? referenciaEnviada;
     var uploadConcluido = false;
+    var etapaUpload = 'preparacao';
 
     try {
       if (arquivo.bytes == null) {
@@ -16815,18 +16828,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         );
       }
 
-      // No Web, uma sessão mantida aberta por muito tempo pode deixar o SDK
-      // de Storage com um token anterior ao estado atual do Firebase Auth.
-      // A renovação antes do upload evita a falha genérica `Error` do JS SDK.
-      await usuarioUpload.getIdToken(true);
-
       final nomeArquivo =
           '${DateTime.now().millisecondsSinceEpoch}_${nomeArquivoSeguro(arquivo.name)}';
 
+      etapaUpload = 'escopo';
       final ref = storage.ref().child(
         tenantFirestore.caminhoStorage('$pasta/$nomeArquivo'),
       );
       referenciaEnviada = ref;
+
+      etapaUpload = 'validacao';
+      final metadados = metadadosUpload(arquivo, pacienteId: pacienteId);
 
       controller.preparing(
         titulo: 'Enviando arquivo',
@@ -16839,13 +16851,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         mensagem: 'Enviando ${arquivo.name}...',
       );
 
-      // Aguardar diretamente a tarefa é mais estável no Flutter Web. A
-      // assinatura paralela de snapshotEvents podia emitir um Error do JS sem
-      // passar pelo FirebaseException aguardado pela operação principal.
-      await ref.putData(
-        arquivo.bytes!,
-        metadadosUpload(arquivo, pacienteId: pacienteId),
-      );
+      // O SDK de Storage administra o token da sessão. Forçar uma renovação
+      // imediatamente antes do putData criava uma segunda operação assíncrona
+      // no Web e podia interromper o envio antes da primeira requisição.
+      etapaUpload = 'envio';
+      await ref.putData(arquivo.bytes!, metadados);
       uploadConcluido = true;
 
       final url = obterUrlDownload ? await ref.getDownloadURL() : '';
@@ -16877,16 +16887,30 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await Future<void>.delayed(const Duration(milliseconds: 1100));
       mostrarMensagem(mensagem);
       return null;
+    } on FormatException catch (e) {
+      final mensagem = e.message;
+      logErroSeguro('Arquivo recusado antes do upload.', e);
+      controller.error(titulo: 'Arquivo não enviado', mensagem: mensagem);
+      await Future<void>.delayed(const Duration(milliseconds: 1600));
+      mostrarMensagem(mensagem);
+      return null;
+    } on TenantScopeException catch (e) {
+      final mensagem = e.message;
+      logErroSeguro('Escopo recusado antes do upload.', e);
+      controller.error(titulo: 'Arquivo não enviado', mensagem: mensagem);
+      await Future<void>.delayed(const Duration(milliseconds: 1800));
+      mostrarMensagem(mensagem);
+      return null;
     } catch (e) {
       logErroSeguro('Erro no upload.', e);
+      final codigoSeguro = 'U-${etapaUpload.toUpperCase()}';
       controller.error(
         titulo: 'Erro no upload',
-        mensagem: 'Não foi possível concluir o envio de ${arquivo.name}.',
+        mensagem:
+            'Não foi possível iniciar o envio. Código de diagnóstico: $codigoSeguro.',
       );
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
-      mostrarMensagem(
-        'Não foi possível enviar o comprovante. Tente novamente.',
-      );
+      await Future<void>.delayed(const Duration(milliseconds: 1800));
+      mostrarMensagem('Não foi possível enviar o comprovante ($codigoSeguro).');
       return null;
     } finally {
       if (dialogoAberto) {
