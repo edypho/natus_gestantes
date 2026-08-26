@@ -316,6 +316,15 @@ service firebase.storage {
         ];
     }
 
+    // Ponte restrita para o administrador proprietário da clínica Natus.
+    // Evita que uma indisponibilidade na consulta cruzada Storage -> Firestore
+    // bloqueie comprovantes durante a migração para a hierarquia de clínicas.
+    function natusOwnerFinanceAdmin(tenantId) {
+      return signedIn() &&
+        request.auth.uid == 'cBTxJeaOYTbd2VnwdE3gbz81zHJ3' &&
+        tenantId == '6VGYxoNV69HlrocZgfBo';
+    }
+
     // Nova hierarquia canônica de arquivos.
     match /clinicas/{tenantId}/pacientes/{patientId}/contratos/{allPaths=**} {
       allow read: if superAdmin() ||
@@ -353,15 +362,18 @@ service firebase.storage {
     }
 
     match /clinicas/{tenantId}/financeiro/pacientes/{patientId}/{allPaths=**} {
-      allow read: if superAdmin() ||
+      allow read: if natusOwnerFinanceAdmin(tenantId) ||
+        superAdmin() ||
         patientDocumentOwned(tenantId, patientId) ||
         adminMember(tenantId);
-      allow create, update: if (superAdmin() || adminMember(tenantId)) &&
+      allow create, update: if (natusOwnerFinanceAdmin(tenantId) ||
+          superAdmin() || adminMember(tenantId)) &&
         validClinicalUpload() &&
         canonicalTenantMetadata(tenantId) &&
         canonicalPatientMetadata(patientId) &&
         uploaderMetadataMatchesAuth();
-      allow delete: if superAdmin() || adminMember(tenantId);
+      allow delete: if natusOwnerFinanceAdmin(tenantId) ||
+        superAdmin() || adminMember(tenantId);
     }
 
     match /clinicas/{tenantId}/financeiro/{financialArea}/{allPaths=**} {
