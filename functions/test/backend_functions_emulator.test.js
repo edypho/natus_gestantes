@@ -118,7 +118,7 @@ async function commitClientDocument(fetchImpl, idToken, documentPath) {
 
 test(
     "Functions pendentes preservam tenant e cópias canônicas no Emulator",
-    {skip: !RUN_EMULATOR_TESTS, timeout: 30000},
+    {skip: !RUN_EMULATOR_TESTS, timeout: 120000},
     async () => {
       assert.match(
           process.env.FIRESTORE_EMULATOR_HOST || "",

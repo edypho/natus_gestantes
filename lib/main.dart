@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'shared/natus_app.dart';
 import 'shared/natus_logo.dart';
 import 'shared/natus_premium_visual.dart';
@@ -15,8 +16,6 @@ import 'package:excel/excel.dart' as excel;
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'super_admin/super_admin_access_guard.dart';
@@ -39,6 +38,7 @@ import 'dashboard/dashboard_cards_natus.dart';
 import 'dashboard/dashboard_clinica_resumo.dart';
 import 'dashboard/dashboard_destino_filtros.dart';
 import 'dados/natus_data_source.dart' as dados;
+import 'exames/exame_arquivo.dart';
 import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
@@ -54,6 +54,7 @@ import 'shared/gestacao_helpers.dart' as gestacao;
 import 'services/push_notifications_service.dart';
 import 'services/arquivo_download_service.dart';
 import 'services/google_maps_web_loader.dart';
+import 'services/cep_service.dart';
 import 'services/tenant_firestore_service.dart';
 import 'saas/contexto_saas.dart';
 import 'saas/tenant_access_scope.dart';
@@ -356,6 +357,7 @@ class TelaPrincipal extends StatefulWidget {
 
 class _TelaPrincipalState extends State<TelaPrincipal> {
   late final TenantFirestoreService tenantFirestore;
+  final CepService cepService = CepService();
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -4243,7 +4245,42 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              final exames = snapshot.data!.docs;
+              final arquivos = <ExameArquivo>[];
+
+              for (final documento in snapshot.data!.docs) {
+                try {
+                  arquivos.add(
+                    ExameArquivo.fromExame(
+                      documento.id,
+                      documento.data() as Map<String, dynamic>,
+                    ),
+                  );
+                } on FormatException catch (erro) {
+                  logErroSeguro(
+                    'Exame ignorado por possuir identidade inconsistente.',
+                    erro,
+                  );
+                }
+              }
+
+              for (final documento in documentos) {
+                if (!ExameArquivo.documentoEhExame(documento)) continue;
+                try {
+                  arquivos.add(ExameArquivo.fromDocumento(documento));
+                } on FormatException catch (erro) {
+                  logErroSeguro(
+                    'Documento de exame ignorado por possuir identidade inconsistente.',
+                    erro,
+                  );
+                }
+              }
+
+              var exames = removerExamesDuplicados(arquivos);
+              if (usuarioGestante) {
+                exames = exames
+                    .where((exame) => exame.pertenceA(gestante))
+                    .toList();
+              }
 
               if (exames.isEmpty) {
                 return blocoFicha(
@@ -4252,26 +4289,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 );
               }
 
-              Map<String, List<QueryDocumentSnapshot>> examesAgrupados = {};
-
-              for (var exame in exames) {
-                final dados = exame.data() as Map<String, dynamic>;
-                dados['nomeGestante'] = nomeGestanteDoExame(dados);
-
-                final nomeGestante =
-                    dados['nomeGestante'] ?? 'Paciente não identificado';
-
-                examesAgrupados.putIfAbsent(nomeGestante, () => []);
-
-                examesAgrupados[nomeGestante]!.add(exame);
-              }
+              final examesAgrupados = agruparExamesPorPaciente(
+                exames,
+                gestantes,
+              );
 
               return blocoFicha(
                 usuarioGestante
                     ? 'Meus exames (${exames.length})'
                     : 'Exames dos pacientes (${exames.length})',
                 [
-                  ...examesAgrupados.entries.map((grupo) {
+                  ...examesAgrupados.map((grupo) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -4279,7 +4307,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           Padding(
                             padding: const EdgeInsets.only(bottom: 10, top: 10),
                             child: Text(
-                              grupo.key,
+                              grupo.nomePaciente,
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -4288,15 +4316,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                             ),
                           ),
 
-                        ...grupo.value.map((doc) {
-                          final dados = doc.data() as Map<String, dynamic>;
-
-                          final nomeArquivo = dados['nomeArquivo'] ?? 'Exame';
-
-                          final url = dados['url'] ?? '';
-
-                          final criadoEm = dados['criadoEm'] ?? '';
-
+                        ...grupo.exames.map((exame) {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.all(14),
@@ -4325,7 +4345,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        nomeArquivo,
+                                        exame.nomeArquivo,
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
@@ -4334,9 +4354,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                         ),
                                       ),
 
-                                      if (criadoEm.toString().isNotEmpty)
+                                      if (exame.criadoEm.isNotEmpty)
                                         Text(
-                                          'Enviado em: ${criadoEm.toString().substring(0, 10)}',
+                                          'Enviado em: ${exame.dataExibicao}',
                                           style: TextStyle(
                                             color: NatusApp.textoSuave,
                                             fontSize: 12,
@@ -4352,7 +4372,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                     Icons.open_in_new,
                                     color: NatusApp.vinho,
                                   ),
-                                  onPressed: () => abrirArquivo(url),
+                                  onPressed: () => abrirArquivo(exame.url),
                                 ),
 
                                 if (usuarioEhAdmin())
@@ -4363,7 +4383,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                                       color: Colors.red,
                                     ),
                                     onPressed: () async {
-                                      await excluirExame(doc.id, url);
+                                      await excluirExame(exame);
                                     },
                                   ),
                               ],
@@ -4382,17 +4402,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Future<void> excluirExame(String idExame, String urlArquivo) async {
+  Future<void> excluirExame(ExameArquivo exame) async {
     if (!usuarioEhAdmin()) {
       mostrarMensagem('Somente o administrador pode excluir exames.');
       return;
     }
 
     try {
-      await firestore.collection('exames').doc(idExame).delete();
+      final colecao = exame.origem == OrigemExameArquivo.exames
+          ? 'exames'
+          : 'documentos';
+      await firestore.collection(colecao).doc(exame.id).delete();
 
-      if (urlArquivo.isNotEmpty) {
-        final ref = storage.refFromURL(urlArquivo);
+      if (exame.url.isNotEmpty) {
+        final ref = storage.refFromURL(exame.url);
         try {
           await ref.delete();
         } catch (e) {
@@ -4400,48 +4423,17 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         }
       }
 
-      setState(() {});
+      if (exame.origem == OrigemExameArquivo.documentos) {
+        setState(() {
+          documentos.removeWhere((documento) => documento['id'] == exame.id);
+        });
+      }
 
       mostrarMensagem('Exame excluído com sucesso.');
     } catch (e) {
       logErroSeguro('Erro ao excluir exame.', e);
       mostrarMensagem('Erro ao excluir exame.');
     }
-  }
-
-  String nomeGestanteDoExame(Map<String, dynamic> dados) {
-    final nomeSalvo = (dados['nomeGestante'] ?? '').toString().trim();
-    if (nomeSalvo.isNotEmpty) {
-      return nomeSalvo;
-    }
-
-    final idGestante = pacienteIdDoRegistro(dados);
-    if (idGestante.isNotEmpty) {
-      final gestantePorId = gestantes.firstWhere(
-        (g) => (g['id'] ?? '').trim() == idGestante,
-        orElse: () => <String, String>{},
-      );
-
-      final nomePorId = (gestantePorId['nomeGestante'] ?? '').trim();
-      if (nomePorId.isNotEmpty) {
-        return nomePorId;
-      }
-    }
-
-    final uidGestante = pacienteUidDoRegistro(dados);
-    if (uidGestante.isNotEmpty) {
-      final gestantePorUid = gestantes.firstWhere(
-        (g) => (g['uidGestante'] ?? '').trim() == uidGestante,
-        orElse: () => <String, String>{},
-      );
-
-      final nomePorUid = (gestantePorUid['nomeGestante'] ?? '').trim();
-      if (nomePorUid.isNotEmpty) {
-        return nomePorUid;
-      }
-    }
-
-    return 'Paciente não identificado';
   }
 
   Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
@@ -6176,22 +6168,32 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (value) async {
-                      if (value.replaceAll(RegExp(r'[^0-9]'), '').length == 8) {
+                      final cepConsultado = value.replaceAll(
+                        RegExp(r'[^0-9]'),
+                        '',
+                      );
+                      if (cepConsultado.length == 8) {
                         final resultado = await buscarEnderecoPorCep(value);
+                        final cepAtual = cepGestante.text.replaceAll(
+                          RegExp(r'[^0-9]'),
+                          '',
+                        );
+                        if (cepAtual != cepConsultado) return;
 
                         if (resultado != null) {
-                          enderecoGestante.text = resultado['endereco'] ?? '';
-                          bairroGestante.text = resultado['bairro'] ?? '';
-                          cidadeGestante.text = resultado['cidade'] ?? '';
-                          estadoGestante.text = resultado['estado'] ?? '';
+                          enderecoGestante.text = resultado.logradouro;
+                          bairroGestante.text = resultado.bairro;
+                          cidadeGestante.text = resultado.cidade;
+                          estadoGestante.text = resultado.estado;
                         }
+                        mostrarResultadoConsultaCep(resultado);
                       }
                     },
                   ),
                 ),
                 SizedBox(
                   width: layoutCompacto ? 230 : 480,
-                  child: campoBloqueadoFull(enderecoGestante, 'Endereço'),
+                  child: campoFull(enderecoGestante, 'Endereço'),
                 ),
               ],
             ),
@@ -6210,16 +6212,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                 ),
                 SizedBox(
                   width: 230,
-                  child: campoBloqueadoFull(bairroGestante, 'Bairro'),
+                  child: campoFull(bairroGestante, 'Bairro'),
                 ),
                 SizedBox(
                   width: 230,
-                  child: campoBloqueadoFull(cidadeGestante, 'Cidade'),
+                  child: campoFull(cidadeGestante, 'Cidade'),
                 ),
-                SizedBox(
-                  width: 70,
-                  child: campoBloqueadoFull(estadoGestante, 'UF'),
-                ),
+                SizedBox(width: 70, child: campoFull(estadoGestante, 'UF')),
               ],
             ),
 
@@ -13772,28 +13771,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Widget campoBloqueadoFull(TextEditingController controller, String label) {
-    return TextFormField(
-      controller: controller,
-      readOnly: true,
-      decoration: InputDecoration(
-        labelText: label,
-        floatingLabelBehavior: FloatingLabelBehavior.always,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade400),
-        ),
-        filled: true,
-        fillColor: const Color(0xFFF7F1EF),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 16,
-        ),
-      ),
-    );
-  }
-
   Widget seletorPlanoGestante() {
     final planosAtivos = planosCadastrados
         .where((p) => p['ativo'] != false)
@@ -14619,33 +14596,28 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<Map<String, String>?> buscarEnderecoPorCep(String cep) async {
+  Future<EnderecoCep?> buscarEnderecoPorCep(String cep) async {
     try {
-      final cepLimpo = cep.replaceAll(RegExp(r'[^0-9]'), '');
-
-      if (cepLimpo.length != 8) return null;
-
-      final response = await http.get(
-        Uri.parse('https://viacep.com.br/ws/$cepLimpo/json/'),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-
-        if (data.containsKey('erro')) return null;
-
-        return {
-          'endereco': data['logradouro'] ?? '',
-          'bairro': data['bairro'] ?? '',
-          'cidade': data['localidade'] ?? '',
-          'estado': data['uf'] ?? '',
-        };
-      }
+      return await cepService.buscar(cep);
     } catch (e) {
       logErroSeguro('Erro ao buscar CEP.', e);
+      return null;
     }
+  }
 
-    return null;
+  void mostrarResultadoConsultaCep(EnderecoCep? resultado) {
+    if (!mounted) return;
+    if (resultado == null) {
+      mostrarMensagem(
+        'CEP não encontrado. Confira o número ou preencha o endereço manualmente.',
+      );
+      return;
+    }
+    if (!resultado.possuiLogradouro) {
+      mostrarMensagem(
+        'CEP localizado apenas até cidade/UF. Complete o endereço manualmente.',
+      );
+    }
   }
 
   String formatarDataHora(DateTime data) {
@@ -15279,6 +15251,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final cidadeTemp = TextEditingController(
       text: gestante['cidadeGestante'] ?? '',
     );
+    final estadoTemp = TextEditingController(
+      text: gestante['estadoGestante'] ?? '',
+    );
     final hospitalTemp = TextEditingController(
       text: gestante['hospitalGestante'] ?? '',
     );
@@ -15310,14 +15285,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     Widget campoPopup(
       TextEditingController controller,
       String label, {
-      bool bloqueado = false,
       Function(String)? onChanged,
     }) {
       return SizedBox(
         width: 360,
         child: TextField(
           controller: controller,
-          enabled: !bloqueado,
           onChanged: onChanged,
           decoration: InputDecoration(
             labelText: label,
@@ -15385,29 +15358,44 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                     cepTemp,
                     'CEP',
                     onChanged: (value) async {
-                      if (value.replaceAll(RegExp(r'[^0-9]'), '').length == 8) {
+                      final cepConsultado = value.replaceAll(
+                        RegExp(r'[^0-9]'),
+                        '',
+                      );
+                      if (cepConsultado.length == 8) {
                         final resultado = await buscarEnderecoPorCep(value);
+                        final cepAtual = cepTemp.text.replaceAll(
+                          RegExp(r'[^0-9]'),
+                          '',
+                        );
+                        if (cepAtual != cepConsultado) return;
 
                         if (resultado != null) {
-                          enderecoTemp.text = resultado['endereco'] ?? '';
-                          bairroTemp.text = resultado['bairro'] ?? '';
-                          cidadeTemp.text = resultado['cidade'] ?? '';
+                          enderecoTemp.text = resultado.logradouro;
+                          bairroTemp.text = resultado.bairro;
+                          cidadeTemp.text = resultado.cidade;
+                          estadoTemp.text = resultado.estado;
                         }
+                        mostrarResultadoConsultaCep(resultado);
                       }
                     },
                   ),
 
                   const SizedBox(height: 16),
 
-                  campoPopup(enderecoTemp, 'Endereço', bloqueado: true),
+                  campoPopup(enderecoTemp, 'Endereço'),
 
                   const SizedBox(height: 16),
 
-                  campoPopup(bairroTemp, 'Bairro', bloqueado: true),
+                  campoPopup(bairroTemp, 'Bairro'),
 
                   const SizedBox(height: 16),
 
-                  campoPopup(cidadeTemp, 'Cidade', bloqueado: true),
+                  campoPopup(cidadeTemp, 'Cidade'),
+
+                  const SizedBox(height: 16),
+
+                  campoPopup(estadoTemp, 'UF'),
 
                   const SizedBox(height: 16),
 
@@ -15480,6 +15468,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   enderecoTemp.text.trim(),
                   bairroTemp.text.trim(),
                   cidadeTemp.text.trim(),
+                  estadoTemp.text.trim(),
                   cepTemp.text.trim(),
                   hospitalTemp.text.trim(),
                   obstetraTemp.text.trim(),
@@ -15583,16 +15572,23 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     Future<void> preencherEnderecoPorCep(String value) async {
-      if (value.replaceAll(RegExp(r'[^0-9]'), '').length != 8) return;
+      final cepConsultado = value.replaceAll(RegExp(r'[^0-9]'), '');
+      if (cepConsultado.length != 8) return;
 
       final resultado = await buscarEnderecoPorCep(value);
+      final cepAtual = controllers['cepGestante']?.text.replaceAll(
+        RegExp(r'[^0-9]'),
+        '',
+      );
+      if (cepAtual != cepConsultado) return;
 
       if (resultado != null) {
-        controllers['enderecoGestante']?.text = resultado['endereco'] ?? '';
-        controllers['bairroGestante']?.text = resultado['bairro'] ?? '';
-        controllers['cidadeGestante']?.text = resultado['cidade'] ?? '';
-        controllers['estadoGestante']?.text = resultado['estado'] ?? '';
+        controllers['enderecoGestante']?.text = resultado.logradouro;
+        controllers['bairroGestante']?.text = resultado.bairro;
+        controllers['cidadeGestante']?.text = resultado.cidade;
+        controllers['estadoGestante']?.text = resultado.estado;
       }
+      mostrarResultadoConsultaCep(resultado);
     }
 
     showDialog(
@@ -16307,6 +16303,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     String endereco,
     String bairro,
     String cidade,
+    String estado,
     String cep,
     String hospital,
     String obstetra,
@@ -16338,6 +16335,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         'enderecoGestante': endereco,
         'bairroGestante': bairro,
         'cidadeGestante': cidade,
+        'estadoGestante': estado,
         'cepGestante': cep,
         'hospitalGestante': hospital,
         'obstetraGestante': obstetra,

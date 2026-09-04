@@ -125,7 +125,9 @@ class PushNotificationsService {
           return null;
         }
 
-        return FirebaseMessaging.instance.getToken(vapidKey: vapidPublicKey);
+        return await FirebaseMessaging.instance.getToken(
+          vapidKey: vapidPublicKey,
+        );
       }
 
       if (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -140,7 +142,7 @@ class PushNotificationsService {
         }
       }
 
-      return FirebaseMessaging.instance.getToken();
+      return await FirebaseMessaging.instance.getToken();
     } catch (e) {
       logErroSeguro('Push: erro ao obter token FCM.', e);
       return null;
