@@ -69,7 +69,8 @@ E-mail e telefone válidos da paciente são obrigatórios. Eles são enviados à
 ZapSign como dados bloqueados do signatário; o e-mail automático de assinatura
 fica habilitado quando `disableSignerEmails` não for `true`.
 
-O botão do aplicativo usa `reemitirContratoZapSign`: se o contrato ainda não
+O botão do aplicativo usa a ação `reemitir` da callable
+`gerarContratoZapSign`: se o contrato ainda não
 possuir documento ZapSign, a solicitação existente é tentada novamente. Se já
 possuir documento, uma nova emissão é criada e vinculada à anterior, que
 permanece no histórico.

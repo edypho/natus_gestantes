@@ -5145,6 +5145,11 @@ exports.gerarContratoZapSign = onCall(
       secrets: [zapsignApiToken],
     },
     async (request) => {
+      const entrada = request.data || {};
+      if (entrada.acao === "reemitir") {
+        return reemitirContratoZapSignCore(request);
+      }
+
       const contexto = await exigirContextoUsuario(
           request.auth,
           ["admin", "superAdmin"],
@@ -5155,7 +5160,6 @@ exports.gerarContratoZapSign = onCall(
         limit: 10,
         windowSeconds: 60,
       });
-      const entrada = request.data || {};
       const contratoId = textoSeguro(entrada.contratoId);
       const contratoResolvido = await buscarContratoComTenant(contratoId);
       exigirAcessoAoTenant(contexto, contratoResolvido.clinicaId);
@@ -5214,261 +5218,253 @@ exports.gerarContratoZapSign = onCall(
     },
 );
 
-exports.reemitirContratoZapSign = onCall(
-    {
-      invoker: "public",
-      region: "us-central1",
-      enforceAppCheck,
-      secrets: [zapsignApiToken],
-    },
-    async (request) => {
-      const contexto = await exigirContextoUsuario(request.auth, ["admin"]);
-      await exigirLimiteUso({
-        action: "zapsign-reissue",
-        subjects: [`actor:${contexto.uid}`],
-        limit: 10,
-        windowSeconds: 60,
-      });
+async function reemitirContratoZapSignCore(request) {
+  const contexto = await exigirContextoUsuario(request.auth, ["admin"]);
+  await exigirLimiteUso({
+    action: "zapsign-reissue",
+    subjects: [`actor:${contexto.uid}`],
+    limit: 10,
+    windowSeconds: 60,
+  });
 
-      const entrada = request.data || {};
-      const pacienteId = exigirTextoCriacao(
-          entrada.pacienteId,
-          "pacienteId",
-          128,
+  const entrada = request.data || {};
+  const pacienteId = exigirTextoCriacao(
+      entrada.pacienteId,
+      "pacienteId",
+      128,
+  );
+  const contratoIdInformado = textoSeguro(entrada.contratoId);
+  const reemissaoConfirmada = entrada.confirmarReemissao === true;
+  const operacaoId = exigirTextoCriacao(
+      entrada.operacaoId || entrada.operationId,
+      "operacaoId",
+      128,
+  );
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(operacaoId)) {
+    throw new HttpsError("invalid-argument", "OperacaoId inválido.");
+  }
+
+  let contratoAnterior = null;
+  let pacienteRef;
+  let paciente;
+  let clinicaId;
+
+  if (contratoIdInformado) {
+    contratoAnterior = await buscarContratoComTenant(contratoIdInformado);
+    if (contratoAnterior.pacienteId !== pacienteId) {
+      throw new HttpsError(
+          "permission-denied",
+          "O contrato não pertence à paciente informada.",
       );
-      const contratoIdInformado = textoSeguro(entrada.contratoId);
-      const reemissaoConfirmada = entrada.confirmarReemissao === true;
-      const operacaoId = exigirTextoCriacao(
-          entrada.operacaoId || entrada.operationId,
-          "operacaoId",
-          128,
+    }
+    exigirAcessoAoTenant(contexto, contratoAnterior.clinicaId);
+    pacienteRef = contratoAnterior.pacienteRef;
+    paciente = contratoAnterior.paciente;
+    clinicaId = contratoAnterior.clinicaId;
+  } else {
+    pacienteRef = admin.firestore().collection("gestantes").doc(pacienteId);
+    const pacienteSnapshot = await pacienteRef.get();
+    if (!pacienteSnapshot.exists) {
+      throw new HttpsError("not-found", "Paciente não encontrada.");
+    }
+    paciente = pacienteSnapshot.data() || {};
+    clinicaId = exigirTenant(paciente, "Paciente");
+    await exigirClinicaAtiva(clinicaId);
+    exigirAcessoAoTenant(contexto, clinicaId);
+  }
+
+  const contratoVinculadoId = textoSeguro(paciente.contratoId);
+  if (!contratoAnterior && contratoVinculadoId) {
+    try {
+      const contratoVinculado = await buscarContratoComTenant(
+          contratoVinculadoId,
       );
-
-      if (!/^[a-zA-Z0-9_-]+$/.test(operacaoId)) {
-        throw new HttpsError("invalid-argument", "OperacaoId inválido.");
-      }
-
-      let contratoAnterior = null;
-      let pacienteRef;
-      let paciente;
-      let clinicaId;
-
-      if (contratoIdInformado) {
-        contratoAnterior = await buscarContratoComTenant(contratoIdInformado);
-        if (contratoAnterior.pacienteId !== pacienteId) {
-          throw new HttpsError(
-              "permission-denied",
-              "O contrato não pertence à paciente informada.",
-          );
-        }
-        exigirAcessoAoTenant(contexto, contratoAnterior.clinicaId);
-        pacienteRef = contratoAnterior.pacienteRef;
-        paciente = contratoAnterior.paciente;
-        clinicaId = contratoAnterior.clinicaId;
-      } else {
-        pacienteRef = admin.firestore().collection("gestantes").doc(pacienteId);
-        const pacienteSnapshot = await pacienteRef.get();
-        if (!pacienteSnapshot.exists) {
-          throw new HttpsError("not-found", "Paciente não encontrada.");
-        }
-        paciente = pacienteSnapshot.data() || {};
-        clinicaId = exigirTenant(paciente, "Paciente");
-        await exigirClinicaAtiva(clinicaId);
-        exigirAcessoAoTenant(contexto, clinicaId);
-      }
-
-      const contratoVinculadoId = textoSeguro(paciente.contratoId);
-      if (!contratoAnterior && contratoVinculadoId) {
-        try {
-          const contratoVinculado = await buscarContratoComTenant(
-              contratoVinculadoId,
-          );
-          if (contratoVinculado.pacienteId !== pacienteId ||
+      if (contratoVinculado.pacienteId !== pacienteId ||
               contratoVinculado.clinicaId !== clinicaId) {
-            throw new HttpsError(
-                "failed-precondition",
-                "O contrato vinculado à paciente está inconsistente.",
-            );
-          }
-          contratoAnterior = contratoVinculado;
-        } catch (error) {
-          if (!(error instanceof HttpsError) || error.code !== "not-found") {
-            throw error;
-          }
-        }
-      }
-
-      const templateKey = descobrirTemplateKeyContrato(
-          paciente.plano || "",
-          paciente.consultorio || "",
-      );
-      if (!templateKey || !ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey]) {
         throw new HttpsError(
             "failed-precondition",
-            "A paciente precisa estar no plano Presença ou Plenitude.",
+            "O contrato vinculado à paciente está inconsistente.",
         );
       }
-
-      const payload = montarPayloadContratoDaGestante(pacienteId, {
-        ...paciente,
-        contratoTemplateKey: templateKey,
-      });
-      validarContatoPacienteContrato(payload);
-
-      const documentoAnterior = textoSeguro(
-          contratoAnterior && contratoAnterior.contrato.zapsignDocumentId,
-      );
-      if (contratoAnterior && documentoAnterior && !reemissaoConfirmada) {
-        await atualizarGestanteComContrato(pacienteId, {
-          contratoId: contratoAnterior.contratoRef.id,
-          contratoStatus: contratoAnterior.contrato.status || "enviado",
-          contratoTemplateKey: contratoAnterior.contrato.templateKey ||
-            templateKey,
-          contratoZapSignDocumentId: documentoAnterior,
-          contratoZapSignSignerUrl:
-            contratoAnterior.contrato.zapsignSignerUrl || "",
-          contratoUltimaTentativaEm: new Date().toISOString(),
-        }, clinicaId);
-        return {
-          sucesso: true,
-          acao: "sincronizacao",
-          contratoId: contratoAnterior.contratoRef.id,
-          status: contratoAnterior.contrato.status || "enviado",
-          zapsignDocumentId: documentoAnterior,
-          zapsignSignerUrl:
-            contratoAnterior.contrato.zapsignSignerUrl || "",
-          reutilizado: true,
-        };
-      }
-      const reutilizarPendente = Boolean(contratoAnterior && !documentoAnterior);
-      const acao = reutilizarPendente ? "envio_pendente" :
-        (contratoAnterior ? "reemissao" : "emissao");
-      const contratoRef = reutilizarPendente ? contratoAnterior.contratoRef :
-        admin.firestore().collection("contratos")
-            .doc(`reemissao_${operacaoId}`);
-      const agora = new Date();
-      let resultadoExistente = null;
-
-      await admin.firestore().runTransaction(async (transaction) => {
-        const snapshot = await transaction.get(contratoRef);
-        const dadosAtuais = snapshot.exists ? (snapshot.data() || {}) : {};
-        const pacienteAtual = textoSeguro(
-            dadosAtuais.pacienteId ||
-            (dadosAtuais.payload && dadosAtuais.payload.pacienteId),
-        );
-
-        if (snapshot.exists && pacienteAtual && pacienteAtual !== pacienteId) {
-          throw new HttpsError(
-              "failed-precondition",
-              "A operação de emissão conflita com outra paciente.",
-          );
-        }
-
-        const documentoExistente = textoSeguro(dadosAtuais.zapsignDocumentId);
-        if (documentoExistente) {
-          resultadoExistente = {
-            sucesso: true,
-            acao,
-            contratoId: contratoRef.id,
-            status: dadosAtuais.status || "enviado",
-            zapsignDocumentId: documentoExistente,
-            zapsignSignerUrl: dadosAtuais.zapsignSignerUrl || "",
-            reutilizado: true,
-          };
-          return;
-        }
-
-        const inicioAnterior = Date.parse(
-            dadosAtuais.emissaoIniciadaEm || "",
-        );
-        const bloqueioAtivo = dadosAtuais.emissaoEmAndamento === true &&
-          Number.isFinite(inicioAnterior) &&
-          agora.getTime() - inicioAnterior < 5 * 60 * 1000;
-        if (bloqueioAtivo) {
-          throw new HttpsError(
-              "aborted",
-              "A emissão deste contrato já está em andamento.",
-          );
-        }
-
-        transaction.set(contratoRef, {
-          ...camposTenant(clinicaId),
-          pacienteId,
-          pacienteUid: payload.pacienteUid || "",
-          uidPaciente: payload.uidPaciente || "",
-          uidGestante: payload.uidGestante || "",
-          templateKey,
-          status: "pendente",
-          zapsignDocumentId: "",
-          zapsignSignerUrl: "",
-          payload,
-          origem: acao === "reemissao" ?
-            "reemissao_manual" : "emissao_manual",
-          operacaoId,
-          emissaoEmAndamento: true,
-          emissaoIniciadaEm: agora.toISOString(),
-          atualizadoEm: agora.toISOString(),
-          ...(!snapshot.exists ? {criadoEm: agora.toISOString()} : {}),
-          ...(contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id ? {
-            contratoAnteriorId: contratoAnterior.contratoRef.id,
-          } : {}),
-        }, {merge: true});
-      });
-
-      if (resultadoExistente) {
-        await atualizarGestanteComContrato(pacienteId, {
-          contratoGeracaoAutomatica: false,
-          contratoId: contratoRef.id,
-          contratoStatus: resultadoExistente.status,
-          contratoTemplateKey: templateKey,
-          contratoPlanoCodigo: templateKey.split("_")[0] || "",
-          contratoModalidadeCodigo: "consultorio",
-          contratoZapSignDocumentId: resultadoExistente.zapsignDocumentId,
-          contratoZapSignSignerUrl: resultadoExistente.zapsignSignerUrl,
-          contratoUltimaTentativaEm: new Date().toISOString(),
-        }, clinicaId);
-        return resultadoExistente;
-      }
-
-      await atualizarGestanteComContrato(pacienteId, {
-        contratoGeracaoAutomatica: false,
-        contratoId: contratoRef.id,
-        contratoStatus: "pendente",
-        contratoTemplateKey: templateKey,
-        contratoPlanoCodigo: templateKey.split("_")[0] || "",
-        contratoModalidadeCodigo: "consultorio",
-        contratoZapSignDocumentId: "",
-        contratoZapSignSignerUrl: "",
-        contratoUltimaTentativaEm: agora.toISOString(),
-      }, clinicaId);
-
-      let resultado;
-      try {
-        resultado = await processarGeracaoContrato({
-          contratoId: contratoRef.id,
-          payload,
-          apiToken: zapsignApiToken.value(),
-          clinicaId,
-        });
-      } catch (error) {
-        await atualizarContrato(contratoRef.id, {
-          emissaoEmAndamento: false,
-          atualizadoEm: new Date().toISOString(),
-        }, clinicaId);
+      contratoAnterior = contratoVinculado;
+    } catch (error) {
+      if (!(error instanceof HttpsError) || error.code !== "not-found") {
         throw error;
       }
+    }
+  }
 
-      if (contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id) {
-        await contratoAnterior.contratoRef.set({
-          substituidoPorContratoId: contratoRef.id,
-          substituidoEm: new Date().toISOString(),
-          atualizadoEm: new Date().toISOString(),
-        }, {merge: true});
-      }
+  const templateKey = descobrirTemplateKeyContrato(
+      paciente.plano || "",
+      paciente.consultorio || "",
+  );
+  if (!templateKey || !ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey]) {
+    throw new HttpsError(
+        "failed-precondition",
+        "A paciente precisa estar no plano Presença ou Plenitude.",
+    );
+  }
 
-      return {...resultado, acao};
-    },
-);
+  const payload = montarPayloadContratoDaGestante(pacienteId, {
+    ...paciente,
+    contratoTemplateKey: templateKey,
+  });
+  validarContatoPacienteContrato(payload);
+
+  const documentoAnterior = textoSeguro(
+      contratoAnterior && contratoAnterior.contrato.zapsignDocumentId,
+  );
+  if (contratoAnterior && documentoAnterior && !reemissaoConfirmada) {
+    await atualizarGestanteComContrato(pacienteId, {
+      contratoId: contratoAnterior.contratoRef.id,
+      contratoStatus: contratoAnterior.contrato.status || "enviado",
+      contratoTemplateKey: contratoAnterior.contrato.templateKey ||
+            templateKey,
+      contratoZapSignDocumentId: documentoAnterior,
+      contratoZapSignSignerUrl:
+            contratoAnterior.contrato.zapsignSignerUrl || "",
+      contratoUltimaTentativaEm: new Date().toISOString(),
+    }, clinicaId);
+    return {
+      sucesso: true,
+      acao: "sincronizacao",
+      contratoId: contratoAnterior.contratoRef.id,
+      status: contratoAnterior.contrato.status || "enviado",
+      zapsignDocumentId: documentoAnterior,
+      zapsignSignerUrl:
+            contratoAnterior.contrato.zapsignSignerUrl || "",
+      reutilizado: true,
+    };
+  }
+  const reutilizarPendente = Boolean(contratoAnterior && !documentoAnterior);
+  const acao = reutilizarPendente ? "envio_pendente" :
+        (contratoAnterior ? "reemissao" : "emissao");
+  const contratoRef = reutilizarPendente ? contratoAnterior.contratoRef :
+        admin.firestore().collection("contratos")
+            .doc(`reemissao_${operacaoId}`);
+  const agora = new Date();
+  let resultadoExistente = null;
+
+  await admin.firestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(contratoRef);
+    const dadosAtuais = snapshot.exists ? (snapshot.data() || {}) : {};
+    const pacienteAtual = textoSeguro(
+        dadosAtuais.pacienteId ||
+            (dadosAtuais.payload && dadosAtuais.payload.pacienteId),
+    );
+
+    if (snapshot.exists && pacienteAtual && pacienteAtual !== pacienteId) {
+      throw new HttpsError(
+          "failed-precondition",
+          "A operação de emissão conflita com outra paciente.",
+      );
+    }
+
+    const documentoExistente = textoSeguro(dadosAtuais.zapsignDocumentId);
+    if (documentoExistente) {
+      resultadoExistente = {
+        sucesso: true,
+        acao,
+        contratoId: contratoRef.id,
+        status: dadosAtuais.status || "enviado",
+        zapsignDocumentId: documentoExistente,
+        zapsignSignerUrl: dadosAtuais.zapsignSignerUrl || "",
+        reutilizado: true,
+      };
+      return;
+    }
+
+    const inicioAnterior = Date.parse(
+        dadosAtuais.emissaoIniciadaEm || "",
+    );
+    const bloqueioAtivo = dadosAtuais.emissaoEmAndamento === true &&
+          Number.isFinite(inicioAnterior) &&
+          agora.getTime() - inicioAnterior < 5 * 60 * 1000;
+    if (bloqueioAtivo) {
+      throw new HttpsError(
+          "aborted",
+          "A emissão deste contrato já está em andamento.",
+      );
+    }
+
+    transaction.set(contratoRef, {
+      ...camposTenant(clinicaId),
+      pacienteId,
+      pacienteUid: payload.pacienteUid || "",
+      uidPaciente: payload.uidPaciente || "",
+      uidGestante: payload.uidGestante || "",
+      templateKey,
+      status: "pendente",
+      zapsignDocumentId: "",
+      zapsignSignerUrl: "",
+      payload,
+      origem: acao === "reemissao" ?
+            "reemissao_manual" : "emissao_manual",
+      operacaoId,
+      emissaoEmAndamento: true,
+      emissaoIniciadaEm: agora.toISOString(),
+      atualizadoEm: agora.toISOString(),
+      ...(!snapshot.exists ? {criadoEm: agora.toISOString()} : {}),
+      ...(contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id ? {
+        contratoAnteriorId: contratoAnterior.contratoRef.id,
+      } : {}),
+    }, {merge: true});
+  });
+
+  if (resultadoExistente) {
+    await atualizarGestanteComContrato(pacienteId, {
+      contratoGeracaoAutomatica: false,
+      contratoId: contratoRef.id,
+      contratoStatus: resultadoExistente.status,
+      contratoTemplateKey: templateKey,
+      contratoPlanoCodigo: templateKey.split("_")[0] || "",
+      contratoModalidadeCodigo: "consultorio",
+      contratoZapSignDocumentId: resultadoExistente.zapsignDocumentId,
+      contratoZapSignSignerUrl: resultadoExistente.zapsignSignerUrl,
+      contratoUltimaTentativaEm: new Date().toISOString(),
+    }, clinicaId);
+    return resultadoExistente;
+  }
+
+  await atualizarGestanteComContrato(pacienteId, {
+    contratoGeracaoAutomatica: false,
+    contratoId: contratoRef.id,
+    contratoStatus: "pendente",
+    contratoTemplateKey: templateKey,
+    contratoPlanoCodigo: templateKey.split("_")[0] || "",
+    contratoModalidadeCodigo: "consultorio",
+    contratoZapSignDocumentId: "",
+    contratoZapSignSignerUrl: "",
+    contratoUltimaTentativaEm: agora.toISOString(),
+  }, clinicaId);
+
+  let resultado;
+  try {
+    resultado = await processarGeracaoContrato({
+      contratoId: contratoRef.id,
+      payload,
+      apiToken: zapsignApiToken.value(),
+      clinicaId,
+    });
+  } catch (error) {
+    await atualizarContrato(contratoRef.id, {
+      emissaoEmAndamento: false,
+      atualizadoEm: new Date().toISOString(),
+    }, clinicaId);
+    throw error;
+  }
+
+  if (contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id) {
+    await contratoAnterior.contratoRef.set({
+      substituidoPorContratoId: contratoRef.id,
+      substituidoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+    }, {merge: true});
+  }
+
+  return {...resultado, acao};
+}
 
 exports.consultarContratoZapSign = onCall(
     {

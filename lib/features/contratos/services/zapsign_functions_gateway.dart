@@ -61,8 +61,9 @@ final class FirebaseZapSignFunctionsGateway implements ZapSignFunctionsGateway {
   }) async {
     final callable = FirebaseFunctions.instanceFor(
       region: 'us-central1',
-    ).httpsCallable('reemitirContratoZapSign');
+    ).httpsCallable('gerarContratoZapSign');
     final resposta = await callable.call({
+      'acao': 'reemitir',
       'pacienteId': pacienteId,
       'contratoId': contratoId,
       'operacaoId': operacaoId,
