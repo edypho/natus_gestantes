@@ -14,6 +14,10 @@ class ContratoPayloadMapper {
       nomePlano: (paciente['plano'] ?? '').toString(),
       consultorio: (paciente['consultorio'] ?? '').toString(),
     );
+    final valorContratual = template?.valorPadrao ?? valorTotal;
+    final entradaContratual = valorEntrada.clamp(0, valorContratual).toDouble();
+    final saldoContratual = valorContratual - entradaContratual;
+    final parcelasContratuais = numeroParcelas < 1 ? 1 : numeroParcelas;
 
     return {
       'contratoGeracaoAutomatica': template != null,
@@ -27,11 +31,11 @@ class ContratoPayloadMapper {
         'modalidadeNome':
             template?.nomeModalidade ??
             _nomeModalidade((paciente['consultorio'] ?? '').toString()),
-        'valorTotal': valorTotal,
-        'valorEntrada': valorEntrada,
-        'valorSaldo': valorSaldo,
-        'numeroParcelas': numeroParcelas,
-        'valorParcela': valorParcela,
+        'valorTotal': valorContratual,
+        'valorEntrada': entradaContratual,
+        'valorSaldo': saldoContratual,
+        'numeroParcelas': parcelasContratuais,
+        'valorParcela': saldoContratual / parcelasContratuais,
       },
     };
   }
@@ -49,6 +53,10 @@ class ContratoPayloadMapper {
       nomePlano: (paciente['plano'] ?? '').toString(),
       consultorio: (paciente['consultorio'] ?? '').toString(),
     );
+    final valorContratual = template?.valorPadrao ?? valorTotal;
+    final entradaContratual = valorEntrada.clamp(0, valorContratual).toDouble();
+    final saldoContratual = valorContratual - entradaContratual;
+    final parcelasContratuais = numeroParcelas < 1 ? 1 : numeroParcelas;
 
     final enderecoPaciente = _montarEnderecoPaciente(paciente);
 
@@ -74,11 +82,11 @@ class ContratoPayloadMapper {
       formaPagamento: (paciente['formaPagamento'] ?? '').toString(),
       vencimentoParcelas: '',
       observacoesContrato: '',
-      numeroParcelas: numeroParcelas,
-      valorTotal: valorTotal,
-      valorEntrada: valorEntrada,
-      valorSaldo: valorSaldo,
-      valorParcela: valorParcela,
+      numeroParcelas: parcelasContratuais,
+      valorTotal: valorContratual,
+      valorEntrada: entradaContratual,
+      valorSaldo: saldoContratual,
+      valorParcela: saldoContratual / parcelasContratuais,
     );
   }
 

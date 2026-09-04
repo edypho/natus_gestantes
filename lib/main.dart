@@ -358,6 +358,8 @@ class TelaPrincipal extends StatefulWidget {
 class _TelaPrincipalState extends State<TelaPrincipal> {
   late final TenantFirestoreService tenantFirestore;
   final CepService cepService = CepService();
+  final SessaoIdempotencia _sessaoEmissaoContrato = SessaoIdempotencia();
+  final Set<String> _contratosEmProcessamento = <String>{};
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -9368,6 +9370,32 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           blocoFicha('Exames', [examesCompletosCentralClinica(g)]),
           if (podeVerFinanceiroGestante)
             blocoFicha('Contratos', [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ElevatedButton.icon(
+                  onPressed: _contratosEmProcessamento.contains(g['id'] ?? '')
+                      ? null
+                      : () => emitirOuReemitirContrato(g),
+                  icon: _contratosEmProcessamento.contains(g['id'] ?? '')
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          (g['contratoZapSignDocumentId'] ?? '').trim().isEmpty
+                              ? Icons.send_rounded
+                              : Icons.refresh_rounded,
+                        ),
+                  label: Text(
+                    (g['contratoZapSignDocumentId'] ?? '').trim().isNotEmpty
+                        ? 'Reemitir contrato'
+                        : (g['contratoId'] ?? '').trim().isNotEmpty
+                        ? 'Enviar contrato à ZapSign'
+                        : 'Emitir contrato',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               if (contratosDaGestante.isEmpty)
                 linhaInfo('Contratos', 'Nenhum contrato encontrado'),
               ...contratosDaGestante.map(cardDocumentoProntuario),
@@ -9381,6 +9409,118 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ],
       ),
     );
+  }
+
+  Future<void> emitirOuReemitirContrato(Map<String, String> paciente) async {
+    if (!usuarioEhAdmin()) {
+      mostrarMensagem('Somente o administrador pode emitir contratos.');
+      return;
+    }
+
+    final pacienteId = (paciente['id'] ?? '').trim();
+    final contratoId = (paciente['contratoId'] ?? '').trim();
+    final documentoZapSign = (paciente['contratoZapSignDocumentId'] ?? '')
+        .trim();
+    final email = (paciente['emailGestante'] ?? '').trim();
+    final telefone = (paciente['telefoneGestante'] ?? '').trim();
+    final template = CatalogoContratosNatus.localizarPorPlanoEModalidade(
+      nomePlano: paciente['plano'] ?? '',
+      consultorio: paciente['consultorio'] ?? '',
+    );
+
+    if (pacienteId.isEmpty) {
+      mostrarMensagem('Não foi possível identificar a paciente.');
+      return;
+    }
+    if (template == null) {
+      mostrarMensagem('Selecione o plano Presença ou Plenitude na ficha.');
+      return;
+    }
+    if (!email.contains('@') ||
+        telefone.replaceAll(RegExp(r'\D'), '').length < 10) {
+      mostrarMensagem(
+        'Preencha e-mail e telefone válidos antes de emitir o contrato.',
+      );
+      return;
+    }
+
+    if (documentoZapSign.isNotEmpty) {
+      final confirmou = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Reemitir contrato?'),
+          content: const Text(
+            'Um novo documento será criado na ZapSign. O contrato anterior '
+            'permanecerá no histórico para auditoria.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Reemitir'),
+            ),
+          ],
+        ),
+      );
+      if (confirmou != true) return;
+    }
+
+    final assinatura = jsonEncode([
+      pacienteId,
+      contratoId,
+      documentoZapSign,
+      template.chave,
+      email.toLowerCase(),
+      telefone.replaceAll(RegExp(r'\D'), ''),
+    ]);
+    final operacaoId = _sessaoEmissaoContrato.idParaAssinatura(assinatura);
+
+    setState(() => _contratosEmProcessamento.add(pacienteId));
+    try {
+      final service = ZapSignContratosService(escopo: widget.escopoTenant);
+      final resultado = await service.reemitirOuEnviarContrato(
+        pacienteId: pacienteId,
+        contratoId: contratoId,
+        operacaoId: operacaoId,
+        confirmarReemissao: documentoZapSign.isNotEmpty,
+      );
+      if (resultado['sucesso'] != true) {
+        throw StateError('O servidor não confirmou a emissão do contrato.');
+      }
+
+      await Future.wait([
+        carregarGestantesFirestore(),
+        carregarDocumentosFirestore(),
+      ]);
+      _sessaoEmissaoContrato.reiniciar();
+      if (!mounted) return;
+      final acao = resultado['acao']?.toString();
+      mostrarMensagem(
+        acao == 'reemissao'
+            ? 'Novo contrato emitido e enviado à ZapSign.'
+            : acao == 'sincronizacao'
+            ? 'Contrato já existente sincronizado com a ficha.'
+            : 'Contrato enviado à ZapSign com sucesso.',
+      );
+    } on FirebaseFunctionsException catch (e) {
+      logErroSeguro('Erro ao emitir contrato na ZapSign.', e.code);
+      mostrarMensagem(
+        mensagemErroFunctionsSeguro(
+          e,
+          fallback: 'Não foi possível emitir o contrato.',
+        ),
+      );
+    } catch (e) {
+      logErroSeguro('Erro inesperado ao emitir contrato.', e);
+      mostrarMensagem('Não foi possível emitir o contrato.');
+    } finally {
+      if (mounted) {
+        setState(() => _contratosEmProcessamento.remove(pacienteId));
+      }
+    }
   }
 
   List<Map<String, String>> atendimentosDaGestanteCentral(

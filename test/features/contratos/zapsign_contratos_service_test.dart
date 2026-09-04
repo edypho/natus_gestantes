@@ -8,6 +8,10 @@ final class _FakeZapSignFunctionsGateway implements ZapSignFunctionsGateway {
   Map<String, dynamic>? payloadGerado;
   String? contratoConsultadoId;
   String? documentoConsultadoId;
+  String? pacienteReemitidoId;
+  String? contratoReemitidoId;
+  String? operacaoReemissaoId;
+  bool? reemissaoConfirmada;
 
   @override
   Future<Map<String, dynamic>> gerarContrato({
@@ -27,6 +31,20 @@ final class _FakeZapSignFunctionsGateway implements ZapSignFunctionsGateway {
     contratoConsultadoId = contratoId;
     documentoConsultadoId = zapsignDocumentId;
     return {'status': 'assinado'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> reemitirOuEnviarContrato({
+    required String pacienteId,
+    required String contratoId,
+    required String operacaoId,
+    required bool confirmarReemissao,
+  }) async {
+    pacienteReemitidoId = pacienteId;
+    contratoReemitidoId = contratoId;
+    operacaoReemissaoId = operacaoId;
+    reemissaoConfirmada = confirmarReemissao;
+    return {'sucesso': true, 'acao': 'reemissao'};
   }
 }
 
@@ -102,5 +120,20 @@ void main() {
     expect(gateway.contratoConsultadoId, 'contrato-1');
     expect(gateway.documentoConsultadoId, 'documento-zapsign');
     expect(resposta, {'status': 'assinado'});
+  });
+
+  test('encaminha a reemissão com os identificadores corretos', () async {
+    final resposta = await service.reemitirOuEnviarContrato(
+      pacienteId: 'paciente-1',
+      contratoId: 'contrato-1',
+      operacaoId: 'operacao-1',
+      confirmarReemissao: true,
+    );
+
+    expect(gateway.pacienteReemitidoId, 'paciente-1');
+    expect(gateway.contratoReemitidoId, 'contrato-1');
+    expect(gateway.operacaoReemissaoId, 'operacao-1');
+    expect(gateway.reemissaoConfirmada, isTrue);
+    expect(resposta, {'sucesso': true, 'acao': 'reemissao'});
   });
 }

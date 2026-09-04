@@ -10,6 +10,13 @@ abstract interface class ZapSignFunctionsGateway {
     required String contratoId,
     required String zapsignDocumentId,
   });
+
+  Future<Map<String, dynamic>> reemitirOuEnviarContrato({
+    required String pacienteId,
+    required String contratoId,
+    required String operacaoId,
+    required bool confirmarReemissao,
+  });
 }
 
 final class FirebaseZapSignFunctionsGateway implements ZapSignFunctionsGateway {
@@ -40,6 +47,26 @@ final class FirebaseZapSignFunctionsGateway implements ZapSignFunctionsGateway {
     final resposta = await callable.call({
       'contratoId': contratoId,
       'zapsignDocumentId': zapsignDocumentId,
+    });
+
+    return Map<String, dynamic>.from(resposta.data as Map);
+  }
+
+  @override
+  Future<Map<String, dynamic>> reemitirOuEnviarContrato({
+    required String pacienteId,
+    required String contratoId,
+    required String operacaoId,
+    required bool confirmarReemissao,
+  }) async {
+    final callable = FirebaseFunctions.instanceFor(
+      region: 'us-central1',
+    ).httpsCallable('reemitirContratoZapSign');
+    final resposta = await callable.call({
+      'pacienteId': pacienteId,
+      'contratoId': contratoId,
+      'operacaoId': operacaoId,
+      'confirmarReemissao': confirmarReemissao,
     });
 
     return Map<String, dynamic>.from(resposta.data as Map);

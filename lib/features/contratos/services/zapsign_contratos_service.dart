@@ -48,4 +48,18 @@ class ZapSignContratosService {
   Future<ContratoRegistro?> buscarRegistro(String contratoId) {
     return _repository.buscarPorId(contratoId);
   }
+
+  Future<Map<String, dynamic>> reemitirOuEnviarContrato({
+    required String pacienteId,
+    String contratoId = '',
+    required String operacaoId,
+    required bool confirmarReemissao,
+  }) {
+    return _functionsGateway.reemitirOuEnviarContrato(
+      pacienteId: pacienteId,
+      contratoId: contratoId,
+      operacaoId: operacaoId,
+      confirmarReemissao: confirmarReemissao,
+    );
+  }
 }

@@ -201,7 +201,7 @@ test("fonte nao reintroduz CORS aberto nem log de e-mail da paciente", () => {
   const callableOptions = Array.from(source.matchAll(
       /exports\.[A-Za-z0-9_]+\s*=\s*onCall\(\s*\{([\s\S]*?)\}\s*,/g,
   ));
-  assert.equal(callableOptions.length, 9);
+  assert.equal(callableOptions.length, 10);
   for (const callable of callableOptions) {
     assert.match(callable[1], /\benforceAppCheck\s*,/);
   }

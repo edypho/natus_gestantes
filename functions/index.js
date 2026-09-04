@@ -82,13 +82,10 @@ const enforceAppCheck = false;
 const ZAPSIGN_API_BASE_URL = "https://api.zapsign.com.br/api/v1";
 const ZAPSIGN_SIGNER_BASE_URL = "https://app.zapsign.co/verificar";
 const ZAPSIGN_CONFIG_PATH = "integracoes/zapsign";
+const ZAPSIGN_MODELO_CONTRATUAL_VERSAO = "2026-09-consultorio-v3";
 const ZAPSIGN_TEMPLATE_IDS_PADRAO = {
-  acolher_consultorio: "2037be9f-e33e-406b-98ad-e2b74b385c9f",
-  acolher_residencial: "1953c005-2ca1-450c-a779-d77e8a680ab8",
-  presenca_consultorio: "876e29dd-bb1f-4801-b146-d9e2e45cf6ed",
-  presenca_residencial: "b7337535-0c05-4038-97f4-8f879d1a4012",
-  plenitude_consultorio: "045ebda1-9835-4bd8-810f-7fb1bd2cf411",
-  plenitude_residencial: "83503f6b-f179-4a20-afe4-dbdc9ad0f031",
+  presenca_consultorio: "",
+  plenitude_consultorio: "",
 };
 
 const ZAPSIGN_PLANOS_POR_TEMPLATE = {
@@ -103,18 +100,12 @@ const ZAPSIGN_PLANOS_POR_TEMPLATE = {
   presenca_consultorio: {
     planoNome: "Presenca",
     modalidadeNome: "Consultorio",
-  },
-  presenca_residencial: {
-    planoNome: "Presenca",
-    modalidadeNome: "Residencial",
+    valorTotal: 4000,
   },
   plenitude_consultorio: {
     planoNome: "Plenitude",
     modalidadeNome: "Consultorio",
-  },
-  plenitude_residencial: {
-    planoNome: "Plenitude",
-    modalidadeNome: "Residencial",
+    valorTotal: 5000,
   },
 };
 
@@ -128,57 +119,13 @@ function normalizarTextoContrato(valor) {
 
 function descobrirTemplateKeyContrato(plano, consultorio) {
   const planoNormalizado = normalizarTextoContrato(plano);
-  const consultorioNormalizado = normalizarTextoContrato(consultorio);
 
-  if (planoNormalizado.includes("acolher") &&
-    planoNormalizado.includes("consultorio")) {
-    return "acolher_consultorio";
-  }
-
-  if (planoNormalizado.includes("acolher") &&
-    planoNormalizado.includes("residencial")) {
-    return "acolher_residencial";
-  }
-
-  if (planoNormalizado.includes("presenca") &&
-    planoNormalizado.includes("consultorio")) {
+  if (planoNormalizado.includes("presenca")) {
     return "presenca_consultorio";
   }
 
-  if (planoNormalizado.includes("presenca") &&
-    planoNormalizado.includes("residencial")) {
-    return "presenca_residencial";
-  }
-
-  if (planoNormalizado.includes("plenitude") &&
-    planoNormalizado.includes("consultorio")) {
-    return "plenitude_consultorio";
-  }
-
-  if (planoNormalizado.includes("plenitude") &&
-    planoNormalizado.includes("residencial")) {
-    return "plenitude_residencial";
-  }
-
-  if (planoNormalizado.includes("acolher")) {
-    return consultorioNormalizado === "sim" ||
-      consultorioNormalizado.includes("consultorio") ?
-      "acolher_consultorio" :
-      "acolher_residencial";
-  }
-
-  if (planoNormalizado.includes("presenca")) {
-    return consultorioNormalizado === "sim" ||
-      consultorioNormalizado.includes("consultorio") ?
-      "presenca_consultorio" :
-      "presenca_residencial";
-  }
-
   if (planoNormalizado.includes("plenitude")) {
-    return consultorioNormalizado === "sim" ||
-      consultorioNormalizado.includes("consultorio") ?
-      "plenitude_consultorio" :
-      "plenitude_residencial";
+    return "plenitude_consultorio";
   }
 
   return "";
@@ -2829,6 +2776,7 @@ async function buscarConfiguracaoZapSign() {
       brandPrimaryColor: "#6F3E46",
       brandLogo: "",
       folderToken: "",
+      modeloContratualVersao: ZAPSIGN_MODELO_CONTRATUAL_VERSAO,
       templateIds: ZAPSIGN_TEMPLATE_IDS_PADRAO,
       placeholdersFixos: {
         razaoSocialNatus: "Natus",
@@ -2856,6 +2804,7 @@ async function buscarConfiguracaoZapSign() {
     brandPrimaryColor: dados.brandPrimaryColor || "#6F3E46",
     brandLogo: dados.brandLogo || "",
     folderToken: dados.folderToken || "",
+    modeloContratualVersao: dados.modeloContratualVersao || "",
     templateIds: {
       ...ZAPSIGN_TEMPLATE_IDS_PADRAO,
       ...(dados.templateIds || {}),
@@ -2883,6 +2832,17 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     throw new Error("Paciente com aliases UID divergentes.");
   }
   const uidPaciente = uidsPaciente.size === 1 ? [...uidsPaciente][0] : "";
+  const valorTotal = definicaoPlano.valorTotal || 0;
+  const numeroParcelas = Math.max(
+      1,
+      Number.parseInt(dados.parcelas || "1", 10) || 1,
+  );
+  const entradaInformada = converterNumeroContrato(
+      dados.contratoResumo && dados.contratoResumo.valorEntrada !== undefined ?
+        dados.contratoResumo.valorEntrada : dados.entrada,
+  );
+  const valorEntrada = Math.min(Math.max(entradaInformada, 0), valorTotal);
+  const valorSaldo = Math.max(valorTotal - valorEntrada, 0);
 
   return {
     ...camposIdentidadePaciente(idGestante, uidPaciente),
@@ -2900,30 +2860,35 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     enderecoResponsavel: partesEndereco.join(", "),
     dpp: dados.dpp || "",
     planoNome: definicaoPlano.planoNome || dados.plano || "",
-    modalidadeNome: definicaoPlano.modalidadeNome ||
-      (dados.contratoResumo && dados.contratoResumo.modalidadeNome ?
-      dados.contratoResumo.modalidadeNome :
-      (dados.consultorio === "Sim" ? "Consultorio" : "Residencial")),
+    modalidadeNome: definicaoPlano.modalidadeNome || "Consultorio",
     templateKey,
     cidadeAssinatura: dados.cidadeGestante || "Curitiba",
     dataAssinatura: new Date().toISOString(),
     formaPagamento: dados.formaPagamento || "",
     vencimentoParcelas: dados.vencimentoParcelas || "",
     observacoesContrato: dados.observacoesContrato || "",
-    numeroParcelas: Number.parseInt(dados.parcelas || "1", 10) || 1,
-    valorTotal: dados.contratoResumo && dados.contratoResumo.valorTotal ?
-      dados.contratoResumo.valorTotal :
-      dados.valorPlano || 0,
-    valorEntrada: dados.contratoResumo && dados.contratoResumo.valorEntrada ?
-      dados.contratoResumo.valorEntrada :
-      dados.entrada || 0,
-    valorSaldo: dados.contratoResumo && dados.contratoResumo.valorSaldo ?
-      dados.contratoResumo.valorSaldo :
-      0,
-    valorParcela: dados.contratoResumo && dados.contratoResumo.valorParcela ?
-      dados.contratoResumo.valorParcela :
-      dados.valorParcela || 0,
+    numeroParcelas,
+    valorTotal,
+    valorEntrada,
+    valorSaldo,
+    valorParcela: valorSaldo / numeroParcelas,
   };
+}
+
+function validarContatoPacienteContrato(payload) {
+  const email = textoSeguro(payload.emailPaciente).toLowerCase();
+  const telefone = normalizarTelefone(payload.telefonePaciente);
+  const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const telefoneValido = telefone.number.length >= 10 &&
+    telefone.number.length <= 11;
+
+  if (!emailValido || !telefoneValido) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Preencha e-mail e telefone válidos na ficha da paciente antes de " +
+        "emitir o contrato.",
+    );
+  }
 }
 
 function montarCamposDinamicos(payload, configuracao) {
@@ -3105,10 +3070,13 @@ function montarPayloadCriacaoDocumento({
 
   const body = {
     template_id: templateId,
+    external_id: contratoId,
     signer_name: signatarioPrincipal.name || payload.nomePaciente || "Paciente",
     data: montarCamposDinamicos(payload, configuracao),
     lang: configuracao.lang || "pt-br",
     disable_signer_emails: configuracao.disableSignerEmails === true,
+    send_automatic_email:
+      configuracao.disableSignerEmails !== true && Boolean(signatarioPrincipal.email),
   };
 
   if (signatarioPrincipal.email) {
@@ -3690,14 +3658,59 @@ async function processarGeracaoContrato({
 }) {
   const tenantId = exigirTenant(camposTenant(clinicaId), "Contrato");
   const templateKey = payload.templateKey || "";
+  const definicaoPlano = ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey];
+
+  if (!definicaoPlano) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Este plano não possui um modelo contratual ativo.",
+    );
+  }
+
+  const numeroParcelas = Math.max(
+      1,
+      Number.parseInt(payload.numeroParcelas || "1", 10) || 1,
+  );
+  const valorTotal = definicaoPlano.valorTotal;
+  const valorEntrada = Math.min(
+      Math.max(converterNumeroContrato(payload.valorEntrada), 0),
+      valorTotal,
+  );
+  const valorSaldo = Math.max(valorTotal - valorEntrada, 0);
+  payload = {
+    ...payload,
+    planoNome: definicaoPlano.planoNome,
+    modalidadeNome: definicaoPlano.modalidadeNome,
+    numeroParcelas,
+    valorTotal,
+    valorEntrada,
+    valorSaldo,
+    valorParcela: valorSaldo / numeroParcelas,
+  };
   const pacienteId = payload.pacienteId || "";
   const configuracao = await buscarConfiguracaoZapSign();
   const signatariosPlanejados = montarSignatariosContrato(payload, configuracao);
+
+  validarContatoPacienteContrato(payload);
 
   if (configuracao.ativo === false) {
     throw new HttpsError(
         "failed-precondition",
         "A integracao ZapSign esta desativada nas configuracoes.",
+    );
+  }
+
+  if (configuracao.modeloContratualVersao !==
+      ZAPSIGN_MODELO_CONTRATUAL_VERSAO) {
+    await atualizarContrato(contratoId, {
+      status: "aguardando_template_atualizado",
+      zapsignTemplateKey: templateKey,
+      payload,
+      atualizadoEm: new Date().toISOString(),
+    }, tenantId);
+    throw new HttpsError(
+        "failed-precondition",
+        "Os novos modelos contratuais ainda não foram configurados na ZapSign.",
     );
   }
 
@@ -3773,6 +3786,7 @@ async function processarGeracaoContrato({
 
     await atualizarContrato(contratoId, {
       status: statusInterno,
+      emissaoEmAndamento: false,
       zapsignStatus: detalheDocumento.status || respostaZapSign.status || "",
       zapsignDocumentId: detalheDocumento.token || respostaZapSign.token || "",
       zapsignOpenId: String(
@@ -3825,6 +3839,7 @@ async function processarGeracaoContrato({
     const errorCode = safeErrorCode(error);
     await atualizarContrato(contratoId, {
       status: "erro",
+      emissaoEmAndamento: false,
       erro: "Falha temporaria na integracao de assinatura.",
       erroCodigo: errorCode,
       atualizadoEm: new Date().toISOString(),
@@ -5196,6 +5211,262 @@ exports.gerarContratoZapSign = onCall(
         apiToken,
         clinicaId: contratoResolvido.clinicaId,
       });
+    },
+);
+
+exports.reemitirContratoZapSign = onCall(
+    {
+      invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
+      secrets: [zapsignApiToken],
+    },
+    async (request) => {
+      const contexto = await exigirContextoUsuario(request.auth, ["admin"]);
+      await exigirLimiteUso({
+        action: "zapsign-reissue",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 10,
+        windowSeconds: 60,
+      });
+
+      const entrada = request.data || {};
+      const pacienteId = exigirTextoCriacao(
+          entrada.pacienteId,
+          "pacienteId",
+          128,
+      );
+      const contratoIdInformado = textoSeguro(entrada.contratoId);
+      const reemissaoConfirmada = entrada.confirmarReemissao === true;
+      const operacaoId = exigirTextoCriacao(
+          entrada.operacaoId || entrada.operationId,
+          "operacaoId",
+          128,
+      );
+
+      if (!/^[a-zA-Z0-9_-]+$/.test(operacaoId)) {
+        throw new HttpsError("invalid-argument", "OperacaoId inválido.");
+      }
+
+      let contratoAnterior = null;
+      let pacienteRef;
+      let paciente;
+      let clinicaId;
+
+      if (contratoIdInformado) {
+        contratoAnterior = await buscarContratoComTenant(contratoIdInformado);
+        if (contratoAnterior.pacienteId !== pacienteId) {
+          throw new HttpsError(
+              "permission-denied",
+              "O contrato não pertence à paciente informada.",
+          );
+        }
+        exigirAcessoAoTenant(contexto, contratoAnterior.clinicaId);
+        pacienteRef = contratoAnterior.pacienteRef;
+        paciente = contratoAnterior.paciente;
+        clinicaId = contratoAnterior.clinicaId;
+      } else {
+        pacienteRef = admin.firestore().collection("gestantes").doc(pacienteId);
+        const pacienteSnapshot = await pacienteRef.get();
+        if (!pacienteSnapshot.exists) {
+          throw new HttpsError("not-found", "Paciente não encontrada.");
+        }
+        paciente = pacienteSnapshot.data() || {};
+        clinicaId = exigirTenant(paciente, "Paciente");
+        await exigirClinicaAtiva(clinicaId);
+        exigirAcessoAoTenant(contexto, clinicaId);
+      }
+
+      const contratoVinculadoId = textoSeguro(paciente.contratoId);
+      if (!contratoAnterior && contratoVinculadoId) {
+        try {
+          const contratoVinculado = await buscarContratoComTenant(
+              contratoVinculadoId,
+          );
+          if (contratoVinculado.pacienteId !== pacienteId ||
+              contratoVinculado.clinicaId !== clinicaId) {
+            throw new HttpsError(
+                "failed-precondition",
+                "O contrato vinculado à paciente está inconsistente.",
+            );
+          }
+          contratoAnterior = contratoVinculado;
+        } catch (error) {
+          if (!(error instanceof HttpsError) || error.code !== "not-found") {
+            throw error;
+          }
+        }
+      }
+
+      const templateKey = descobrirTemplateKeyContrato(
+          paciente.plano || "",
+          paciente.consultorio || "",
+      );
+      if (!templateKey || !ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey]) {
+        throw new HttpsError(
+            "failed-precondition",
+            "A paciente precisa estar no plano Presença ou Plenitude.",
+        );
+      }
+
+      const payload = montarPayloadContratoDaGestante(pacienteId, {
+        ...paciente,
+        contratoTemplateKey: templateKey,
+      });
+      validarContatoPacienteContrato(payload);
+
+      const documentoAnterior = textoSeguro(
+          contratoAnterior && contratoAnterior.contrato.zapsignDocumentId,
+      );
+      if (contratoAnterior && documentoAnterior && !reemissaoConfirmada) {
+        await atualizarGestanteComContrato(pacienteId, {
+          contratoId: contratoAnterior.contratoRef.id,
+          contratoStatus: contratoAnterior.contrato.status || "enviado",
+          contratoTemplateKey: contratoAnterior.contrato.templateKey ||
+            templateKey,
+          contratoZapSignDocumentId: documentoAnterior,
+          contratoZapSignSignerUrl:
+            contratoAnterior.contrato.zapsignSignerUrl || "",
+          contratoUltimaTentativaEm: new Date().toISOString(),
+        }, clinicaId);
+        return {
+          sucesso: true,
+          acao: "sincronizacao",
+          contratoId: contratoAnterior.contratoRef.id,
+          status: contratoAnterior.contrato.status || "enviado",
+          zapsignDocumentId: documentoAnterior,
+          zapsignSignerUrl:
+            contratoAnterior.contrato.zapsignSignerUrl || "",
+          reutilizado: true,
+        };
+      }
+      const reutilizarPendente = Boolean(contratoAnterior && !documentoAnterior);
+      const acao = reutilizarPendente ? "envio_pendente" :
+        (contratoAnterior ? "reemissao" : "emissao");
+      const contratoRef = reutilizarPendente ? contratoAnterior.contratoRef :
+        admin.firestore().collection("contratos")
+            .doc(`reemissao_${operacaoId}`);
+      const agora = new Date();
+      let resultadoExistente = null;
+
+      await admin.firestore().runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(contratoRef);
+        const dadosAtuais = snapshot.exists ? (snapshot.data() || {}) : {};
+        const pacienteAtual = textoSeguro(
+            dadosAtuais.pacienteId ||
+            (dadosAtuais.payload && dadosAtuais.payload.pacienteId),
+        );
+
+        if (snapshot.exists && pacienteAtual && pacienteAtual !== pacienteId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "A operação de emissão conflita com outra paciente.",
+          );
+        }
+
+        const documentoExistente = textoSeguro(dadosAtuais.zapsignDocumentId);
+        if (documentoExistente) {
+          resultadoExistente = {
+            sucesso: true,
+            acao,
+            contratoId: contratoRef.id,
+            status: dadosAtuais.status || "enviado",
+            zapsignDocumentId: documentoExistente,
+            zapsignSignerUrl: dadosAtuais.zapsignSignerUrl || "",
+            reutilizado: true,
+          };
+          return;
+        }
+
+        const inicioAnterior = Date.parse(
+            dadosAtuais.emissaoIniciadaEm || "",
+        );
+        const bloqueioAtivo = dadosAtuais.emissaoEmAndamento === true &&
+          Number.isFinite(inicioAnterior) &&
+          agora.getTime() - inicioAnterior < 5 * 60 * 1000;
+        if (bloqueioAtivo) {
+          throw new HttpsError(
+              "aborted",
+              "A emissão deste contrato já está em andamento.",
+          );
+        }
+
+        transaction.set(contratoRef, {
+          ...camposTenant(clinicaId),
+          pacienteId,
+          pacienteUid: payload.pacienteUid || "",
+          uidPaciente: payload.uidPaciente || "",
+          uidGestante: payload.uidGestante || "",
+          templateKey,
+          status: "pendente",
+          zapsignDocumentId: "",
+          zapsignSignerUrl: "",
+          payload,
+          origem: acao === "reemissao" ?
+            "reemissao_manual" : "emissao_manual",
+          operacaoId,
+          emissaoEmAndamento: true,
+          emissaoIniciadaEm: agora.toISOString(),
+          atualizadoEm: agora.toISOString(),
+          ...(!snapshot.exists ? {criadoEm: agora.toISOString()} : {}),
+          ...(contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id ? {
+            contratoAnteriorId: contratoAnterior.contratoRef.id,
+          } : {}),
+        }, {merge: true});
+      });
+
+      if (resultadoExistente) {
+        await atualizarGestanteComContrato(pacienteId, {
+          contratoGeracaoAutomatica: false,
+          contratoId: contratoRef.id,
+          contratoStatus: resultadoExistente.status,
+          contratoTemplateKey: templateKey,
+          contratoPlanoCodigo: templateKey.split("_")[0] || "",
+          contratoModalidadeCodigo: "consultorio",
+          contratoZapSignDocumentId: resultadoExistente.zapsignDocumentId,
+          contratoZapSignSignerUrl: resultadoExistente.zapsignSignerUrl,
+          contratoUltimaTentativaEm: new Date().toISOString(),
+        }, clinicaId);
+        return resultadoExistente;
+      }
+
+      await atualizarGestanteComContrato(pacienteId, {
+        contratoGeracaoAutomatica: false,
+        contratoId: contratoRef.id,
+        contratoStatus: "pendente",
+        contratoTemplateKey: templateKey,
+        contratoPlanoCodigo: templateKey.split("_")[0] || "",
+        contratoModalidadeCodigo: "consultorio",
+        contratoZapSignDocumentId: "",
+        contratoZapSignSignerUrl: "",
+        contratoUltimaTentativaEm: agora.toISOString(),
+      }, clinicaId);
+
+      let resultado;
+      try {
+        resultado = await processarGeracaoContrato({
+          contratoId: contratoRef.id,
+          payload,
+          apiToken: zapsignApiToken.value(),
+          clinicaId,
+        });
+      } catch (error) {
+        await atualizarContrato(contratoRef.id, {
+          emissaoEmAndamento: false,
+          atualizadoEm: new Date().toISOString(),
+        }, clinicaId);
+        throw error;
+      }
+
+      if (contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id) {
+        await contratoAnterior.contratoRef.set({
+          substituidoPorContratoId: contratoRef.id,
+          substituidoEm: new Date().toISOString(),
+          atualizadoEm: new Date().toISOString(),
+        }, {merge: true});
+      }
+
+      return {...resultado, acao};
     },
 );
 
