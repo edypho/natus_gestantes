@@ -3,6 +3,8 @@ import 'package:natus_gestantes/shared/natus_app.dart';
 import 'package:natus_gestantes/shared/natus_logo.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../core/natus_terminologia.dart';
+
 class _NatusMenuItem {
   final String titulo;
   final IconData icone;
@@ -61,7 +63,7 @@ Widget menuLateralRealNatus({
       return const [
         _NatusMenuItem('Dashboard', Icons.dashboard_rounded),
         _NatusMenuItem('Mapa', Icons.map_rounded),
-        _NatusMenuItem('Gestantes', Icons.pregnant_woman_rounded),
+        _NatusMenuItem('Gestantes', Icons.people_alt_rounded),
         _NatusMenuItem('Prontuário', Icons.assignment_rounded),
         _NatusMenuItem('Calculadora de IG', Icons.calculate_rounded),
         _NatusMenuItem('Atendimentos', Icons.medical_services_rounded),
@@ -76,7 +78,7 @@ Widget menuLateralRealNatus({
       _NatusMenuItem('Dashboard', Icons.dashboard_rounded),
       _NatusMenuItem('Mapa', Icons.map_rounded),
       _NatusMenuItem('Cadastro', Icons.person_add_alt_1_rounded),
-      _NatusMenuItem('Gestantes', Icons.pregnant_woman_rounded),
+      _NatusMenuItem('Gestantes', Icons.people_alt_rounded),
       _NatusMenuItem('Prontuário', Icons.assignment_rounded),
       _NatusMenuItem('Calculadora de IG', Icons.calculate_rounded),
       _NatusMenuItem('Atendimentos', Icons.medical_services_rounded),
@@ -146,7 +148,7 @@ Widget menuLateralRealNatus({
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  item.titulo,
+                  NatusTermos.rotuloMenu(item.titulo),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

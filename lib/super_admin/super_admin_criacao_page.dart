@@ -9,27 +9,16 @@ class SuperAdminCriacaoPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SuperAdminPageScaffold(
-      titulo: 'Criação de clínica/admin SaaS',
-      subtitulo: 'Fluxo único para criar clínica, admin responsável, plano e assinatura.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'O SuperAdmin cria apenas a clínica e o admin responsável. '
-            'Depois, o admin da clínica cria enfermeiras, gestantes e equipe interna.',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 18),
-          ElevatedButton.icon(
-            onPressed: () => superAdminCriarClinicaComAdminDialog(
-              context: context,
-            ),
-            icon: const Icon(Icons.add_business),
-            label: const Text('Criar clínica + admin SaaS'),
-          ),
-        ],
+      titulo: 'Cadastrar clínica',
+      subtitulo:
+          'Crie a operação comercial completa com clínica, administrador, plano e assinatura.',
+      icone: Icons.add_business_rounded,
+      child: SuperAdminActionCard(
+        titulo: 'Nova clínica + administrador',
+        descricao:
+            'O administrador receberá um link seguro para definir a senha. Depois, ele poderá cadastrar profissionais, pacientes e equipe.',
+        icone: Icons.add_business_rounded,
+        onTap: () => superAdminCriarClinicaComAdminDialog(context: context),
       ),
     );
   }

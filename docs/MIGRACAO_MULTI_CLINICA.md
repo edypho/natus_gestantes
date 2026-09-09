@@ -1,9 +1,10 @@
 # Migração multi-clínica — artefatos staged
 
-> **ATENÇÃO: estas regras NÃO estão ativas.** Os arquivos em
-> `firebase/security/` não estão vinculados ao `firebase.json`, não foram
-> publicados e não alteram o ambiente de produção. Não faça deploy direto
-> destes arquivos.
+> **ATENÇÃO: estas regras NÃO estão ativas em produção.** Os arquivos em
+> `firebase/security/` estão vinculados ao `firebase.json` local e protegidos
+> por um gate de predeploy, mas não foram publicados. Não faça deploy direto:
+> siga o rollout controlado documentado em
+> [`PLANO_RELEASE_SEM_INTERRUPCAO.md`](PLANO_RELEASE_SEM_INTERRUPCAO.md).
 
 Este documento descreve o caminho seguro para migrar o Natus do modelo legado,
 com coleções operacionais globais, para isolamento por clínica. A nova raiz é:
@@ -11,6 +12,10 @@ com coleções operacionais globais, para isolamento por clínica. A nova raiz �
 ```text
 clinicas/{tenantId}/...
 ```
+
+O inventário automatizado e seus comandos estão documentados em
+[`AUDITORIA_MULTI_CLINICA.md`](AUDITORIA_MULTI_CLINICA.md). Ele é estritamente
+read-only e deve ser executado antes de qualquer backfill.
 
 No primeiro ciclo, `tenantId`, `clinicaId` e `adminDonoId` representam o ID do
 documento da clínica. `adminUid` continua representando apenas o UID da conta
@@ -348,8 +353,7 @@ leitura de contexto também deve negar acesso.
 6. Faça shadow-read: compare resposta legada e canônica sem mudar a UI.
 7. Corrija toda divergência antes de prosseguir.
 8. Construa os índices e aguarde o status pronto.
-9. Somente após aprovação, adicione manualmente ao `firebase.json` referências
-   equivalentes a:
+9. Somente após aprovação, confirme que o `firebase.json` mantém as referências:
 
    ```json
    {
@@ -363,11 +367,13 @@ leitura de contexto também deve negar acesso.
    }
    ```
 
-   Este repositório **não faz essa vinculação automaticamente**.
+   O repositório já contém essa vinculação, mas o gate de predeploy recusa o
+   ambiente produtivo enquanto a auditoria cloud recente não estiver completa
+   e sem bloqueadores.
 10. Publique primeiro para um grupo interno, depois uma clínica piloto e só
     então amplie gradualmente.
 11. Monitore `permission-denied`, falhas de Functions, divergências de shadow
-    read, notificações, cobranças, NFS-e, contratos e uploads.
+    read, notificações, cobranças, contratos e uploads.
 12. Mantenha as coleções legadas somente pelo período de estabilização aprovado.
 
 ## Checklist de ativação

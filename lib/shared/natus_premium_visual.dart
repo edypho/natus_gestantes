@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/natus_breakpoints.dart';
 import 'natus_app.dart';
 
 class PremiumNatusBackground extends StatelessWidget {
@@ -171,8 +172,10 @@ class PremiumHeaderNatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final largura = MediaQuery.of(context).size.width;
-    final mobile = largura < 760;
+    final mobile = NatusBreakpoints.usarLayoutCompacto(
+      context,
+      larguraLimite: 760,
+    );
 
     return Container(
       width: double.infinity,
@@ -301,7 +304,10 @@ class PremiumMetricCardNatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mobile = MediaQuery.of(context).size.width < 720;
+    final mobile = NatusBreakpoints.usarLayoutCompacto(
+      context,
+      larguraLimite: 720,
+    );
     final cor = this.cor ?? NatusApp.vinho;
 
     return Container(

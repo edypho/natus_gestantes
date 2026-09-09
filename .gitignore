@@ -17,6 +17,7 @@ migrate_working_dir/
 *.ipr
 *.iws
 .idea/
+/.vscode/
 
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
@@ -32,6 +33,26 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/.firebase/
+/functions/audit-reports/
+/functions/migration-reports/
+/functions/private-backups/
+/.local-private/
+/ios/Flutter/Secrets.xcconfig
+
+# Secrets and local runtime configuration
+**/.env
+**/.env.*
+!**/.env.example
+**/.runtimeconfig.json
+**/*service-account*.json
+**/serviceAccountKey.json
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/*.key
 
 # Symbolication related
 app.*.symbols
@@ -43,3 +64,5 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/web/downloads/natus-android-1.0.0.apk
+/web/downloads/natus-android-1.0.0.sha256

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../pacientes/paciente_identidade.dart';
+
 class AgendaEvento {
   final String id;
   final String titulo;
@@ -57,10 +59,8 @@ class AgendaEvento {
       id: doc.id,
       titulo: texto(dados['titulo']),
       tipo: texto(dados['tipo']).isEmpty ? 'Outro' : texto(dados['tipo']),
-      gestanteId: texto(dados['gestanteId']),
-      gestanteUid: texto(dados['gestanteUid']).isNotEmpty
-          ? texto(dados['gestanteUid'])
-          : texto(dados['uidGestante']),
+      gestanteId: pacienteIdDoRegistro(dados),
+      gestanteUid: pacienteUidDoRegistro(dados),
       gestanteNome: texto(dados['gestanteNome']),
       enfermeiraId: texto(dados['enfermeiraId']),
       enfermeiraNome: texto(dados['enfermeiraNome']),
@@ -84,25 +84,27 @@ class AgendaEvento {
     final inicio = montarDataHora(data, horaInicio);
     final fim = montarDataHora(data, horaFim);
 
-    final dados = <String, dynamic>{
-      'titulo': titulo.trim(),
-      'tipo': tipo.trim(),
-      'gestanteId': gestanteId.trim(),
-      'gestanteUid': gestanteUid.trim(),
-      'gestanteNome': gestanteNome.trim(),
-      'enfermeiraId': enfermeiraId.trim(),
-      'enfermeiraNome': enfermeiraNome.trim(),
-      'data': data.trim(),
-      'horaInicio': horaInicio.trim(),
-      'horaFim': horaFim.trim(),
-      'local': local.trim(),
-      'observacoes': observacoes.trim(),
-      'status': status.trim(),
-      'dataHoraInicio': inicio == null ? null : Timestamp.fromDate(inicio),
-      'dataHoraFim': fim == null ? null : Timestamp.fromDate(fim),
-      'atualizadoPorUid': usuarioUid,
-      'atualizadoEm': FieldValue.serverTimestamp(),
-    };
+    final dados = identidadePacienteCanonica(
+      <String, dynamic>{
+        'titulo': titulo.trim(),
+        'tipo': tipo.trim(),
+        'gestanteNome': gestanteNome.trim(),
+        'enfermeiraId': enfermeiraId.trim(),
+        'enfermeiraNome': enfermeiraNome.trim(),
+        'data': data.trim(),
+        'horaInicio': horaInicio.trim(),
+        'horaFim': horaFim.trim(),
+        'local': local.trim(),
+        'observacoes': observacoes.trim(),
+        'status': status.trim(),
+        'dataHoraInicio': inicio == null ? null : Timestamp.fromDate(inicio),
+        'dataHoraFim': fim == null ? null : Timestamp.fromDate(fim),
+        'atualizadoPorUid': usuarioUid,
+        'atualizadoEm': FieldValue.serverTimestamp(),
+      },
+      pacienteId: gestanteId,
+      pacienteUid: gestanteUid,
+    );
 
     if (incluirCriador) {
       dados['criadoPorUid'] = usuarioUid;

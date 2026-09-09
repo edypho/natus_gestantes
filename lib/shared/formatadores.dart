@@ -16,7 +16,6 @@ double converterPercentual(String texto) {
   return percentual / 100;
 }
 
-
 String formatarMoeda(double valor) {
   return 'R\$ ${valor.toStringAsFixed(2).replaceAll('.', ',')}';
 }

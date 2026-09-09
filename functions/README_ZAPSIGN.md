@@ -35,13 +35,10 @@ Exemplo de estrutura:
   "brandPrimaryColor": "#6F3E46",
   "brandLogo": "",
   "folderToken": "",
+  "modeloContratualVersao": "2026-09-consultorio-v3",
   "templateIds": {
-    "acolher_consultorio": "",
-    "acolher_residencial": "",
     "presenca_consultorio": "",
-    "presenca_residencial": "",
-    "plenitude_consultorio": "",
-    "plenitude_residencial": ""
+    "plenitude_consultorio": ""
   },
   "placeholdersFixos": {
     "razaoSocialNatus": "Natus",
@@ -62,6 +59,21 @@ Exemplo de estrutura:
 4. A function chama `POST /api/v1/models/create-doc/`.
 5. O retorno da ZapSign e salvo em `contratos`.
 6. A ficha da paciente recebe status, token e link de assinatura.
+
+Os únicos modelos contratuais ativos são:
+
+- `presenca_consultorio`: R$ 4.000,00
+- `plenitude_consultorio`: R$ 5.000,00
+
+E-mail e telefone válidos da paciente são obrigatórios. Eles são enviados à
+ZapSign como dados bloqueados do signatário; o e-mail automático de assinatura
+fica habilitado quando `disableSignerEmails` não for `true`.
+
+O botão do aplicativo usa a ação `reemitir` da callable
+`gerarContratoZapSign`: se o contrato ainda não
+possuir documento ZapSign, a solicitação existente é tentada novamente. Se já
+possuir documento, uma nova emissão é criada e vinculada à anterior, que
+permanece no histórico.
 
 ## Endpoints usados
 

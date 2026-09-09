@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../seguranca/log_seguro.dart';
+
 Future<bool> abrirTrocaSenhaPrimeiroLoginSaaS({
   required BuildContext context,
   required String uid,
@@ -110,11 +112,15 @@ Future<bool> abrirTrocaSenhaPrimeiroLoginSaaS({
                               Navigator.pop(dialogContext, true);
                             }
                           } catch (e) {
+                            logErroSeguro(
+                              'Erro ao alterar a senha inicial.',
+                              e,
+                            );
                             if (dialogContext.mounted) {
                               ScaffoldMessenger.of(dialogContext).showSnackBar(
-                                SnackBar(
+                                const SnackBar(
                                   content: Text(
-                                    'Não foi possível alterar a senha: $e',
+                                    'Não foi possível alterar a senha.',
                                   ),
                                 ),
                               );

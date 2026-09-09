@@ -1,10 +1,7 @@
 import '../decorativos/decorativos_natus.dart';
 import 'package:flutter/material.dart';
 
-Widget gestantesSecaoTitulo({
-  required String titulo,
-  String? subtitulo,
-}) {
+Widget gestantesSecaoTitulo({required String titulo, String? subtitulo}) {
   return Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: Column(
@@ -12,19 +9,13 @@ Widget gestantesSecaoTitulo({
       children: [
         Text(
           titulo,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
         if (subtitulo != null && subtitulo.trim().isNotEmpty) ...[
           const SizedBox(height: 4),
           Text(
             subtitulo,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade700,
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
           ),
         ],
       ],
@@ -42,18 +33,12 @@ Widget gestantesInfoChip({
     decoration: BoxDecoration(
       color: (cor ?? Colors.grey).withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(999),
-      border: Border.all(
-        color: (cor ?? Colors.grey).withValues(alpha: 0.25),
-      ),
+      border: Border.all(color: (cor ?? Colors.grey).withValues(alpha: 0.25)),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          icone,
-          size: 16,
-          color: cor ?? Colors.grey.shade700,
-        ),
+        Icon(icone, size: 16, color: cor ?? Colors.grey.shade700),
         const SizedBox(width: 6),
         Text(
           texto,
@@ -92,20 +77,11 @@ Widget gestantesCardBase({
   );
 }
 
-
-Widget gestantesCardOrganicoNatus({
-  required Widget child,
-}) {
-  return CardOrganicoNatus(
-    child: child,
-  );
+Widget gestantesCardOrganicoNatus({required Widget child}) {
+  return CardOrganicoNatus(child: child);
 }
 
-
-String gestanteTextoSeguro(
-  Map<String, String> gestante,
-  String chave,
-) {
+String gestanteTextoSeguro(Map<String, String> gestante, String chave) {
   final valor = gestante[chave];
   if (valor == null || valor.trim().isEmpty) {
     return '-';

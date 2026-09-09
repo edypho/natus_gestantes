@@ -24,24 +24,15 @@ Widget superAdminStatusBadge(String status) {
   final cor = superAdminStatusColor(status);
 
   return Container(
-    padding: const EdgeInsets.symmetric(
-      horizontal: 10,
-      vertical: 6,
-    ),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
       color: cor.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(999),
-      border: Border.all(
-        color: cor.withValues(alpha: 0.25),
-      ),
+      border: Border.all(color: cor.withValues(alpha: 0.25)),
     ),
     child: Text(
       status.isEmpty ? 'sem status' : status,
-      style: TextStyle(
-        color: cor,
-        fontWeight: FontWeight.bold,
-        fontSize: 12,
-      ),
+      style: TextStyle(color: cor, fontWeight: FontWeight.bold, fontSize: 12),
     ),
   );
 }

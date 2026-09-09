@@ -3,22 +3,17 @@ String normalizarStatus(dynamic valor) {
     return '';
   }
 
-  return valor
-      .toString()
-      .trim()
-      .toLowerCase();
+  return valor.toString().trim().toLowerCase();
 }
 
 bool statusEhPago(dynamic valor) {
   final status = normalizarStatus(valor);
 
-  return status == 'pago' ||
-      status == 'paga';
+  return status == 'pago' || status == 'paga';
 }
 
 bool statusEhEncerrado(dynamic valor) {
   final status = normalizarStatus(valor);
 
-  return status == 'encerrada' ||
-      status == 'encerrado';
+  return status == 'encerrada' || status == 'encerrado';
 }

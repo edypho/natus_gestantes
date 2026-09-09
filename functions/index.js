@@ -5,32 +5,87 @@ const {setGlobalOptions} = require("firebase-functions");
 const {
   onDocumentCreated,
   onDocumentUpdated,
+  onDocumentWritten,
 } = require("firebase-functions/v2/firestore");
-const admin = require("firebase-admin");
+const {initializeApp} = require("firebase-admin/app");
+const {getAuth} = require("firebase-admin/auth");
+const {
+  FieldValue,
+  Timestamp,
+  getFirestore,
+} = require("firebase-admin/firestore");
+const {getMessaging} = require("firebase-admin/messaging");
+const {getStorage} = require("firebase-admin/storage");
 const {defineSecret} = require("firebase-functions/params");
 const {
   avaliarTransicaoPerfil,
 } = require("./user_lifecycle_policy");
+const {
+  AuthTokenValidationError,
+  verificarIdTokenNaoRevogado,
+} = require("./password_reset_auth");
+const {
+  MAX_SAFE_BATCH_WRITES,
+  canonicalPatientLinkedRecordPath,
+  canonicalPatientPath,
+  canonicalUserPath,
+  countPatientLinkBatchWrites,
+} = require("./canonical_dual_write_policy");
+const {
+  DurableOperationError,
+  OPERATION_KIND,
+  OPERATION_STATE,
+  adicionarCommitAoBatch,
+  consultarOperacao,
+  criarDescritorOperacao,
+  garantirUsuarioAuth,
+  marcarFirestoreParaRetentativa,
+  marcarRollbackNecessario,
+  prepararCommitOperacao,
+  reservarOperacao,
+  reverterUsuarioAuth,
+} = require("./durable_operation_journal");
+const {
+  applyRestrictedCors,
+} = require("./security/http_cors");
+const {
+  buildPrivateClinicalPush,
+} = require("./security/private_push");
+const {
+  RateLimitExceededError,
+  consumeRateLimit,
+} = require("./security/rate_limiter");
+const {
+  logSafeError,
+  safeErrorCode,
+} = require("./security/safe_logging");
+const {
+  validateCanonicalUpload,
+} = require("./security/upload_content_validator");
+const {
+  canonicalSyncDestination,
+} = require("./canonical_sync_policy");
 
 const {onRequest} = require("firebase-functions/v2/https");
 
 
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onObjectFinalized} = require("firebase-functions/v2/storage");
 
 const zapsignApiToken = defineSecret("ZAPSIGN_API_TOKEN");
 const googleMapsGeocodingApiKey = defineSecret(
     "GOOGLE_MAPS_GEOCODING_API_KEY",
 );
+// App Check e uma opcao de implantacao, nao uma configuracao lida em runtime.
+// Permanece desligado ate os provedores serem cadastrados e monitorados.
+const enforceAppCheck = false;
 const ZAPSIGN_API_BASE_URL = "https://api.zapsign.com.br/api/v1";
 const ZAPSIGN_SIGNER_BASE_URL = "https://app.zapsign.co/verificar";
 const ZAPSIGN_CONFIG_PATH = "integracoes/zapsign";
+const ZAPSIGN_MODELO_CONTRATUAL_VERSAO = "2026-09-consultorio-v3";
 const ZAPSIGN_TEMPLATE_IDS_PADRAO = {
-  acolher_consultorio: "2037be9f-e33e-406b-98ad-e2b74b385c9f",
-  acolher_residencial: "1953c005-2ca1-450c-a779-d77e8a680ab8",
-  presenca_consultorio: "876e29dd-bb1f-4801-b146-d9e2e45cf6ed",
-  presenca_residencial: "b7337535-0c05-4038-97f4-8f879d1a4012",
-  plenitude_consultorio: "045ebda1-9835-4bd8-810f-7fb1bd2cf411",
-  plenitude_residencial: "83503f6b-f179-4a20-afe4-dbdc9ad0f031",
+  presenca_consultorio: "",
+  plenitude_consultorio: "",
 };
 
 const ZAPSIGN_PLANOS_POR_TEMPLATE = {
@@ -45,18 +100,12 @@ const ZAPSIGN_PLANOS_POR_TEMPLATE = {
   presenca_consultorio: {
     planoNome: "Presenca",
     modalidadeNome: "Consultorio",
-  },
-  presenca_residencial: {
-    planoNome: "Presenca",
-    modalidadeNome: "Residencial",
+    valorTotal: 4000,
   },
   plenitude_consultorio: {
     planoNome: "Plenitude",
     modalidadeNome: "Consultorio",
-  },
-  plenitude_residencial: {
-    planoNome: "Plenitude",
-    modalidadeNome: "Residencial",
+    valorTotal: 5000,
   },
 };
 
@@ -70,65 +119,103 @@ function normalizarTextoContrato(valor) {
 
 function descobrirTemplateKeyContrato(plano, consultorio) {
   const planoNormalizado = normalizarTextoContrato(plano);
-  const consultorioNormalizado = normalizarTextoContrato(consultorio);
 
-  if (planoNormalizado.includes("acolher") &&
-    planoNormalizado.includes("consultorio")) {
-    return "acolher_consultorio";
-  }
-
-  if (planoNormalizado.includes("acolher") &&
-    planoNormalizado.includes("residencial")) {
-    return "acolher_residencial";
-  }
-
-  if (planoNormalizado.includes("presenca") &&
-    planoNormalizado.includes("consultorio")) {
+  if (planoNormalizado.includes("presenca")) {
     return "presenca_consultorio";
   }
 
-  if (planoNormalizado.includes("presenca") &&
-    planoNormalizado.includes("residencial")) {
-    return "presenca_residencial";
-  }
-
-  if (planoNormalizado.includes("plenitude") &&
-    planoNormalizado.includes("consultorio")) {
-    return "plenitude_consultorio";
-  }
-
-  if (planoNormalizado.includes("plenitude") &&
-    planoNormalizado.includes("residencial")) {
-    return "plenitude_residencial";
-  }
-
-  if (planoNormalizado.includes("acolher")) {
-    return consultorioNormalizado === "sim" ||
-      consultorioNormalizado.includes("consultorio") ?
-      "acolher_consultorio" :
-      "acolher_residencial";
-  }
-
-  if (planoNormalizado.includes("presenca")) {
-    return consultorioNormalizado === "sim" ||
-      consultorioNormalizado.includes("consultorio") ?
-      "presenca_consultorio" :
-      "presenca_residencial";
-  }
-
   if (planoNormalizado.includes("plenitude")) {
-    return consultorioNormalizado === "sim" ||
-      consultorioNormalizado.includes("consultorio") ?
-      "plenitude_consultorio" :
-      "plenitude_residencial";
+    return "plenitude_consultorio";
   }
 
   return "";
 }
 
-admin.initializeApp();
+// Adapter mínimo para preservar os fluxos existentes enquanto o SDK Admin 14
+// expõe apenas as APIs modulares. Nenhum estado ou credencial é armazenado aqui.
+const adminFirestore = () => getFirestore();
+adminFirestore.FieldValue = FieldValue;
+adminFirestore.Timestamp = Timestamp;
+const admin = {
+  auth: getAuth,
+  firestore: adminFirestore,
+  messaging: getMessaging,
+  storage: getStorage,
+};
+
+initializeApp();
 
 setGlobalOptions({maxInstances: 10});
+
+exports.sincronizarRaizCanonica = onDocumentWritten(
+    "{collectionId}/{documentId}",
+    async (event) => {
+      const change = event.data;
+      if (!change) return;
+      const collectionName = event.params.collectionId;
+      const documentId = event.params.documentId;
+      const before = change.before.exists ? canonicalSyncDestination(
+          collectionName,
+          documentId,
+          change.before.data() || {},
+      ) : null;
+      const after = change.after.exists ? canonicalSyncDestination(
+          collectionName,
+          documentId,
+          change.after.data() || {},
+      ) : null;
+
+      if (after && after.status === "blocked") {
+        console.warn("Sincronização canônica recusada.", {
+          collectionName,
+          reason: after.reason,
+        });
+        return;
+      }
+      if ((!before || before.status !== "ready") &&
+          (!after || after.status !== "ready")) {
+        return;
+      }
+
+      const db = getFirestore();
+      const batch = db.batch();
+      let writes = 0;
+      if (before && before.status === "ready" &&
+          (!after || after.status !== "ready" || before.path !== after.path)) {
+        batch.delete(db.doc(before.path));
+        writes += 1;
+      }
+      if (after && after.status === "ready") {
+        batch.set(db.doc(after.path), after.data, {merge: false});
+        writes += 1;
+      }
+      if (writes > 0) await batch.commit();
+    },
+);
+
+exports.validarConteudoUpload = onObjectFinalized(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (event) => {
+      try {
+        const result = await validateCanonicalUpload({
+          objectData: event.data,
+          storage: admin.storage(),
+        });
+        if (result.deleted) {
+          console.warn(
+              "Upload canônico removido por assinatura de conteúdo inválida.",
+          );
+        }
+      } catch (error) {
+        logSafeError("Falha ao validar conteudo de upload canonico.", error);
+        throw error;
+      }
+    },
+);
 
 const PERFIS_USUARIO_CONHECIDOS = new Set([
   "admin",
@@ -150,7 +237,7 @@ function exigirIdDocumento(valor, campo) {
   if (!id || id.includes("/") || id.length > 1500) {
     throw new HttpsError(
         "invalid-argument",
-        `${campo} invalido.`,
+        `${campo} inválido.`,
     );
   }
 
@@ -257,7 +344,7 @@ async function exigirClinicaAtiva(clinicaId) {
       !STATUS_CLINICA_ATIVOS.has(status)) {
     throw new HttpsError(
         "permission-denied",
-        "A clinica vinculada nao esta habilitada.",
+        "A clínica vinculada não está habilitada.",
     );
   }
 }
@@ -275,6 +362,8 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
     );
   }
 
+  await exigirSessaoAuthAtiva(autenticacao, uidNormalizado);
+
   const snapshot = await admin
       .firestore()
       .collection("usuarios")
@@ -284,7 +373,7 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
   if (!snapshot.exists) {
     throw new HttpsError(
         "permission-denied",
-        "Perfil de acesso nao encontrado.",
+        "Perfil de acesso não encontrado.",
     );
   }
 
@@ -295,7 +384,7 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
   if (!perfilResolvido.consistente || status !== "ativo") {
     throw new HttpsError(
         "permission-denied",
-        "Perfil de acesso invalido ou inativo.",
+        "Perfil de acesso inválido ou inativo.",
     );
   }
 
@@ -309,7 +398,7 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
   if (!perfisPermitidos.includes(perfilResolvido.perfil)) {
     throw new HttpsError(
         "permission-denied",
-        "Seu perfil nao possui permissao para esta operacao.",
+        "Seu perfil não possui permissão para esta operação.",
     );
   }
 
@@ -331,6 +420,81 @@ async function exigirContextoUsuario(autenticacao, perfisPermitidos) {
     clinicaId,
     dados,
   };
+}
+
+async function exigirSessaoAuthAtiva(autenticacao, uid) {
+  let usuarioAuth;
+
+  try {
+    usuarioAuth = await admin.auth().getUser(uid);
+  } catch (error) {
+    if (safeErrorCode(error) === "auth/user-not-found") {
+      throw new HttpsError(
+          "unauthenticated",
+          "Sessão inválida ou expirada.",
+      );
+    }
+
+    logSafeError("Falha ao validar a sessão no Firebase Auth.", error);
+    throw new HttpsError(
+        "unavailable",
+        "Não foi possível validar a sessão. Tente novamente.",
+    );
+  }
+
+  if (usuarioAuth.disabled) {
+    throw new HttpsError(
+        "permission-denied",
+        "Usuario desabilitado.",
+    );
+  }
+
+  const token = autenticacao && autenticacao.token ?
+    autenticacao.token : (autenticacao || {});
+  const authTimeSeconds = Number(token.auth_time);
+  const tokensValidAfterMillis = Date.parse(
+      usuarioAuth.tokensValidAfterTime || "",
+  );
+
+  if (!Number.isFinite(authTimeSeconds) ||
+      (Number.isFinite(tokensValidAfterMillis) &&
+       authTimeSeconds * 1000 < tokensValidAfterMillis)) {
+    throw new HttpsError(
+        "unauthenticated",
+        "Sessão inválida ou expirada.",
+    );
+  }
+}
+
+async function exigirLimiteUso({
+  action,
+  subjects,
+  limit,
+  windowSeconds,
+}) {
+  try {
+    await consumeRateLimit({
+      db: admin.firestore(),
+      action,
+      subjects,
+      limit,
+      windowSeconds,
+    });
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      throw new HttpsError(
+          "resource-exhausted",
+          "Muitas solicitacoes em pouco tempo. Aguarde e tente novamente.",
+          {retryAfterSeconds: error.retryAfterSeconds},
+      );
+    }
+
+    logSafeError("Falha ao aplicar limite de uso.", error);
+    throw new HttpsError(
+        "unavailable",
+        "Não foi possível validar o limite de uso. Tente novamente.",
+    );
+  }
 }
 
 function exigirAcessoAoTenant(contexto, clinicaId) {
@@ -362,7 +526,7 @@ async function buscarContratoComTenant(contratoId) {
   const contratoSnapshot = await contratoRef.get();
 
   if (!contratoSnapshot.exists) {
-    throw new HttpsError("not-found", "Contrato nao encontrado.");
+    throw new HttpsError("not-found", "Contrato não encontrado.");
   }
 
   const contrato = contratoSnapshot.data() || {};
@@ -394,7 +558,7 @@ async function buscarContratoComTenant(contratoId) {
   if (!pacienteSnapshot.exists) {
     throw new HttpsError(
         "failed-precondition",
-        "Paciente vinculada ao contrato nao encontrada.",
+        "Paciente vinculado ao contrato não encontrado.",
     );
   }
 
@@ -447,14 +611,22 @@ async function propagarTenantContrato(contratoResolvido) {
 }
 
 async function buscarPacienteParaRedefinicao(contexto, entrada) {
-  const idSolicitado = textoSeguro(
-      entrada.gestanteId || entrada.pacienteId,
+  const idsSolicitados = valoresIdentificadores(
+      entrada,
+      CAMPOS_ID_PACIENTE,
   );
-  const idsUsuario = [
-    textoSeguro(contexto.dados.pacienteId),
-    textoSeguro(contexto.dados.idGestante),
-  ].filter(Boolean);
-  const idsUsuarioUnicos = Array.from(new Set(idsUsuario));
+  if (idsSolicitados.size > 1) {
+    throw new HttpsError(
+        "invalid-argument",
+        "Identificadores de paciente divergentes.",
+    );
+  }
+  const idSolicitado = idsSolicitados.size === 1 ?
+    [...idsSolicitados][0] : "";
+  const idsUsuarioUnicos = [...valoresIdentificadores(
+      contexto.dados,
+      CAMPOS_ID_PACIENTE,
+  )];
 
   if (idsUsuarioUnicos.length > 1) {
     throw new HttpsError(
@@ -477,15 +649,10 @@ async function buscarPacienteParaRedefinicao(contexto, entrada) {
   let pacienteSnapshot;
 
   if (!pacienteId && contexto.perfil === "gestante") {
-    const resultado = await admin
-        .firestore()
-        .collection("gestantes")
-        .where("uidGestante", "==", contexto.uid)
-        .limit(2)
-        .get();
+    const resultados = await buscarPacientesPorUid(contexto.uid);
 
-    if (resultado.size === 1) {
-      pacienteSnapshot = resultado.docs[0];
+    if (resultados.length === 1) {
+      pacienteSnapshot = resultados[0];
       pacienteId = pacienteSnapshot.id;
     }
   }
@@ -493,7 +660,7 @@ async function buscarPacienteParaRedefinicao(contexto, entrada) {
   if (!pacienteId) {
     throw new HttpsError(
         "invalid-argument",
-        "Paciente nao informada ou nao vinculada ao usuario.",
+        "Cadastro do paciente não informado ou não vinculado ao usuário.",
     );
   }
 
@@ -506,7 +673,7 @@ async function buscarPacienteParaRedefinicao(contexto, entrada) {
   }
 
   if (!pacienteSnapshot.exists) {
-    throw new HttpsError("not-found", "Paciente nao encontrada.");
+    throw new HttpsError("not-found", "Paciente não encontrado.");
   }
 
   const paciente = pacienteSnapshot.data() || {};
@@ -514,7 +681,17 @@ async function buscarPacienteParaRedefinicao(contexto, entrada) {
   exigirAcessoAoTenant(contexto, clinicaId);
 
   if (contexto.perfil === "gestante") {
-    const uidPaciente = textoSeguro(paciente.uidGestante);
+    const uidsPaciente = valoresIdentificadores(
+        paciente,
+        CAMPOS_UID_PACIENTE,
+    );
+    if (uidsPaciente.size > 1) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Paciente com vinculo de login inconsistente.",
+      );
+    }
+    const uidPaciente = uidsPaciente.size === 1 ? [...uidsPaciente][0] : "";
     const idConfere = idsUsuarioUnicos.includes(pacienteSnapshot.id);
     const uidConfere = uidPaciente === contexto.uid;
 
@@ -540,8 +717,18 @@ async function buscarPacienteParaRedefinicao(contexto, entrada) {
 }
 
 async function buscarUsuarioAuthDaPaciente(contexto, paciente) {
+  const uidsPaciente = valoresIdentificadores(
+      paciente.dados,
+      CAMPOS_UID_PACIENTE,
+  );
+  if (uidsPaciente.size > 1) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Paciente com vinculo de login inconsistente.",
+    );
+  }
   const uidPaciente = contexto.perfil === "gestante" ?
-    contexto.uid : textoSeguro(paciente.dados.uidGestante);
+    contexto.uid : (uidsPaciente.size === 1 ? [...uidsPaciente][0] : "");
 
   if (!uidPaciente) {
     throw new HttpsError(
@@ -559,18 +746,17 @@ async function buscarUsuarioAuthDaPaciente(contexto, paciente) {
   if (!perfilSnapshot.exists) {
     throw new HttpsError(
         "failed-precondition",
-        "Perfil de acesso da paciente nao encontrado.",
+        "Perfil de acesso do paciente não encontrado.",
     );
   }
 
   const perfilDados = perfilSnapshot.data() || {};
   const perfil = resolverPerfilUsuario(perfilDados);
   const tenantPerfil = resolverTenant(perfilDados);
-  const pacientePerfil = textoSeguro(
-      perfilDados.pacienteId || perfilDados.idGestante,
-  );
+  const idsPerfil = valoresIdentificadores(perfilDados, CAMPOS_ID_PACIENTE);
+  const pacientePerfil = idsPerfil.size === 1 ? [...idsPerfil][0] : "";
 
-  if (!perfil.consistente ||
+  if (idsPerfil.size > 1 || !perfil.consistente ||
       perfil.perfil !== "gestante" ||
       textoSeguro(perfilDados.status).toLowerCase() !== "ativo" ||
       !tenantPerfil.consistente ||
@@ -603,18 +789,105 @@ async function buscarUsuarioAuthDaPaciente(contexto, paciente) {
   return usuario;
 }
 
+async function autenticarRedefinicaoSenha(
+    authorizationHeader,
+    autenticacaoCallable = null,
+) {
+  const uidCallable = textoSeguro(
+      autenticacaoCallable && autenticacaoCallable.uid,
+  );
+
+  if (autenticacaoCallable && !uidCallable) {
+    throw new HttpsError(
+        "unauthenticated",
+        "Voce precisa estar logado.",
+    );
+  }
+
+  try {
+    return await verificarIdTokenNaoRevogado(
+        admin.auth(),
+        authorizationHeader,
+        uidCallable,
+    );
+  } catch (error) {
+    if (error instanceof AuthTokenValidationError) {
+      throw new HttpsError(
+          "unauthenticated",
+          "Sessão inválida ou expirada.",
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function solicitarRedefinicaoSenhaPacienteCore(
+    autenticacao,
+    entrada,
+) {
+  const contexto = await exigirContextoUsuario(
+      autenticacao,
+      ["admin", "gestante"],
+  );
+  const paciente = await buscarPacienteParaRedefinicao(
+      contexto,
+      entrada || {},
+  );
+  await exigirLimiteUso({
+    action: "password-reset-request",
+    subjects: [
+      `actor:${contexto.uid}`,
+      `patient:${paciente.clinicaId}:${paciente.id}`,
+    ],
+    limit: 3,
+    windowSeconds: 15 * 60,
+  });
+  const usuarioAuth = await buscarUsuarioAuthDaPaciente(
+      contexto,
+      paciente,
+  );
+  const emailNormalizado = textoSeguro(usuarioAuth.email).toLowerCase();
+  const agora = new Date().toISOString();
+
+  await paciente.ref.set({
+    ...camposTenant(paciente.clinicaId),
+    linkSenhaInicial: admin.firestore.FieldValue.delete(),
+    linkSenhaInicialGeradoEm: admin.firestore.FieldValue.delete(),
+    linkSenhaInicialExpirado: true,
+    redefinicaoSenhaPendente: true,
+    redefinicaoSenhaSolicitadaEm: agora,
+    redefinicaoSenhaSolicitadaPor: contexto.uid,
+  }, {merge: true});
+
+  return {
+    sucesso: true,
+    mensagem: "Solicitacao de redefinicao registrada com seguranca.",
+    pacienteId: paciente.id,
+    emailPaciente: emailNormalizado,
+    telefonePaciente: textoSeguro(paciente.dados.telefoneGestante),
+    nomePaciente: textoSeguro(paciente.dados.nomeGestante),
+  };
+}
+
 function statusHttpParaErro(error) {
   if (error && error.code === "unauthenticated") return 401;
   if (error && error.code === "permission-denied") return 403;
   if (error && error.code === "not-found") return 404;
   if (error && error.code === "invalid-argument") return 400;
   if (error && error.code === "failed-precondition") return 400;
+  if (error && error.code === "resource-exhausted") return 429;
   if (error && error.code === "auth/user-not-found") return 404;
   if (error && textoSeguro(error.code).startsWith("auth/")) return 401;
   return 500;
 }
 
 const MAX_REGISTROS_POR_VINCULO = 440;
+const CAMPOS_ID_PACIENTE = [
+  "pacienteId",
+  "gestanteId",
+  "idGestante",
+];
 const CAMPOS_UID_PACIENTE = [
   "uidPaciente",
   "pacienteUid",
@@ -658,11 +931,6 @@ const COLECOES_VINCULO_PACIENTE = [
     camposUid: CAMPOS_UID_PACIENTE,
     payload: true,
   },
-  {
-    colecao: "notas_fiscais",
-    camposId: ["pacienteId", "gestanteId", "idGestante"],
-    camposUid: CAMPOS_UID_PACIENTE,
-  },
 ];
 
 function valoresIdentificadores(dados, campos) {
@@ -674,6 +942,40 @@ function valoresIdentificadores(dados, campos) {
   }
 
   return valores;
+}
+
+function camposIdentidadePaciente(pacienteId, uidPaciente) {
+  return {
+    pacienteId,
+    gestanteId: pacienteId,
+    idGestante: pacienteId,
+    uidPaciente,
+    pacienteUid: uidPaciente,
+    uidGestante: uidPaciente,
+    gestanteUid: uidPaciente,
+  };
+}
+
+async function buscarPacientesPorUid(uidPaciente, limite = 3) {
+  const uid = textoSeguro(uidPaciente);
+  if (!uid) return [];
+
+  const db = admin.firestore();
+  const resultados = await Promise.all(CAMPOS_UID_PACIENTE.map((campo) => {
+    return db.collection("gestantes")
+        .where(campo, "==", uid)
+        .limit(limite)
+        .get();
+  }));
+  const pacientes = new Map();
+
+  for (const resultado of resultados) {
+    for (const documento of resultado.docs) {
+      pacientes.set(documento.ref.path, documento);
+    }
+  }
+
+  return [...pacientes.values()];
 }
 
 const MAX_VINCULOS_ENTIDADE_USUARIO = 20;
@@ -832,7 +1134,7 @@ async function buscarEntidadesVinculadasUsuario({
     if (!tenant.consistente || tenant.clinicaId !== clinicaId) {
       throw new HttpsError(
           "failed-precondition",
-          "Entidade vinculada fora da clinica do usuario.",
+          "Entidade vinculada fora da clínica do usuário.",
       );
     }
 
@@ -1184,17 +1486,20 @@ async function prepararAtualizacoesVinculoPaciente({
             );
           }
 
+          const dadosAtualizacao = montarAtualizacaoRegistroPaciente({
+            configuracao,
+            dados,
+            pacienteId,
+            uidUsuario,
+            clinicaId,
+            uidOperador,
+          });
           atualizacoes.push({
             ref: documento.ref,
-            dados: montarAtualizacaoRegistroPaciente({
-              configuracao,
-              dados,
-              pacienteId,
-              uidUsuario,
-              clinicaId,
-              uidOperador,
-            }),
+            dados: dadosAtualizacao,
+            dadosCanonicos: {...dados, ...dadosAtualizacao},
             colecao: configuracao.colecao,
+            updateTime: documento.updateTime,
           });
         }
 
@@ -1381,40 +1686,23 @@ function validarPerfilPacienteParaVinculo({
 
   exigirIdsCompativeis(
       dados,
-      ["pacienteId", "idGestante"],
+      CAMPOS_ID_PACIENTE,
       pacienteId,
       "Perfil de acesso",
   );
   exigirUidCompativel(
       dados,
-      ["uidGestante", "uidPaciente"],
+      CAMPOS_UID_PACIENTE,
       uidUsuario,
       "Perfil de acesso",
   );
 }
 
 async function exigirUidSemOutraPaciente(uidUsuario, pacienteId) {
-  const db = admin.firestore();
-  const [porUidGestante, porUidPaciente] = await Promise.all([
-    db.collection("gestantes")
-        .where("uidGestante", "==", uidUsuario)
-        .limit(3)
-        .get(),
-    db.collection("gestantes")
-        .where("uidPaciente", "==", uidUsuario)
-        .limit(3)
-        .get(),
-  ]);
-  const pacientes = new Map();
+  const pacientes = await buscarPacientesPorUid(uidUsuario);
 
-  for (const snapshot of [porUidGestante, porUidPaciente]) {
-    for (const documento of snapshot.docs) {
-      pacientes.set(documento.ref.path, documento.id);
-    }
-  }
-
-  for (const id of pacientes.values()) {
-    if (id !== pacienteId) {
+  for (const paciente of pacientes) {
+    if (paciente.id !== pacienteId) {
       throw new HttpsError(
           "failed-precondition",
           "O login ja esta vinculado a outra paciente.",
@@ -1434,12 +1722,60 @@ function contagensPorColecao(atualizacoes) {
   return contagens;
 }
 
+function adicionarEscritaGuardadaAoBatch(batch, snapshot, dados) {
+  if (snapshot.exists) {
+    if (!snapshot.updateTime) {
+      throw new HttpsError(
+          "internal",
+          "Snapshot sem versao para escrita concorrente segura.",
+      );
+    }
+
+    batch.update(
+        snapshot.ref,
+        dados,
+        {lastUpdateTime: snapshot.updateTime},
+    );
+    return;
+  }
+
+  batch.create(snapshot.ref, dados);
+}
+
+function conflitoConcorrenteFirestore(error) {
+  return [
+    "6",
+    "9",
+    "10",
+    "aborted",
+    "already-exists",
+    "failed-precondition",
+  ].includes(String(error && error.code || "").toLowerCase());
+}
+
+async function confirmarBatchGuardado(batch) {
+  try {
+    await batch.commit();
+  } catch (error) {
+    if (conflitoConcorrenteFirestore(error)) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Os dados foram alterados durante a operação. Revise e tente " +
+            "novamente.",
+      );
+    }
+
+    throw error;
+  }
+}
+
 async function vincularUidAPaciente({
   contexto,
   uidUsuario,
   pacienteId,
   nomeUsuario,
   convitePendente = false,
+  descritorOperacao = null,
 }) {
   const uid = exigirIdDocumento(uidUsuario, "uidUsuario");
   const idPaciente = exigirIdDocumento(pacienteId, "pacienteId");
@@ -1467,7 +1803,7 @@ async function vincularUidAPaciente({
   ]);
 
   if (!pacienteSnapshot.exists) {
-    throw new HttpsError("not-found", "Paciente nao encontrada.");
+    throw new HttpsError("not-found", "Paciente não encontrado.");
   }
 
   if (usuarioAuth.disabled ||
@@ -1476,7 +1812,7 @@ async function vincularUidAPaciente({
        usuarioAuth.customClaims.superAdmin === true)) {
     throw new HttpsError(
         "failed-precondition",
-        "Usuario de autenticacao invalido para vinculo de paciente.",
+        "Usuário de autenticação inválido para vínculo de paciente.",
     );
   }
 
@@ -1484,16 +1820,25 @@ async function vincularUidAPaciente({
   const clinicaId = exigirTenant(paciente, "Paciente");
   exigirAcessoAoTenant(contexto, clinicaId);
   await exigirClinicaAtiva(clinicaId);
+  const usuarioCanonicoRef = db.doc(canonicalUserPath(clinicaId, uid));
+  const pacienteCanonicoRef = db.doc(
+      canonicalPatientPath(clinicaId, idPaciente),
+  );
+  const [usuarioCanonicoSnapshot, pacienteCanonicoSnapshot] =
+    await Promise.all([
+      usuarioCanonicoRef.get(),
+      pacienteCanonicoRef.get(),
+    ]);
 
   exigirIdsCompativeis(
       paciente,
-      ["pacienteId", "idGestante"],
+      CAMPOS_ID_PACIENTE,
       idPaciente,
       "Paciente",
   );
   exigirUidCompativel(
       paciente,
-      ["uidGestante", "uidPaciente"],
+      CAMPOS_UID_PACIENTE,
       uid,
       "Paciente",
   );
@@ -1535,6 +1880,47 @@ async function vincularUidAPaciente({
     clinicaId,
     uidOperador: contexto.uid,
   });
+  const destinosCanonicos = atualizacoes.flatMap((atualizacao) => {
+    const path = canonicalPatientLinkedRecordPath({
+      collection: atualizacao.colecao,
+      documentId: atualizacao.ref.id,
+      clinicaId,
+      pacienteId: idPaciente,
+    });
+
+    if (!path) return [];
+
+    return [{
+      ref: db.doc(path),
+      dados: atualizacao.dadosCanonicos,
+      colecao: atualizacao.colecao,
+    }];
+  });
+  const quantidadeOperacoes = countPatientLinkBatchWrites({
+    legacyRecordWrites: atualizacoes.length,
+    canonicalRecordWrites: destinosCanonicos.length,
+    writesLegacyUser: usuarioSaaSSnapshot.exists,
+  });
+
+  const escritasJournal = descritorOperacao ? 1 : 0;
+
+  if (quantidadeOperacoes + escritasJournal > MAX_SAFE_BATCH_WRITES) {
+    throw new HttpsError(
+        "resource-exhausted",
+        "A vinculacao excede o limite seguro de escritas atomicas. " +
+          "Execute o backfill administrativo antes de tentar novamente.",
+    );
+  }
+
+  const snapshotsCanonicos = destinosCanonicos.length > 0 ?
+    await db.getAll(...destinosCanonicos.map((item) => item.ref)) : [];
+  const atualizacoesCanonicas = destinosCanonicos.map(
+      (item, indice) => ({
+        ...item,
+        snapshot: snapshotsCanonicos[indice],
+      }),
+  );
+
   const agora = admin.firestore.FieldValue.serverTimestamp();
   const dadosUsuarioAtual = usuarioSnapshot.exists ?
     (usuarioSnapshot.data() || {}) : {};
@@ -1543,11 +1929,8 @@ async function vincularUidAPaciente({
     textoSeguro(paciente.nomeGestante);
   const dadosUsuario = {
     ...camposTenant(clinicaId),
+    ...camposIdentidadePaciente(idPaciente, uid),
     uid,
-    uidGestante: uid,
-    uidPaciente: uid,
-    pacienteId: idPaciente,
-    idGestante: idPaciente,
     nome: nomeResolvido,
     email: textoSeguro(usuarioAuth.email).toLowerCase(),
     tipo: "gestante",
@@ -1559,10 +1942,7 @@ async function vincularUidAPaciente({
   };
   const dadosPaciente = {
     ...camposTenant(clinicaId),
-    pacienteId: idPaciente,
-    idGestante: idPaciente,
-    uidGestante: uid,
-    uidPaciente: uid,
+    ...camposIdentidadePaciente(idPaciente, uid),
     emailAcesso: textoSeguro(usuarioAuth.email).toLowerCase(),
     acessoCriado: "true",
     acessoVinculadoEm: agora,
@@ -1585,17 +1965,61 @@ async function vincularUidAPaciente({
     dadosPaciente.linkSenhaInicialExpirado = true;
   }
 
+  const dadosUsuarioCanonico = {...dadosUsuarioAtual, ...dadosUsuario};
+  const dadosPacienteCanonico = {...paciente, ...dadosPaciente};
+  if (!pacienteCanonicoSnapshot.exists && convitePendente) {
+    delete dadosPacienteCanonico.linkSenhaInicial;
+    delete dadosPacienteCanonico.linkSenhaInicialGeradoEm;
+  }
+  const commitOperacao = descritorOperacao ?
+    await prepararCommitOperacao(db, descritorOperacao) : null;
+
+  if (commitOperacao && commitOperacao.concluida) {
+    return {
+      uidUsuario: uid,
+      pacienteId: idPaciente,
+      clinicaId,
+      registrosAtualizados: contagensPorColecao(atualizacoes),
+      conviteSenhaPendente: convitePendente,
+    };
+  }
+
   const batch = db.batch();
 
   for (const atualizacao of atualizacoes) {
-    batch.set(atualizacao.ref, atualizacao.dados, {merge: true});
+    batch.update(
+        atualizacao.ref,
+        atualizacao.dados,
+        {lastUpdateTime: atualizacao.updateTime},
+    );
+  }
+  for (const atualizacao of atualizacoesCanonicas) {
+    adicionarEscritaGuardadaAoBatch(
+        batch,
+        atualizacao.snapshot,
+        atualizacao.dados,
+    );
   }
 
-  batch.set(usuarioRef, dadosUsuario, {merge: true});
-  batch.set(pacienteRef, dadosPaciente, {merge: true});
+  adicionarEscritaGuardadaAoBatch(batch, usuarioSnapshot, dadosUsuario);
+  adicionarEscritaGuardadaAoBatch(batch, pacienteSnapshot, dadosPaciente);
+  adicionarEscritaGuardadaAoBatch(
+      batch,
+      usuarioCanonicoSnapshot,
+      dadosUsuarioCanonico,
+  );
+  adicionarEscritaGuardadaAoBatch(
+      batch,
+      pacienteCanonicoSnapshot,
+      dadosPacienteCanonico,
+  );
 
   if (usuarioSaaSSnapshot.exists) {
-    batch.set(usuarioSaaSRef, dadosUsuario, {merge: true});
+    adicionarEscritaGuardadaAoBatch(
+        batch,
+        usuarioSaaSSnapshot,
+        dadosUsuario,
+    );
   }
 
   const dadosLock = {
@@ -1607,20 +2031,27 @@ async function vincularUidAPaciente({
   };
 
   if (lockUidSnapshot.exists) {
-    batch.set(lockUidRef, dadosLock, {merge: true});
+    adicionarEscritaGuardadaAoBatch(batch, lockUidSnapshot, dadosLock);
   } else {
     batch.create(lockUidRef, {...dadosLock, criadoEm: agora});
   }
 
   if (lockPacienteSnapshot.exists) {
-    batch.set(lockPacienteRef, dadosLock, {merge: true});
+    adicionarEscritaGuardadaAoBatch(
+        batch,
+        lockPacienteSnapshot,
+        dadosLock,
+    );
   } else {
     batch.create(lockPacienteRef, {...dadosLock, criadoEm: agora});
   }
 
   const contagens = contagensPorColecao(atualizacoes);
-  const logRef = db.collection("logsAdministrativos").doc();
-  batch.set(logRef, {
+  const logRef = descritorOperacao ?
+    db.collection("logsAdministrativos")
+        .doc(descritorOperacao.recursos.logId) :
+    db.collection("logsAdministrativos").doc();
+  const dadosLog = {
     ...camposTenant(clinicaId),
     acao: "vincular_login_paciente",
     usuarioUid: contexto.uid,
@@ -1629,9 +2060,16 @@ async function vincularUidAPaciente({
     registrosAtualizados: contagens,
     convitePendente,
     criadoEm: agora,
-  });
+  };
 
-  await batch.commit();
+  if (descritorOperacao) {
+    batch.create(logRef, dadosLog);
+    adicionarCommitAoBatch(batch, commitOperacao);
+  } else {
+    batch.set(logRef, dadosLog);
+  }
+
+  await confirmarBatchGuardado(batch);
 
   return {
     uidUsuario: uid,
@@ -1660,6 +2098,7 @@ async function prepararDestinoCriacaoUsuario({
       clinicaId: contexto.clinicaId,
       entidadeRef: null,
       campoUid: "",
+      uidsAtuais: new Set(),
     };
   }
 
@@ -1702,7 +2141,7 @@ async function prepararDestinoCriacaoUsuario({
   if (!entidadeSnapshot.exists) {
     throw new HttpsError(
         "not-found",
-        `${configuracao.recurso} nao encontrado.`,
+        `${configuracao.recurso} não encontrado.`,
     );
   }
 
@@ -1716,13 +2155,6 @@ async function prepararDestinoCriacaoUsuario({
       configuracao.camposUid,
   );
 
-  if (uidsAtuais.size > 0) {
-    throw new HttpsError(
-        "failed-precondition",
-        `${configuracao.recurso} ja possui login vinculado.`,
-    );
-  }
-
   return {
     clinicaId,
     entidadeRef,
@@ -1730,6 +2162,8 @@ async function prepararDestinoCriacaoUsuario({
     campoUid: configuracao.campoUid,
     camposUid: configuracao.camposUid,
     idVinculo: id,
+    uidsAtuais,
+    recurso: configuracao.recurso,
   };
 }
 
@@ -1739,10 +2173,14 @@ async function gravarUsuarioClinicaCriado({
   nome,
   tipoUsuario,
   destino,
+  descritorOperacao,
 }) {
   const db = admin.firestore();
   const uid = usuarioAuth.uid;
   const usuarioRef = db.collection("usuarios").doc(uid);
+  const usuarioCanonicoRef = db.doc(
+      canonicalUserPath(destino.clinicaId, uid),
+  );
   const usuarioSnapshot = await usuarioRef.get();
 
   if (usuarioSnapshot.exists) {
@@ -1771,7 +2209,7 @@ async function gravarUsuarioClinicaCriado({
         tenantEntidade.clinicaId !== destino.clinicaId) {
       throw new HttpsError(
           "failed-precondition",
-          "Registro de vinculo mudou de clinica durante a operacao.",
+          "Registro de vínculo mudou de clínica durante a operação.",
       );
     }
 
@@ -1807,8 +2245,22 @@ async function gravarUsuarioClinicaCriado({
     criadoEm: agora,
     criadoPorUid: contexto.uid,
   };
+  const commitOperacao = await prepararCommitOperacao(
+      db,
+      descritorOperacao,
+  );
+
+  if (commitOperacao.concluida) {
+    return resultadoUsuarioCriado({
+      descritorOperacao,
+      tipoUsuario,
+      destino,
+    });
+  }
+
   const batch = db.batch();
   batch.create(usuarioRef, dadosUsuario);
+  batch.create(usuarioCanonicoRef, dadosUsuario);
 
   if (destino.entidadeRef) {
     const dadosEntidade = {
@@ -1820,7 +2272,11 @@ async function gravarUsuarioClinicaCriado({
       conviteSenhaPendente: true,
       conviteSenhaSolicitadoEm: agora,
     };
-    batch.set(destino.entidadeRef, dadosEntidade, {merge: true});
+    batch.update(
+        destino.entidadeRef,
+        dadosEntidade,
+        {lastUpdateTime: entidadeSnapshot.updateTime},
+    );
 
     const lockUidRef = db.collection("vinculosAuthEntidade").doc(uid);
     const lockEntidadeRef = db
@@ -1837,8 +2293,9 @@ async function gravarUsuarioClinicaCriado({
     batch.create(lockEntidadeRef, dadosLock);
   }
 
-  const logRef = db.collection("logsAdministrativos").doc();
-  batch.set(logRef, {
+  const logRef = db.collection("logsAdministrativos")
+      .doc(descritorOperacao.recursos.logId);
+  batch.create(logRef, {
     ...camposTenant(destino.clinicaId),
     acao: "criar_usuario_clinica",
     usuarioUid: contexto.uid,
@@ -1848,8 +2305,9 @@ async function gravarUsuarioClinicaCriado({
     convitePendente: true,
     criadoEm: agora,
   });
+  adicionarCommitAoBatch(batch, commitOperacao);
 
-  await batch.commit();
+  await confirmarBatchGuardado(batch);
 
   return {
     uidUsuario: uid,
@@ -1866,15 +2324,166 @@ async function rollbackUsuarioAuth(uidUsuario) {
     await admin.auth().deleteUser(uidUsuario);
     return true;
   } catch (error) {
-    console.error(
-        "Falha critica ao reverter usuario do Firebase Authentication:",
+    logSafeError(
+        "Falha critica ao reverter usuario do Firebase Authentication.",
         error,
     );
     return false;
   }
 }
 
-function exigirTextoCriacaoClinicaSaaS(valor, campo, tamanhoMaximo) {
+function resultadoUsuarioCriado({
+  descritorOperacao,
+  tipoUsuario,
+  destino,
+}) {
+  const resultado = {
+    uidUsuario: descritorOperacao.recursos.authUid,
+    tipoUsuario,
+    idVinculo: destino.idVinculo || "",
+    clinicaId: destino.clinicaId,
+    conviteSenhaPendente: true,
+    registrosAtualizados: {},
+  };
+
+  if (tipoUsuario === "gestante") {
+    resultado.pacienteId = destino.idVinculo;
+  }
+
+  return resultado;
+}
+
+function resultadoClinicaCriada(descritorOperacao) {
+  return {
+    clinicaId: descritorOperacao.recursos.clinicId,
+    adminUid: descritorOperacao.recursos.authUid,
+    assinaturaId: descritorOperacao.recursos.subscriptionId,
+    statusClinica: "teste",
+    statusAssinatura: "ativa",
+    primeiroLogin: false,
+    conviteSenhaPendente: true,
+  };
+}
+
+async function operacaoDuravelConcluida(descritorOperacao) {
+  const dados = await consultarOperacao(
+      admin.firestore(),
+      descritorOperacao,
+  );
+  return dados && dados.estado === OPERATION_STATE.COMMITTED;
+}
+
+function erroDuravelParaHttps(error) {
+  if (!(error instanceof DurableOperationError)) return null;
+
+  if ([
+    "auth-identity-conflict",
+    "operation-payload-conflict",
+    "operation-requires-reconciliation",
+  ].includes(error.code)) {
+    return new HttpsError(
+        "already-exists",
+        "A operação conflita com um cadastro existente.",
+    );
+  }
+
+  if ([
+    "invalid-auth-resource",
+    "invalid-operation-input",
+    "invalid-operation-kind",
+    "invalid-operation-payload",
+  ].includes(error.code)) {
+    return new HttpsError("invalid-argument", "Dados da operação inválidos.");
+  }
+
+  return new HttpsError(
+      "internal",
+      "Não foi possível validar o estado durável da operação.",
+  );
+}
+
+function falhaPermanenteDePersistencia(error) {
+  if (error instanceof HttpsError) {
+    return [
+      "already-exists",
+      "failed-precondition",
+      "invalid-argument",
+      "not-found",
+      "permission-denied",
+      "resource-exhausted",
+    ].includes(error.code);
+  }
+
+  return ["3", "6", "already-exists", "invalid-argument"]
+      .includes(String(error && error.code || ""));
+}
+
+async function tentarResolverConcorrencia(descritorOperacao) {
+  try {
+    return await operacaoDuravelConcluida(descritorOperacao);
+  } catch (error) {
+    console.error(
+        "Falha ao consultar estado da operacao duravel:",
+        error && error.code || "erro_desconhecido",
+    );
+    return false;
+  }
+}
+
+async function prepararRetentativaFirestore(descritorOperacao) {
+  try {
+    const estado = await marcarFirestoreParaRetentativa(
+        admin.firestore(),
+        descritorOperacao,
+    );
+    return estado === OPERATION_STATE.COMMITTED;
+  } catch (error) {
+    if (error instanceof DurableOperationError &&
+        error.code === "operation-already-committed") {
+      return true;
+    }
+
+    console.error(
+        "Falha ao marcar retentativa da operacao duravel:",
+        error && error.code || "erro_desconhecido",
+    );
+    return tentarResolverConcorrencia(descritorOperacao);
+  }
+}
+
+async function rollbackDuravelSeguro(descritorOperacao) {
+  try {
+    const estado = await marcarRollbackNecessario(
+        admin.firestore(),
+        descritorOperacao,
+        "domain_rollback_required",
+    );
+
+    if (estado === OPERATION_STATE.COMMITTED) {
+      return {concluido: false, operacaoJaConcluida: true};
+    }
+
+    const concluido = await reverterUsuarioAuth({
+      auth: admin.auth(),
+      db: admin.firestore(),
+      descritor: descritorOperacao,
+    });
+    return {concluido, operacaoJaConcluida: false};
+  } catch (error) {
+    if (error instanceof DurableOperationError &&
+        error.code === "operation-already-committed") {
+      return {concluido: false, operacaoJaConcluida: true};
+    }
+
+    console.error(
+        "Falha no rollback da operacao duravel:",
+        error && error.code || "erro_desconhecido",
+    );
+    return {concluido: false, operacaoJaConcluida: false};
+  }
+}
+
+function exigirTextoCriacao(valor, campo, tamanhoMaximo) {
   const texto = typeof valor === "string" ? textoSeguro(valor) : "";
   const possuiControle = Array.from(texto).some((caractere) => {
     const codigo = caractere.charCodeAt(0);
@@ -1884,7 +2493,7 @@ function exigirTextoCriacaoClinicaSaaS(valor, campo, tamanhoMaximo) {
   if (!texto || texto.length > tamanhoMaximo || possuiControle) {
     throw new HttpsError(
         "invalid-argument",
-        `${campo} invalido.`,
+        `${campo} inválido.`,
     );
   }
 
@@ -1913,15 +2522,21 @@ async function gravarClinicaComAdminSaaS({
   emailAdmin,
   plano,
   valorAssinatura,
+  descritorOperacao,
 }) {
   const db = admin.firestore();
-  const clinicaRef = db.collection("clinicas").doc();
+  const recursos = descritorOperacao.recursos;
+  const clinicaRef = db.collection("clinicas").doc(recursos.clinicId);
   const clinicaId = clinicaRef.id;
   const clinicaSaaSRef = db.collection("clinicasSaaS").doc(clinicaId);
   const usuarioRef = db.collection("usuarios").doc(usuarioAuth.uid);
   const usuarioSaaSRef = db.collection("usuariosSaaS").doc(usuarioAuth.uid);
-  const assinaturaRef = db.collection("assinaturasSaaS").doc();
-  const logRef = db.collection("logsSuperAdmin").doc();
+  const usuarioCanonicoRef = db.doc(
+      canonicalUserPath(clinicaId, usuarioAuth.uid),
+  );
+  const assinaturaRef = db.collection("assinaturasSaaS")
+      .doc(recursos.subscriptionId);
+  const logRef = db.collection("logsSuperAdmin").doc(recursos.logId);
   const agora = admin.firestore.FieldValue.serverTimestamp();
   const vencimento = admin.firestore.Timestamp.fromMillis(
       Date.now() + (30 * 24 * 60 * 60 * 1000),
@@ -1993,14 +2608,25 @@ async function gravarClinicaComAdminSaaS({
     },
     criadoEm: agora,
   };
+  const commitOperacao = await prepararCommitOperacao(
+      db,
+      descritorOperacao,
+  );
+
+  if (commitOperacao.concluida) {
+    return resultadoClinicaCriada(descritorOperacao);
+  }
+
   const batch = db.batch();
 
   batch.create(clinicaRef, dadosClinica);
   batch.create(clinicaSaaSRef, dadosClinica);
   batch.create(usuarioRef, dadosUsuario);
   batch.create(usuarioSaaSRef, dadosUsuario);
+  batch.create(usuarioCanonicoRef, dadosUsuario);
   batch.create(assinaturaRef, dadosAssinatura);
   batch.create(logRef, dadosLog);
+  adicionarCommitAoBatch(batch, commitOperacao);
 
   await batch.commit();
 
@@ -2150,6 +2776,7 @@ async function buscarConfiguracaoZapSign() {
       brandPrimaryColor: "#6F3E46",
       brandLogo: "",
       folderToken: "",
+      modeloContratualVersao: ZAPSIGN_MODELO_CONTRATUAL_VERSAO,
       templateIds: ZAPSIGN_TEMPLATE_IDS_PADRAO,
       placeholdersFixos: {
         razaoSocialNatus: "Natus",
@@ -2177,6 +2804,7 @@ async function buscarConfiguracaoZapSign() {
     brandPrimaryColor: dados.brandPrimaryColor || "#6F3E46",
     brandLogo: dados.brandLogo || "",
     folderToken: dados.folderToken || "",
+    modeloContratualVersao: dados.modeloContratualVersao || "",
     templateIds: {
       ...ZAPSIGN_TEMPLATE_IDS_PADRAO,
       ...(dados.templateIds || {}),
@@ -2199,12 +2827,25 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     dados.estadoGestante || "",
     dados.cepGestante || "",
   ].filter((parte) => String(parte || "").trim());
+  const uidsPaciente = valoresIdentificadores(dados, CAMPOS_UID_PACIENTE);
+  if (uidsPaciente.size > 1) {
+    throw new Error("Paciente com aliases UID divergentes.");
+  }
+  const uidPaciente = uidsPaciente.size === 1 ? [...uidsPaciente][0] : "";
+  const valorTotal = definicaoPlano.valorTotal || 0;
+  const numeroParcelas = Math.max(
+      1,
+      Number.parseInt(dados.parcelas || "1", 10) || 1,
+  );
+  const entradaInformada = converterNumeroContrato(
+      dados.contratoResumo && dados.contratoResumo.valorEntrada !== undefined ?
+        dados.contratoResumo.valorEntrada : dados.entrada,
+  );
+  const valorEntrada = Math.min(Math.max(entradaInformada, 0), valorTotal);
+  const valorSaldo = Math.max(valorTotal - valorEntrada, 0);
 
   return {
-    pacienteId: idGestante,
-    pacienteUid: dados.uidPaciente || dados.uidGestante || "",
-    uidPaciente: dados.uidPaciente || dados.uidGestante || "",
-    uidGestante: dados.uidGestante || dados.uidPaciente || "",
+    ...camposIdentidadePaciente(idGestante, uidPaciente),
     nomePaciente: dados.nomeGestante || "",
     emailPaciente: dados.emailGestante || "",
     telefonePaciente: dados.telefoneGestante || "",
@@ -2219,30 +2860,35 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     enderecoResponsavel: partesEndereco.join(", "),
     dpp: dados.dpp || "",
     planoNome: definicaoPlano.planoNome || dados.plano || "",
-    modalidadeNome: definicaoPlano.modalidadeNome ||
-      (dados.contratoResumo && dados.contratoResumo.modalidadeNome ?
-      dados.contratoResumo.modalidadeNome :
-      (dados.consultorio === "Sim" ? "Consultorio" : "Residencial")),
+    modalidadeNome: definicaoPlano.modalidadeNome || "Consultorio",
     templateKey,
     cidadeAssinatura: dados.cidadeGestante || "Curitiba",
     dataAssinatura: new Date().toISOString(),
     formaPagamento: dados.formaPagamento || "",
     vencimentoParcelas: dados.vencimentoParcelas || "",
     observacoesContrato: dados.observacoesContrato || "",
-    numeroParcelas: Number.parseInt(dados.parcelas || "1", 10) || 1,
-    valorTotal: dados.contratoResumo && dados.contratoResumo.valorTotal ?
-      dados.contratoResumo.valorTotal :
-      dados.valorPlano || 0,
-    valorEntrada: dados.contratoResumo && dados.contratoResumo.valorEntrada ?
-      dados.contratoResumo.valorEntrada :
-      dados.entrada || 0,
-    valorSaldo: dados.contratoResumo && dados.contratoResumo.valorSaldo ?
-      dados.contratoResumo.valorSaldo :
-      0,
-    valorParcela: dados.contratoResumo && dados.contratoResumo.valorParcela ?
-      dados.contratoResumo.valorParcela :
-      dados.valorParcela || 0,
+    numeroParcelas,
+    valorTotal,
+    valorEntrada,
+    valorSaldo,
+    valorParcela: valorSaldo / numeroParcelas,
   };
+}
+
+function validarContatoPacienteContrato(payload) {
+  const email = textoSeguro(payload.emailPaciente).toLowerCase();
+  const telefone = normalizarTelefone(payload.telefonePaciente);
+  const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const telefoneValido = telefone.number.length >= 10 &&
+    telefone.number.length <= 11;
+
+  if (!emailValido || !telefoneValido) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Preencha e-mail e telefone válidos na ficha da paciente antes de " +
+        "emitir o contrato.",
+    );
+  }
 }
 
 function montarCamposDinamicos(payload, configuracao) {
@@ -2424,10 +3070,13 @@ function montarPayloadCriacaoDocumento({
 
   const body = {
     template_id: templateId,
+    external_id: contratoId,
     signer_name: signatarioPrincipal.name || payload.nomePaciente || "Paciente",
     data: montarCamposDinamicos(payload, configuracao),
     lang: configuracao.lang || "pt-br",
     disable_signer_emails: configuracao.disableSignerEmails === true,
+    send_automatic_email:
+      configuracao.disableSignerEmails !== true && Boolean(signatarioPrincipal.email),
   };
 
   if (signatarioPrincipal.email) {
@@ -2491,7 +3140,7 @@ async function atualizarGestanteComContrato(pacienteId, dados, clinicaId) {
   if (!id) {
     throw new HttpsError(
         "failed-precondition",
-        "Contrato sem paciente vinculada.",
+        "Contrato sem paciente vinculado.",
     );
   }
 
@@ -2536,10 +3185,16 @@ async function buscarGestantePorId(pacienteId) {
 }
 
 async function buscarGestanteDaContracao(dados) {
-  const idInformado = textoSeguro(
-      dados.idGestante || dados.gestanteId || dados.pacienteId,
-  );
-  const uidInformado = textoSeguro(dados.uidGestante);
+  const idsInformados = valoresIdentificadores(dados, CAMPOS_ID_PACIENTE);
+  const uidsInformados = valoresIdentificadores(dados, CAMPOS_UID_PACIENTE);
+  if (idsInformados.size > 1 || uidsInformados.size > 1) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Contracao com vinculo de paciente inconsistente.",
+    );
+  }
+  const idInformado = idsInformados.size === 1 ? [...idsInformados][0] : "";
+  const uidInformado = uidsInformados.size === 1 ? [...uidsInformados][0] : "";
 
   if (idInformado) {
     const snapshot = await admin
@@ -2551,12 +3206,23 @@ async function buscarGestanteDaContracao(dados) {
     if (!snapshot.exists) {
       throw new HttpsError(
           "failed-precondition",
-          "Paciente da contracao nao encontrada.",
+          "Paciente da contração não encontrado.",
       );
     }
 
     const gestante = snapshot.data() || {};
-    const uidCadastrado = textoSeguro(gestante.uidGestante);
+    const uidsCadastrados = valoresIdentificadores(
+        gestante,
+        CAMPOS_UID_PACIENTE,
+    );
+    if (uidsCadastrados.size > 1) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Paciente com vinculo de login inconsistente.",
+      );
+    }
+    const uidCadastrado = uidsCadastrados.size === 1 ?
+      [...uidsCadastrados][0] : "";
 
     if (uidInformado && uidCadastrado && uidInformado !== uidCadastrado) {
       throw new HttpsError(
@@ -2574,25 +3240,20 @@ async function buscarGestanteDaContracao(dados) {
   if (!uidInformado) {
     throw new HttpsError(
         "failed-precondition",
-        "Contracao sem paciente vinculada.",
+        "Contração sem paciente vinculado.",
     );
   }
 
-  const resultado = await admin
-      .firestore()
-      .collection("gestantes")
-      .where("uidGestante", "==", uidInformado)
-      .limit(2)
-      .get();
+  const resultados = await buscarPacientesPorUid(uidInformado, 2);
 
-  if (resultado.size !== 1) {
+  if (resultados.length !== 1) {
     throw new HttpsError(
         "failed-precondition",
-        "Nao foi possivel resolver a paciente da contracao.",
+        "Não foi possível resolver o paciente da contração.",
     );
   }
 
-  const snapshot = resultado.docs[0];
+  const snapshot = resultados[0];
 
   return {
     id: snapshot.id,
@@ -2670,10 +3331,7 @@ async function sincronizarDocumentoContrato({
     nome: nomeDocumento,
     tipo: "Contrato",
     gestante: nomeGestante,
-    gestanteId: pacienteId,
-    pacienteId,
-    uidGestante,
-    uidPaciente: uidGestante,
+    ...camposIdentidadePaciente(pacienteId, uidGestante),
     arquivoNome,
     arquivoUrl,
     arquivoPrincipalUrl: arquivoUrl,
@@ -2734,22 +3392,26 @@ async function buscarUsuariosOperacionaisPush(clinicaId) {
 }
 
 function extrairTokensUsuariosPush(usuarios) {
+  const maxTokensPerUser = 5;
+  const maxRecipients = 500;
   const tokens = [];
   const donosPorToken = new Map();
 
   for (const usuario of usuarios) {
+    if (tokens.length >= maxRecipients) break;
     const tokensUsuario = Array.isArray(usuario.pushTokens) ?
-      usuario.pushTokens :
+      usuario.pushTokens.slice(-maxTokensPerUser) :
       [];
 
     for (const token of tokensUsuario) {
       const tokenNormalizado = String(token || "").trim();
 
-      if (!tokenNormalizado) {
+      if (tokenNormalizado.length < 20 || tokenNormalizado.length > 4096) {
         continue;
       }
 
       if (!donosPorToken.has(tokenNormalizado)) {
+        if (tokens.length >= maxRecipients) break;
         tokens.push(tokenNormalizado);
         donosPorToken.set(tokenNormalizado, new Set());
       }
@@ -2858,7 +3520,7 @@ async function enviarPushParaUsuariosOperacionais({
       resultado.error.code :
       "";
 
-    console.error("Push: falha ao enviar notificação:", code, resultado.error);
+    logSafeError("Push: falha ao enviar notificacao.", {code});
 
     if ([
       "messaging/registration-token-not-registered",
@@ -2890,24 +3552,29 @@ async function registrarNotificacaoCentral({
 }) {
   const tenantId = exigirTenant(camposTenant(clinicaId), "Notificacao");
 
-  await admin.firestore().collection("notificacoesCentral").add({
-    ...camposTenant(tenantId),
-    tipo: tipo || "notificacao",
-    titulo: titulo || "Notificação",
-    mensagem: mensagem || "",
-    gestante: gestante || "",
-    intensidade: intensidade || "",
-    duracao: duracao || "",
-    intervalo: intervalo || "",
-    idGestante: idGestante || "",
-    destinatariosTipos: Array.isArray(destinatariosTipos) ?
-      destinatariosTipos :
-      ["admin"],
-    lidasPor: [],
-    criadoEm: admin.firestore.FieldValue.serverTimestamp(),
-    criadoEmIso: new Date().toISOString(),
-    atualizadoEm: new Date().toISOString(),
-  });
+  const notificationRef = await admin
+      .firestore()
+      .collection("notificacoesCentral")
+      .add({
+        ...camposTenant(tenantId),
+        tipo: tipo || "notificacao",
+        titulo: titulo || "Notificação",
+        mensagem: mensagem || "",
+        gestante: gestante || "",
+        intensidade: intensidade || "",
+        duracao: duracao || "",
+        intervalo: intervalo || "",
+        idGestante: idGestante || "",
+        destinatariosTipos: Array.isArray(destinatariosTipos) ?
+          destinatariosTipos :
+          ["admin"],
+        lidasPor: [],
+        criadoEm: admin.firestore.FieldValue.serverTimestamp(),
+        criadoEmIso: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(),
+      });
+
+  return notificationRef.id;
 }
 
 async function chamarZapSign({
@@ -2916,30 +3583,68 @@ async function chamarZapSign({
   apiToken,
   body,
 }) {
-  const resposta = await fetch(`${ZAPSIGN_API_BASE_URL}${path}`, {
-    method,
+  const methodNormalized = String(method || "").toUpperCase();
+  const safePath = String(path || "");
+  const allowedRequest =
+    (methodNormalized === "POST" &&
+      safePath === "/models/create-doc/") ||
+    (methodNormalized === "GET" &&
+      /^\/docs\/[a-zA-Z0-9_-]{1,200}\/$/.test(safePath)) ||
+    (methodNormalized === "POST" &&
+      /^\/docs\/[a-zA-Z0-9_-]{1,200}\/add-signer\/$/.test(safePath));
+
+  if (!allowedRequest) {
+    const pathError = new Error("Endpoint ZapSign nao permitido.");
+    pathError.code = "zapsign/invalid-path";
+    throw pathError;
+  }
+
+  const serializedBody = body ? JSON.stringify(body) : undefined;
+  if (serializedBody && Buffer.byteLength(serializedBody, "utf8") > 256000) {
+    const bodyError = new Error("Payload ZapSign excede o limite seguro.");
+    bodyError.code = "zapsign/payload-too-large";
+    throw bodyError;
+  }
+
+  const resposta = await fetch(`${ZAPSIGN_API_BASE_URL}${safePath}`, {
+    method: methodNormalized,
     headers: {
       Authorization: `Bearer ${apiToken}`,
       "Content-Type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: serializedBody,
+    signal: AbortSignal.timeout(20000),
   });
 
+  const contentLength = Number(resposta.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > 2 * 1024 * 1024) {
+    const responseSizeError = new Error("Resposta ZapSign excede o limite.");
+    responseSizeError.code = "zapsign/response-too-large";
+    throw responseSizeError;
+  }
+
   const texto = await resposta.text();
+  if (Buffer.byteLength(texto, "utf8") > 2 * 1024 * 1024) {
+    const responseSizeError = new Error("Resposta ZapSign excede o limite.");
+    responseSizeError.code = "zapsign/response-too-large";
+    throw responseSizeError;
+  }
   let json;
 
   try {
     json = texto ? JSON.parse(texto) : {};
-  } catch (error) {
-    json = {raw: texto};
+  } catch (_) {
+    const invalidResponseError = new Error(
+        "Resposta ZapSign em formato inválido.",
+    );
+    invalidResponseError.code = "zapsign/invalid-response";
+    throw invalidResponseError;
   }
 
   if (!resposta.ok) {
-    throw new Error(
-        `ZapSign ${resposta.status}: ${
-          json.detail || json.message || json.error || texto || "erro desconhecido"
-        }`,
-    );
+    const integrationError = new Error("Falha na integracao ZapSign.");
+    integrationError.code = `zapsign/http-${resposta.status}`;
+    throw integrationError;
   }
 
   return json;
@@ -2953,14 +3658,59 @@ async function processarGeracaoContrato({
 }) {
   const tenantId = exigirTenant(camposTenant(clinicaId), "Contrato");
   const templateKey = payload.templateKey || "";
+  const definicaoPlano = ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey];
+
+  if (!definicaoPlano) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Este plano não possui um modelo contratual ativo.",
+    );
+  }
+
+  const numeroParcelas = Math.max(
+      1,
+      Number.parseInt(payload.numeroParcelas || "1", 10) || 1,
+  );
+  const valorTotal = definicaoPlano.valorTotal;
+  const valorEntrada = Math.min(
+      Math.max(converterNumeroContrato(payload.valorEntrada), 0),
+      valorTotal,
+  );
+  const valorSaldo = Math.max(valorTotal - valorEntrada, 0);
+  payload = {
+    ...payload,
+    planoNome: definicaoPlano.planoNome,
+    modalidadeNome: definicaoPlano.modalidadeNome,
+    numeroParcelas,
+    valorTotal,
+    valorEntrada,
+    valorSaldo,
+    valorParcela: valorSaldo / numeroParcelas,
+  };
   const pacienteId = payload.pacienteId || "";
   const configuracao = await buscarConfiguracaoZapSign();
   const signatariosPlanejados = montarSignatariosContrato(payload, configuracao);
+
+  validarContatoPacienteContrato(payload);
 
   if (configuracao.ativo === false) {
     throw new HttpsError(
         "failed-precondition",
         "A integracao ZapSign esta desativada nas configuracoes.",
+    );
+  }
+
+  if (configuracao.modeloContratualVersao !==
+      ZAPSIGN_MODELO_CONTRATUAL_VERSAO) {
+    await atualizarContrato(contratoId, {
+      status: "aguardando_template_atualizado",
+      zapsignTemplateKey: templateKey,
+      payload,
+      atualizadoEm: new Date().toISOString(),
+    }, tenantId);
+    throw new HttpsError(
+        "failed-precondition",
+        "Os novos modelos contratuais ainda não foram configurados na ZapSign.",
     );
   }
 
@@ -3036,6 +3786,7 @@ async function processarGeracaoContrato({
 
     await atualizarContrato(contratoId, {
       status: statusInterno,
+      emissaoEmAndamento: false,
       zapsignStatus: detalheDocumento.status || respostaZapSign.status || "",
       zapsignDocumentId: detalheDocumento.token || respostaZapSign.token || "",
       zapsignOpenId: String(
@@ -3085,21 +3836,26 @@ async function processarGeracaoContrato({
       zapsignSigners: signatariosFinais,
     };
   } catch (error) {
+    const errorCode = safeErrorCode(error);
     await atualizarContrato(contratoId, {
       status: "erro",
-      erro: error.message || String(error),
+      emissaoEmAndamento: false,
+      erro: "Falha temporaria na integracao de assinatura.",
+      erroCodigo: errorCode,
       atualizadoEm: new Date().toISOString(),
     }, tenantId);
 
     await atualizarGestanteComContrato(pacienteId, {
       contratoStatus: "erro",
-      contratoErro: error.message || String(error),
+      contratoErro: "Falha temporaria na integracao de assinatura.",
+      contratoErroCodigo: errorCode,
       contratoUltimaTentativaEm: new Date().toISOString(),
     }, tenantId);
 
+    logSafeError("Erro ao gerar contrato na ZapSign.", error);
     throw new HttpsError(
         "internal",
-        error.message || "Erro ao gerar contrato na ZapSign.",
+        "Não foi possível gerar o contrato na ZapSign.",
     );
   }
 }
@@ -3123,17 +3879,23 @@ async function prepararContratoParaGestante(idGestante, dados) {
     clinicaId = exigirTenant(dados, "Paciente");
     await exigirClinicaAtiva(clinicaId);
   } catch (error) {
-    console.error(
-        "Contrato automatico bloqueado por vinculo de clinica invalido:",
+    logSafeError(
+        "Contrato automático bloqueado por vínculo de clínica inválido.",
         error,
     );
     return;
   }
 
   if (dados.contratoId) {
-    const uidGestante = textoSeguro(
-        dados.uidPaciente || dados.uidGestante,
-    );
+    const uidsPaciente = valoresIdentificadores(dados, CAMPOS_UID_PACIENTE);
+    if (uidsPaciente.size > 1) {
+      logSafeError(
+          "Contrato automatico bloqueado por aliases UID divergentes.",
+          new Error("Paciente com aliases UID divergentes."),
+      );
+      return;
+    }
+    const uidGestante = uidsPaciente.size === 1 ? [...uidsPaciente][0] : "";
 
     if (!uidGestante) {
       return;
@@ -3167,16 +3929,10 @@ async function prepararContratoParaGestante(idGestante, dados) {
         typeof contrato.payload === "object" ? contrato.payload : {};
       await contratoRef.set({
         ...camposTenant(clinicaId),
-        pacienteId: idGestante,
-        pacienteUid: uidGestante,
-        uidPaciente: uidGestante,
-        uidGestante,
+        ...camposIdentidadePaciente(idGestante, uidGestante),
         payload: {
           ...payloadAtual,
-          pacienteId: idGestante,
-          pacienteUid: uidGestante,
-          uidPaciente: uidGestante,
-          uidGestante,
+          ...camposIdentidadePaciente(idGestante, uidGestante),
         },
         atualizadoEm: new Date().toISOString(),
       }, {merge: true});
@@ -3190,14 +3946,14 @@ async function prepararContratoParaGestante(idGestante, dados) {
       if (documentoSnapshot.exists) {
         await documentoRef.set({
           ...camposTenant(clinicaId),
-          pacienteId: idGestante,
-          gestanteId: idGestante,
-          uidPaciente: uidGestante,
-          uidGestante,
+          ...camposIdentidadePaciente(idGestante, uidGestante),
         }, {merge: true});
       }
     } catch (error) {
-      console.error("Falha ao sincronizar login no contrato existente:", error);
+      logSafeError(
+          "Falha ao sincronizar login no contrato existente.",
+          error,
+      );
     }
 
     return;
@@ -3254,7 +4010,7 @@ async function prepararContratoParaGestante(idGestante, dados) {
       clinicaId,
     });
   } catch (error) {
-    console.error("Erro ao preparar contrato ZapSign:", error);
+    logSafeError("Erro ao preparar contrato ZapSign.", error);
   }
 }
 
@@ -3273,7 +4029,10 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
 
       const nome = dados.nomeGestante || "";
       const email = dados.emailGestante || "";
-      const uidGestanteAtual = dados.uidGestante || "";
+      const uidsPacienteAtuais = valoresIdentificadores(
+          dados,
+          CAMPOS_UID_PACIENTE,
+      );
       const origem = dados.origem || "";
 
       if (origem === "importacao_xls") {
@@ -3287,15 +4046,22 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
         clinicaId = exigirTenant(dados, "Paciente");
         await exigirClinicaAtiva(clinicaId);
       } catch (error) {
-        console.error(
-            "Usuario da paciente nao criado: vinculo de clinica invalido.",
+        logSafeError(
+            "Usuário do paciente não criado: vínculo de clínica inválido.",
             error,
         );
         return;
       }
 
-      if (uidGestanteAtual) {
-        console.log("Gestante já possui uidGestante. Usuário não criado.");
+      if (uidsPacienteAtuais.size > 1) {
+        console.error(
+            "Paciente com aliases UID divergentes. Usuário não criado.",
+        );
+        return;
+      }
+
+      if (uidsPacienteAtuais.size === 1) {
+        console.log("Paciente já possui UID. Usuário não criado.");
         return;
       }
 
@@ -3319,7 +4085,7 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
         if (error.code === "auth/email-already-exists") {
           usuario = await admin.auth().getUserByEmail(email);
         } else {
-          console.error("Erro ao criar usuário:", error);
+          logSafeError("Erro ao criar usuario.", error);
           return;
         }
       }
@@ -3334,15 +4100,19 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
           (usuarioExistente.data() || {}) : {};
         const perfilExistente = resolverPerfilUsuario(dadosExistentes);
         const tenantExistente = resolverTenant(dadosExistentes);
-        const pacienteExistente = textoSeguro(
-            dadosExistentes.pacienteId || dadosExistentes.idGestante,
+        const idsPacienteExistente = valoresIdentificadores(
+            dadosExistentes,
+            CAMPOS_ID_PACIENTE,
         );
+        const pacienteExistente = idsPacienteExistente.size === 1 ?
+          [...idsPacienteExistente][0] : "";
 
         if (!usuarioExistente.exists ||
             !perfilExistente.consistente ||
             perfilExistente.perfil !== "gestante" ||
             !tenantExistente.consistente ||
             tenantExistente.clinicaId !== clinicaId ||
+            idsPacienteExistente.size > 1 ||
             pacienteExistente !== idGestante) {
           console.error(
               "Usuario da paciente nao criado: e-mail ja pertence a outro perfil.",
@@ -3372,30 +4142,31 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
             console.error(
                 "Falha critica: usuario Auth automatico ficou sem vinculo " +
                   "Firestore e exige reconciliacao manual.",
-                {
-                  uidUsuario: usuario.uid,
-                  pacienteId: idGestante,
-                  clinicaId,
-                },
             );
           }
         }
 
-        console.error("Erro ao vincular usuario automatico da paciente:", error);
+        logSafeError(
+            "Erro ao vincular usuario automatico da paciente.",
+            error,
+        );
         return;
       }
 
-      console.log("Usuária gestante criada com sucesso:", email);
+      console.log("Conta da paciente criada com sucesso.");
     },
 );
 
 exports.notificarContracaoGestante = onDocumentCreated(
-    "contracoes/{idContracao}",
+    {
+      document: "contracoes/{idContracao}",
+      region: "southamerica-east1",
+    },
     async (event) => {
       const snapshot = event.data;
 
       if (!snapshot) {
-        console.log("Push contracao: documento nao encontrado no evento.");
+        console.log("Push contração: documento não encontrado no evento.");
         return;
       }
 
@@ -3432,8 +4203,8 @@ exports.notificarContracaoGestante = onDocumentCreated(
           ...camposTenant(clinicaId),
         }, {merge: true});
       } catch (error) {
-        console.error(
-            "Push contracao bloqueado por vinculo invalido:",
+        logSafeError(
+            "Push clínico bloqueado por vínculo inválido.",
             error,
         );
         return;
@@ -3455,7 +4226,7 @@ exports.notificarContracaoGestante = onDocumentCreated(
       ].filter(Boolean);
       const mensagem = partesCorpo.join(" ");
 
-      await registrarNotificacaoCentral({
+      const notificacaoId = await registrarNotificacaoCentral({
         clinicaId,
         tipo: "alerta_contracao",
         titulo: "Alerta de contração",
@@ -3473,22 +4244,10 @@ exports.notificarContracaoGestante = onDocumentCreated(
         ],
       });
 
+      const pushPrivado = buildPrivateClinicalPush(notificacaoId);
       await enviarPushParaUsuariosOperacionais({
         clinicaId,
-        title: "Alerta de contração",
-        body: mensagem,
-        data: {
-          tipo: "alerta_contracao",
-          tag: `contracao_${event.params.idContracao}`,
-          contracaoId: event.params.idContracao,
-          gestante: nomeGestante,
-          intensidade,
-          duracao,
-          intervalo,
-          idGestante,
-          clinicaId,
-          adminDonoId: clinicaId,
-        },
+        ...pushPrivado,
       });
     },
 );
@@ -3534,6 +4293,8 @@ exports.prepararContratoZapSignAoAtualizar = onDocumentUpdated(
 exports.excluirUsuarioAuth = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
@@ -3568,7 +4329,7 @@ exports.excluirUsuarioAuth = onCall(
       if (!usuarioSnapshot.exists && !usuarioSaaSSnapshot.exists) {
         throw new HttpsError(
             "not-found",
-            "Usuario nao encontrado.",
+            "Usuário não encontrado.",
         );
       }
 
@@ -3758,6 +4519,8 @@ exports.excluirUsuarioAuth = onCall(
 exports.alterarTipoUsuarioClinica = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
@@ -3794,7 +4557,7 @@ exports.alterarTipoUsuarioClinica = onCall(
       ]);
 
       if (!usuarioSnapshot.exists) {
-        throw new HttpsError("not-found", "Usuario nao encontrado.");
+        throw new HttpsError("not-found", "Usuário não encontrado.");
       }
 
       const dadosUsuario = usuarioSnapshot.data() || {};
@@ -3906,11 +4669,19 @@ exports.alterarTipoUsuarioClinica = onCall(
         atualizadoEm: admin.firestore.FieldValue.serverTimestamp(),
         atualizadoPor: contexto.uid,
       };
+      const usuarioCanonicoRef = db.doc(
+          canonicalUserPath(tenantUsuario.clinicaId, uidUsuario),
+      );
       const batch = db.batch();
       batch.update(
           usuarioRef,
           atualizacao,
           {lastUpdateTime: usuarioSnapshot.updateTime},
+      );
+      batch.set(
+          usuarioCanonicoRef,
+          {...dadosUsuario, ...atualizacao},
+          {merge: true},
       );
 
       if (usuarioSaaSSnapshot.exists) {
@@ -3948,6 +4719,8 @@ exports.alterarTipoUsuarioClinica = onCall(
 exports.vincularLoginPaciente = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
@@ -3974,24 +4747,38 @@ exports.vincularLoginPaciente = onCall(
 exports.criarUsuarioClinica = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
           request.auth,
           ["admin", "superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "clinic-user-create",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 60,
+        windowSeconds: 60 * 60,
+      });
       const entrada = request.data || {};
-      const nome = textoSeguro(entrada.nome);
-      const email = textoSeguro(entrada.email).toLowerCase();
+      const nome = exigirTextoCriacao(
+          entrada.nome,
+          "nome",
+          200,
+      );
+      const email = exigirTextoCriacao(
+          entrada.email,
+          "email",
+          320,
+      ).toLowerCase();
       const tipoUsuario = normalizarPerfilUsuario(entrada.tipo);
       const idVinculo = textoSeguro(entrada.idVinculo);
-
-      if (!nome || !email) {
-        throw new HttpsError(
-            "invalid-argument",
-            "Nome e e-mail sao obrigatorios.",
-        );
-      }
+      const operacaoId = exigirTextoCriacao(
+          entrada.operacaoId || entrada.operationId,
+          "operacaoId",
+          128,
+      );
 
       if (!["admin", "enfermeira", "obstetra", "gestante"]
           .includes(tipoUsuario)) {
@@ -4006,31 +4793,95 @@ exports.criarUsuarioClinica = onCall(
         tipoUsuario,
         idVinculo,
       });
+      const db = admin.firestore();
+      let descritorOperacao;
+      const respostaConcluida = () => ({
+        sucesso: true,
+        ...resultadoUsuarioCriado({
+          descritorOperacao,
+          tipoUsuario,
+          destino,
+        }),
+        mensagem: "Usuario criado; convite de senha pendente de envio.",
+      });
+
+      try {
+        descritorOperacao = criarDescritorOperacao({
+          tipo: OPERATION_KIND.CREATE_CLINIC_USER,
+          atorUid: contexto.uid,
+          clinicaId: destino.clinicaId,
+          operationIdSolicitado: operacaoId,
+          payload: {nome, email, tipoUsuario, idVinculo},
+        });
+        const reserva = await reservarOperacao(db, descritorOperacao);
+
+        if (reserva.concluida) return respostaConcluida();
+      } catch (error) {
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        console.error(
+            "Falha ao reservar criacao duravel de usuario:",
+            error && error.code || "erro_desconhecido",
+        );
+        throw new HttpsError(
+            "unavailable",
+            "Não foi possível iniciar o cadastro. Tente novamente.",
+        );
+      }
+
+      if (destino.uidsAtuais.size > 0) {
+        const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+        if (rollback.operacaoJaConcluida) return respostaConcluida();
+        throw new HttpsError(
+            "failed-precondition",
+            `${destino.recurso || "Registro"} ja possui login vinculado.`,
+        );
+      }
+
       let usuarioAuth;
 
       try {
-        usuarioAuth = await admin.auth().createUser({
-          email,
-          displayName: nome,
-          emailVerified: false,
-          disabled: false,
+        usuarioAuth = await garantirUsuarioAuth({
+          auth: admin.auth(),
+          db,
+          descritor: descritorOperacao,
+          especificacao: {
+            uid: descritorOperacao.recursos.authUid,
+            email,
+            displayName: nome,
+            emailVerified: false,
+            disabled: false,
+          },
         });
       } catch (error) {
-        if (error.code === "auth/email-already-exists") {
-          throw new HttpsError(
-              "already-exists",
-              "Ja existe um usuario com este e-mail.",
-          );
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
         }
 
-        if (error.code === "auth/invalid-email") {
-          throw new HttpsError("invalid-argument", "E-mail invalido.");
+        if (error && error.code === "auth/invalid-email") {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
+          throw new HttpsError("invalid-argument", "E-mail inválido.");
         }
 
-        console.error("Erro ao criar usuario no Firebase Authentication:", error);
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
+
+        if (concluida) return respostaConcluida();
+        console.error(
+            "Falha ao preparar Auth da criacao duravel de usuario:",
+            error && error.code || "erro_desconhecido",
+        );
         throw new HttpsError(
-            "internal",
-            "Nao foi possivel criar o usuario no Firebase Authentication.",
+            "unavailable",
+            "Não foi possível concluir o cadastro. Tente novamente.",
         );
       }
 
@@ -4042,6 +4893,7 @@ exports.criarUsuarioClinica = onCall(
             pacienteId: idVinculo,
             nomeUsuario: nome,
             convitePendente: true,
+            descritorOperacao,
           }) :
           await gravarUsuarioClinicaCriado({
             contexto,
@@ -4049,6 +4901,7 @@ exports.criarUsuarioClinica = onCall(
             nome,
             tipoUsuario,
             destino,
+            descritorOperacao,
           });
 
         return {
@@ -4057,23 +4910,40 @@ exports.criarUsuarioClinica = onCall(
           mensagem: "Usuario criado; convite de senha pendente de envio.",
         };
       } catch (error) {
-        const rollbackConcluido = await rollbackUsuarioAuth(usuarioAuth.uid);
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
+        }
 
-        if (!rollbackConcluido) {
+        if (falhaPermanenteDePersistencia(error)) {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
+          if (!rollback.concluido) {
+            throw new HttpsError(
+                "internal",
+                "Falha ao concluir o cadastro e ao reverter o usuario.",
+            );
+          }
+
+          if (error instanceof HttpsError) throw error;
           throw new HttpsError(
-              "internal",
-              "Falha ao concluir o cadastro e ao reverter o usuario criado.",
+              "failed-precondition",
+              "O cadastro conflita com dados existentes.",
           );
         }
 
-        if (error instanceof HttpsError) {
-          throw error;
-        }
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
 
-        console.error("Erro ao vincular usuario criado a clinica:", error);
+        if (concluida) return respostaConcluida();
+        console.error(
+            "Falha transitoria no cadastro duravel de usuario:",
+            error && error.code || "erro_desconhecido",
+        );
         throw new HttpsError(
-            "internal",
-            "O cadastro foi revertido porque o vinculo nao pode ser salvo.",
+            "unavailable",
+            "Cadastro ainda não concluído. Tente novamente.",
         );
       }
     },
@@ -4082,29 +4952,37 @@ exports.criarUsuarioClinica = onCall(
 exports.criarClinicaComAdminSaaS = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
     },
     async (request) => {
       const contexto = await exigirContextoUsuario(
           request.auth,
           ["superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "clinic-create",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 10,
+        windowSeconds: 60 * 60,
+      });
       const entrada = request.data || {};
-      const nomeClinica = exigirTextoCriacaoClinicaSaaS(
+      const nomeClinica = exigirTextoCriacao(
           entrada.nomeClinica,
           "nomeClinica",
           200,
       );
-      const nomeAdmin = exigirTextoCriacaoClinicaSaaS(
+      const nomeAdmin = exigirTextoCriacao(
           entrada.nomeAdmin,
           "nomeAdmin",
           200,
       );
-      const emailAdmin = exigirTextoCriacaoClinicaSaaS(
+      const emailAdmin = exigirTextoCriacao(
           entrada.emailAdmin,
           "emailAdmin",
           320,
       ).toLowerCase();
-      const plano = exigirTextoCriacaoClinicaSaaS(
+      const plano = exigirTextoCriacao(
           entrada.plano,
           "plano",
           120,
@@ -4112,34 +4990,92 @@ exports.criarClinicaComAdminSaaS = onCall(
       const valorAssinatura = exigirValorAssinaturaSaaS(
           entrada.valorAssinatura,
       );
+      const operacaoId = exigirTextoCriacao(
+          entrada.operacaoId || entrada.operationId,
+          "operacaoId",
+          128,
+      );
+      const db = admin.firestore();
+      let descritorOperacao;
+      const respostaConcluida = () => ({
+        sucesso: true,
+        ...resultadoClinicaCriada(descritorOperacao),
+        mensagem: "Clinica e administrador criados; convite de senha " +
+          "pendente de envio.",
+      });
+
+      try {
+        descritorOperacao = criarDescritorOperacao({
+          tipo: OPERATION_KIND.CREATE_CLINIC_WITH_ADMIN,
+          atorUid: contexto.uid,
+          operationIdSolicitado: operacaoId,
+          payload: {
+            nomeClinica,
+            nomeAdmin,
+            emailAdmin,
+            plano,
+            valorAssinatura,
+          },
+        });
+        const reserva = await reservarOperacao(db, descritorOperacao);
+
+        if (reserva.concluida) return respostaConcluida();
+      } catch (error) {
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        console.error(
+            "Falha ao reservar criacao duravel de clinica:",
+            error && error.code || "erro_desconhecido",
+        );
+        throw new HttpsError(
+            "unavailable",
+            "Não foi possível iniciar o cadastro. Tente novamente.",
+        );
+      }
+
       let usuarioAuth;
 
       try {
-        usuarioAuth = await admin.auth().createUser({
-          email: emailAdmin,
-          displayName: nomeAdmin,
-          emailVerified: false,
-          disabled: false,
+        usuarioAuth = await garantirUsuarioAuth({
+          auth: admin.auth(),
+          db,
+          descritor: descritorOperacao,
+          especificacao: {
+            uid: descritorOperacao.recursos.authUid,
+            email: emailAdmin,
+            displayName: nomeAdmin,
+            emailVerified: false,
+            disabled: false,
+          },
         });
       } catch (error) {
-        if (error.code === "auth/email-already-exists") {
-          throw new HttpsError(
-              "already-exists",
-              "Ja existe um usuario com este e-mail.",
-          );
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
         }
 
-        if (error.code === "auth/invalid-email") {
-          throw new HttpsError("invalid-argument", "E-mail invalido.");
+        if (error && error.code === "auth/invalid-email") {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
+          throw new HttpsError("invalid-argument", "E-mail inválido.");
         }
 
+        const erroHttps = erroDuravelParaHttps(error);
+
+        if (erroHttps) throw erroHttps;
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
+
+        if (concluida) return respostaConcluida();
         console.error(
-            "Erro ao criar admin SaaS no Firebase Authentication:",
-            error,
+            "Falha ao preparar Auth da criacao duravel de clinica:",
+            error && error.code || "erro_desconhecido",
         );
         throw new HttpsError(
-            "internal",
-            "Nao foi possivel criar o administrador da clinica.",
+            "unavailable",
+            "Não foi possível concluir o cadastro. Tente novamente.",
         );
       }
 
@@ -4152,6 +5088,7 @@ exports.criarClinicaComAdminSaaS = onCall(
           emailAdmin,
           plano,
           valorAssinatura,
+          descritorOperacao,
         });
 
         return {
@@ -4161,26 +5098,40 @@ exports.criarClinicaComAdminSaaS = onCall(
             "pendente de envio.",
         };
       } catch (error) {
-        const rollbackConcluido = await rollbackUsuarioAuth(usuarioAuth.uid);
+        if (await tentarResolverConcorrencia(descritorOperacao)) {
+          return respostaConcluida();
+        }
 
-        if (!rollbackConcluido) {
+        if (falhaPermanenteDePersistencia(error)) {
+          const rollback = await rollbackDuravelSeguro(descritorOperacao);
+
+          if (rollback.operacaoJaConcluida) return respostaConcluida();
+          if (!rollback.concluido) {
+            throw new HttpsError(
+                "internal",
+                "Falha ao concluir o cadastro e ao reverter o admin.",
+            );
+          }
+
+          if (error instanceof HttpsError) throw error;
           throw new HttpsError(
-              "internal",
-              "Falha ao concluir o cadastro e ao reverter o admin criado.",
+              "failed-precondition",
+              "O cadastro conflita com dados existentes.",
           );
         }
 
-        if (error instanceof HttpsError) {
-          throw error;
-        }
+        const concluida = await prepararRetentativaFirestore(
+            descritorOperacao,
+        );
 
+        if (concluida) return respostaConcluida();
         console.error(
-            "Cadastro SaaS revertido apos falha no batch Firestore:",
-            error,
+            "Falha transitoria no cadastro duravel de clinica:",
+            error && error.code || "erro_desconhecido",
         );
         throw new HttpsError(
-            "internal",
-            "O cadastro foi revertido porque os dados nao puderam ser salvos.",
+            "unavailable",
+            "Cadastro ainda não concluído. Tente novamente.",
         );
       }
     },
@@ -4190,14 +5141,25 @@ exports.gerarContratoZapSign = onCall(
     {
       invoker: "public",
       region: "us-central1",
+      enforceAppCheck,
       secrets: [zapsignApiToken],
     },
     async (request) => {
+      const entrada = request.data || {};
+      if (entrada.acao === "reemitir") {
+        return reemitirContratoZapSignCore(request);
+      }
+
       const contexto = await exigirContextoUsuario(
           request.auth,
           ["admin", "superAdmin"],
       );
-      const entrada = request.data || {};
+      await exigirLimiteUso({
+        action: "zapsign-create",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 10,
+        windowSeconds: 60,
+      });
       const contratoId = textoSeguro(entrada.contratoId);
       const contratoResolvido = await buscarContratoComTenant(contratoId);
       exigirAcessoAoTenant(contexto, contratoResolvido.clinicaId);
@@ -4256,10 +5218,259 @@ exports.gerarContratoZapSign = onCall(
     },
 );
 
+async function reemitirContratoZapSignCore(request) {
+  const contexto = await exigirContextoUsuario(request.auth, ["admin"]);
+  await exigirLimiteUso({
+    action: "zapsign-reissue",
+    subjects: [`actor:${contexto.uid}`],
+    limit: 10,
+    windowSeconds: 60,
+  });
+
+  const entrada = request.data || {};
+  const pacienteId = exigirTextoCriacao(
+      entrada.pacienteId,
+      "pacienteId",
+      128,
+  );
+  const contratoIdInformado = textoSeguro(entrada.contratoId);
+  const reemissaoConfirmada = entrada.confirmarReemissao === true;
+  const operacaoId = exigirTextoCriacao(
+      entrada.operacaoId || entrada.operationId,
+      "operacaoId",
+      128,
+  );
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(operacaoId)) {
+    throw new HttpsError("invalid-argument", "OperacaoId inválido.");
+  }
+
+  let contratoAnterior = null;
+  let pacienteRef;
+  let paciente;
+  let clinicaId;
+
+  if (contratoIdInformado) {
+    contratoAnterior = await buscarContratoComTenant(contratoIdInformado);
+    if (contratoAnterior.pacienteId !== pacienteId) {
+      throw new HttpsError(
+          "permission-denied",
+          "O contrato não pertence à paciente informada.",
+      );
+    }
+    exigirAcessoAoTenant(contexto, contratoAnterior.clinicaId);
+    pacienteRef = contratoAnterior.pacienteRef;
+    paciente = contratoAnterior.paciente;
+    clinicaId = contratoAnterior.clinicaId;
+  } else {
+    pacienteRef = admin.firestore().collection("gestantes").doc(pacienteId);
+    const pacienteSnapshot = await pacienteRef.get();
+    if (!pacienteSnapshot.exists) {
+      throw new HttpsError("not-found", "Paciente não encontrada.");
+    }
+    paciente = pacienteSnapshot.data() || {};
+    clinicaId = exigirTenant(paciente, "Paciente");
+    await exigirClinicaAtiva(clinicaId);
+    exigirAcessoAoTenant(contexto, clinicaId);
+  }
+
+  const contratoVinculadoId = textoSeguro(paciente.contratoId);
+  if (!contratoAnterior && contratoVinculadoId) {
+    try {
+      const contratoVinculado = await buscarContratoComTenant(
+          contratoVinculadoId,
+      );
+      if (contratoVinculado.pacienteId !== pacienteId ||
+              contratoVinculado.clinicaId !== clinicaId) {
+        throw new HttpsError(
+            "failed-precondition",
+            "O contrato vinculado à paciente está inconsistente.",
+        );
+      }
+      contratoAnterior = contratoVinculado;
+    } catch (error) {
+      if (!(error instanceof HttpsError) || error.code !== "not-found") {
+        throw error;
+      }
+    }
+  }
+
+  const templateKey = descobrirTemplateKeyContrato(
+      paciente.plano || "",
+      paciente.consultorio || "",
+  );
+  if (!templateKey || !ZAPSIGN_PLANOS_POR_TEMPLATE[templateKey]) {
+    throw new HttpsError(
+        "failed-precondition",
+        "A paciente precisa estar no plano Presença ou Plenitude.",
+    );
+  }
+
+  const payload = montarPayloadContratoDaGestante(pacienteId, {
+    ...paciente,
+    contratoTemplateKey: templateKey,
+  });
+  validarContatoPacienteContrato(payload);
+
+  const documentoAnterior = textoSeguro(
+      contratoAnterior && contratoAnterior.contrato.zapsignDocumentId,
+  );
+  if (contratoAnterior && documentoAnterior && !reemissaoConfirmada) {
+    await atualizarGestanteComContrato(pacienteId, {
+      contratoId: contratoAnterior.contratoRef.id,
+      contratoStatus: contratoAnterior.contrato.status || "enviado",
+      contratoTemplateKey: contratoAnterior.contrato.templateKey ||
+            templateKey,
+      contratoZapSignDocumentId: documentoAnterior,
+      contratoZapSignSignerUrl:
+            contratoAnterior.contrato.zapsignSignerUrl || "",
+      contratoUltimaTentativaEm: new Date().toISOString(),
+    }, clinicaId);
+    return {
+      sucesso: true,
+      acao: "sincronizacao",
+      contratoId: contratoAnterior.contratoRef.id,
+      status: contratoAnterior.contrato.status || "enviado",
+      zapsignDocumentId: documentoAnterior,
+      zapsignSignerUrl:
+            contratoAnterior.contrato.zapsignSignerUrl || "",
+      reutilizado: true,
+    };
+  }
+  const reutilizarPendente = Boolean(contratoAnterior && !documentoAnterior);
+  const acao = reutilizarPendente ? "envio_pendente" :
+        (contratoAnterior ? "reemissao" : "emissao");
+  const contratoRef = reutilizarPendente ? contratoAnterior.contratoRef :
+        admin.firestore().collection("contratos")
+            .doc(`reemissao_${operacaoId}`);
+  const agora = new Date();
+  let resultadoExistente = null;
+
+  await admin.firestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(contratoRef);
+    const dadosAtuais = snapshot.exists ? (snapshot.data() || {}) : {};
+    const pacienteAtual = textoSeguro(
+        dadosAtuais.pacienteId ||
+            (dadosAtuais.payload && dadosAtuais.payload.pacienteId),
+    );
+
+    if (snapshot.exists && pacienteAtual && pacienteAtual !== pacienteId) {
+      throw new HttpsError(
+          "failed-precondition",
+          "A operação de emissão conflita com outra paciente.",
+      );
+    }
+
+    const documentoExistente = textoSeguro(dadosAtuais.zapsignDocumentId);
+    if (documentoExistente) {
+      resultadoExistente = {
+        sucesso: true,
+        acao,
+        contratoId: contratoRef.id,
+        status: dadosAtuais.status || "enviado",
+        zapsignDocumentId: documentoExistente,
+        zapsignSignerUrl: dadosAtuais.zapsignSignerUrl || "",
+        reutilizado: true,
+      };
+      return;
+    }
+
+    const inicioAnterior = Date.parse(
+        dadosAtuais.emissaoIniciadaEm || "",
+    );
+    const bloqueioAtivo = dadosAtuais.emissaoEmAndamento === true &&
+          Number.isFinite(inicioAnterior) &&
+          agora.getTime() - inicioAnterior < 5 * 60 * 1000;
+    if (bloqueioAtivo) {
+      throw new HttpsError(
+          "aborted",
+          "A emissão deste contrato já está em andamento.",
+      );
+    }
+
+    transaction.set(contratoRef, {
+      ...camposTenant(clinicaId),
+      pacienteId,
+      pacienteUid: payload.pacienteUid || "",
+      uidPaciente: payload.uidPaciente || "",
+      uidGestante: payload.uidGestante || "",
+      templateKey,
+      status: "pendente",
+      zapsignDocumentId: "",
+      zapsignSignerUrl: "",
+      payload,
+      origem: acao === "reemissao" ?
+            "reemissao_manual" : "emissao_manual",
+      operacaoId,
+      emissaoEmAndamento: true,
+      emissaoIniciadaEm: agora.toISOString(),
+      atualizadoEm: agora.toISOString(),
+      ...(!snapshot.exists ? {criadoEm: agora.toISOString()} : {}),
+      ...(contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id ? {
+        contratoAnteriorId: contratoAnterior.contratoRef.id,
+      } : {}),
+    }, {merge: true});
+  });
+
+  if (resultadoExistente) {
+    await atualizarGestanteComContrato(pacienteId, {
+      contratoGeracaoAutomatica: false,
+      contratoId: contratoRef.id,
+      contratoStatus: resultadoExistente.status,
+      contratoTemplateKey: templateKey,
+      contratoPlanoCodigo: templateKey.split("_")[0] || "",
+      contratoModalidadeCodigo: "consultorio",
+      contratoZapSignDocumentId: resultadoExistente.zapsignDocumentId,
+      contratoZapSignSignerUrl: resultadoExistente.zapsignSignerUrl,
+      contratoUltimaTentativaEm: new Date().toISOString(),
+    }, clinicaId);
+    return resultadoExistente;
+  }
+
+  await atualizarGestanteComContrato(pacienteId, {
+    contratoGeracaoAutomatica: false,
+    contratoId: contratoRef.id,
+    contratoStatus: "pendente",
+    contratoTemplateKey: templateKey,
+    contratoPlanoCodigo: templateKey.split("_")[0] || "",
+    contratoModalidadeCodigo: "consultorio",
+    contratoZapSignDocumentId: "",
+    contratoZapSignSignerUrl: "",
+    contratoUltimaTentativaEm: agora.toISOString(),
+  }, clinicaId);
+
+  let resultado;
+  try {
+    resultado = await processarGeracaoContrato({
+      contratoId: contratoRef.id,
+      payload,
+      apiToken: zapsignApiToken.value(),
+      clinicaId,
+    });
+  } catch (error) {
+    await atualizarContrato(contratoRef.id, {
+      emissaoEmAndamento: false,
+      atualizadoEm: new Date().toISOString(),
+    }, clinicaId);
+    throw error;
+  }
+
+  if (contratoAnterior && contratoRef.id !== contratoAnterior.contratoRef.id) {
+    await contratoAnterior.contratoRef.set({
+      substituidoPorContratoId: contratoRef.id,
+      substituidoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+    }, {merge: true});
+  }
+
+  return {...resultado, acao};
+}
+
 exports.consultarContratoZapSign = onCall(
     {
       invoker: "public",
       region: "us-central1",
+      enforceAppCheck,
       secrets: [zapsignApiToken],
     },
     async (request) => {
@@ -4267,6 +5478,12 @@ exports.consultarContratoZapSign = onCall(
           request.auth,
           ["admin", "superAdmin"],
       );
+      await exigirLimiteUso({
+        action: "zapsign-consult",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 30,
+        windowSeconds: 60,
+      });
       const entrada = request.data || {};
       const contratoId = textoSeguro(entrada.contratoId);
       const contratoResolvido = await buscarContratoComTenant(contratoId);
@@ -4359,14 +5576,17 @@ exports.consultarContratoZapSign = onCall(
           originalFile: detalhe.original_file || "",
         };
       } catch (error) {
+        const errorCode = safeErrorCode(error);
         await atualizarContrato(contratoId, {
-          erroConsulta: error.message || String(error),
+          erroConsulta: "Falha temporaria ao consultar a assinatura.",
+          erroConsultaCodigo: errorCode,
           atualizadoEm: new Date().toISOString(),
         }, contratoResolvido.clinicaId);
 
+        logSafeError("Erro ao consultar contrato na ZapSign.", error);
         throw new HttpsError(
             "internal",
-            error.message || "Erro ao consultar contrato na ZapSign.",
+            "Não foi possível consultar o contrato na ZapSign.",
         );
       }
     },
@@ -4375,13 +5595,22 @@ exports.consultarContratoZapSign = onCall(
 exports.buscarCoordenadaEndereco = onCall(
     {
       invoker: "public",
+      region: "us-central1",
+      enforceAppCheck,
       secrets: [googleMapsGeocodingApiKey],
+      timeoutSeconds: 15,
     },
     async (request) => {
-      await exigirContextoUsuario(
+      const contexto = await exigirContextoUsuario(
           request.auth,
           ["admin", "enfermeira", "obstetra", "profissional"],
       );
+      await exigirLimiteUso({
+        action: "geocoding",
+        subjects: [`actor:${contexto.uid}`],
+        limit: 30,
+        windowSeconds: 60,
+      });
 
       const endereco = textoSeguro(request.data && request.data.endereco);
 
@@ -4411,7 +5640,9 @@ exports.buscarCoordenadaEndereco = onCall(
       let resposta;
 
       try {
-        resposta = await fetch(url);
+        resposta = await fetch(url, {
+          signal: AbortSignal.timeout(10000),
+        });
       } catch (_) {
         throw new HttpsError(
             "unavailable",
@@ -4440,7 +5671,7 @@ exports.buscarCoordenadaEndereco = onCall(
           !Number.isFinite(longitude)) {
         throw new HttpsError(
             "not-found",
-            "Nao foi possivel localizar o endereco informado.",
+            "Não foi possível localizar o endereço informado.",
         );
       }
 
@@ -4451,15 +5682,17 @@ exports.buscarCoordenadaEndereco = onCall(
 exports.reenviarLinkTrocaSenhaGestante = onRequest(
     {
       region: "us-central1",
-      invoker: "public",
     },
     async (req, res) => {
-      res.set("Access-Control-Allow-Origin", "*");
-      res.set(
-          "Access-Control-Allow-Headers",
-          "Content-Type, Authorization",
-      );
-      res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      const originAllowed = applyRestrictedCors(req, res);
+
+      if (!originAllowed) {
+        res.status(403).json({
+          sucesso: false,
+          mensagem: "Origem nao autorizada.",
+        });
+        return;
+      }
 
       if (req.method === "OPTIONS") {
         res.status(204).send("");
@@ -4467,6 +5700,7 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
       }
 
       if (req.method !== "POST") {
+        res.set("Allow", "POST, OPTIONS");
         res.status(405).json({
           sucesso: false,
           mensagem: "Método não permitido.",
@@ -4474,64 +5708,43 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
         return;
       }
 
+      const contentLength = Number(req.headers["content-length"] || 0);
+      let parsedBodyLength = 0;
       try {
-        const authHeader = req.headers.authorization || "";
+        parsedBodyLength = Buffer.byteLength(
+            JSON.stringify(req.body || {}),
+            "utf8",
+        );
+      } catch (_) {
+        parsedBodyLength = 16 * 1024 + 1;
+      }
+      if ((Number.isFinite(contentLength) && contentLength > 16 * 1024) ||
+          parsedBodyLength > 16 * 1024) {
+        res.status(413).json({
+          sucesso: false,
+          mensagem: "Solicitacao excede o limite permitido.",
+        });
+        return;
+      }
 
-        if (!authHeader.startsWith("Bearer ")) {
-          res.status(401).json({
-            sucesso: false,
-            mensagem: "Token de autenticação não informado.",
-          });
-          return;
-        }
-
-        const idToken = authHeader.split("Bearer ")[1];
-        const decodedToken = await admin.auth().verifyIdToken(idToken, true);
-
-        if (!decodedToken || !decodedToken.uid) {
-          res.status(401).json({
-            sucesso: false,
-            mensagem: "Usuário não autenticado.",
-          });
-          return;
-        }
-
-        const contexto = await exigirContextoUsuario(
+      try {
+        const decodedToken = await autenticarRedefinicaoSenha(
+            req.headers.authorization,
+        );
+        const resultado = await solicitarRedefinicaoSenhaPacienteCore(
             decodedToken,
-            ["admin", "gestante"],
+            req.body,
         );
-        const entrada = req.body || {};
-        const paciente = await buscarPacienteParaRedefinicao(
-            contexto,
-            entrada,
-        );
-        const usuarioAuth = await buscarUsuarioAuthDaPaciente(
-            contexto,
-            paciente,
-        );
-        const emailNormalizado = textoSeguro(usuarioAuth.email).toLowerCase();
-
-        const agora = new Date().toISOString();
-        await paciente.ref.set({
-          ...camposTenant(paciente.clinicaId),
-          linkSenhaInicial: admin.firestore.FieldValue.delete(),
-          linkSenhaInicialGeradoEm: admin.firestore.FieldValue.delete(),
-          linkSenhaInicialExpirado: true,
-          redefinicaoSenhaPendente: true,
-          redefinicaoSenhaSolicitadaEm: agora,
-          redefinicaoSenhaSolicitadaPor: contexto.uid,
-        }, {merge: true});
 
         res.status(200).json({
-          sucesso: true,
-          mensagem: "Solicitacao de redefinicao registrada com seguranca.",
-          gestanteId: paciente.id,
-          emailGestante: emailNormalizado,
-          telefoneGestante: textoSeguro(paciente.dados.telefoneGestante),
-          nomeGestante: textoSeguro(paciente.dados.nomeGestante),
+          ...resultado,
+          gestanteId: resultado.pacienteId,
+          emailGestante: resultado.emailPaciente,
+          telefoneGestante: resultado.telefonePaciente,
+          nomeGestante: resultado.nomePaciente,
         });
       } catch (error) {
-        console.error("Erro ao gerar novo link de acesso:", error);
+        logSafeError("Erro ao registrar redefinicao de senha.", error);
 
         const statusHttp = statusHttpParaErro(error);
         const mensagem = statusHttp === 500 ?
@@ -4543,5 +5756,34 @@ exports.reenviarLinkTrocaSenhaGestante = onRequest(
           mensagem,
         });
       }
+    },
+);
+
+exports.solicitarRedefinicaoSenhaPaciente = onCall(
+    {
+      region: "us-central1",
+      invoker: "public",
+      enforceAppCheck,
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Voce precisa estar logado.",
+        );
+      }
+
+      const authorizationHeader = request.rawRequest &&
+        request.rawRequest.headers ?
+        request.rawRequest.headers.authorization : "";
+      const decodedToken = await autenticarRedefinicaoSenha(
+          authorizationHeader,
+          request.auth,
+      );
+
+      return solicitarRedefinicaoSenhaPacienteCore(
+          decodedToken,
+          request.data,
+      );
     },
 );

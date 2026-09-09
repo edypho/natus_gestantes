@@ -11,9 +11,7 @@ Widget documentoCardPremium({
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: Colors.black.withValues(alpha: 0.06),
-      ),
+      border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.04),
@@ -30,21 +28,13 @@ Widget documentoCardPremium({
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                titulo,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               Text(tipo),
             ],
           ),
         ),
-        ElevatedButton(
-          onPressed: onAbrir,
-          child: const Text('Abrir'),
-        ),
+        ElevatedButton(onPressed: onAbrir, child: const Text('Abrir')),
       ],
     ),
   );

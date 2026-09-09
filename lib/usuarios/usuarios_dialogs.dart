@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/natus_terminologia.dart';
 import '../shared/saas_constantes.dart';
 
 typedef CampoUsuarioBuilder =
@@ -72,7 +73,7 @@ Future<void> abrirPopupCriarUsuarioDialog({
                         ].map((tipo) {
                           return DropdownMenuItem(
                             value: tipo,
-                            child: Text(tipo),
+                            child: Text(NatusTermos.rotuloPerfil(tipo)),
                           );
                         }).toList(),
                     onChanged: (value) {
@@ -94,7 +95,7 @@ Future<void> abrirPopupCriarUsuarioDialog({
                     DropdownButtonFormField<String>(
                       initialValue: gestanteSelecionadaLocal,
                       decoration: const InputDecoration(
-                        labelText: 'Selecionar gestante',
+                        labelText: 'Selecionar paciente',
                         border: OutlineInputBorder(),
                       ),
                       items: gestantes
@@ -126,7 +127,7 @@ Future<void> abrirPopupCriarUsuarioDialog({
                     DropdownButtonFormField<String>(
                       initialValue: enfermeiraSelecionadaLocal,
                       decoration: const InputDecoration(
-                        labelText: 'Selecionar enfermeira',
+                        labelText: 'Selecionar profissional',
                         border: OutlineInputBorder(),
                       ),
                       items: enfermeiras

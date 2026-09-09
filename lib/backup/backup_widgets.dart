@@ -10,9 +10,7 @@ Widget backupCard({
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: Colors.black.withValues(alpha: 0.05),
-      ),
+      border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.04),
@@ -28,10 +26,7 @@ Widget backupCard({
         const SizedBox(height: 12),
         Text(
           titulo,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         Text(descricao),

@@ -12,11 +12,7 @@ class NatusBotanicalBackground extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFFFFBF7),
-            Color(0xFFFFF6F1),
-            Color(0xFFFBEDE5),
-          ],
+          colors: [Color(0xFFFFFBF7), Color(0xFFFFF6F1), Color(0xFFFBEDE5)],
         ),
       ),
       child: child,

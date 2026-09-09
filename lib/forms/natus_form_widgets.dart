@@ -19,9 +19,7 @@ Widget campoNatus(
       inputFormatters: mask == null ? null : <TextInputFormatter>[mask],
       decoration: InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       ),
     ),
   );

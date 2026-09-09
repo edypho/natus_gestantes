@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
+import '../core/natus_breakpoints.dart';
+import '../core/natus_terminologia.dart';
 import '../shared/natus_app.dart';
 import '../shared/formatadores.dart';
 import '../gestantes/gestantes_regras.dart';
@@ -156,7 +158,7 @@ class NatusCardAlertaDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
     return _NatusCardClicavel(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -212,6 +214,47 @@ class NatusCardAlertaDashboard extends StatelessWidget {
   }
 }
 
+class NatusAlertasDashboardLayout extends StatelessWidget {
+  final List<Widget> children;
+  final double spacing;
+
+  const NatusAlertasDashboardLayout({
+    required this.children,
+    this.spacing = 12,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final empilhar =
+            constraints.maxWidth < 520 || NatusBreakpoints.isPhone(context);
+
+        if (empilhar) {
+          return Column(
+            children: [
+              for (var indice = 0; indice < children.length; indice++) ...[
+                SizedBox(width: double.infinity, child: children[indice]),
+                if (indice < children.length - 1) SizedBox(height: spacing),
+              ],
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            for (var indice = 0; indice < children.length; indice++) ...[
+              Expanded(child: children[indice]),
+              if (indice < children.length - 1) SizedBox(width: spacing),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
 class NatusCardFinanceiroResumo extends StatelessWidget {
   final String titulo;
   final double valor;
@@ -236,7 +279,7 @@ class NatusCardFinanceiroResumo extends StatelessWidget {
         ? '${valor.toStringAsFixed(1)}%'
         : formatarMoeda(valor);
 
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return _NatusCardClicavel(
       onTap: onTap,
@@ -315,7 +358,7 @@ class NatusCardContagemResumo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return _NatusCardClicavel(
       onTap: onTap,
@@ -435,7 +478,7 @@ class NatusCardResumo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final corFinal = cor ?? NatusApp.vinho;
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
     return Container(
       width: 220,
@@ -495,6 +538,245 @@ class NatusCardResumo extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class NatusCardsResumoLayout extends StatelessWidget {
+  final List<Widget> children;
+  final double spacing;
+  final double larguraMinimaParaDuasColunas;
+
+  const NatusCardsResumoLayout({
+    required this.children,
+    this.spacing = 12,
+    this.larguraMinimaParaDuasColunas = 360,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compacto = NatusBreakpoints.usarLayoutCompacto(context);
+        final colunas =
+            compacto && constraints.maxWidth >= larguraMinimaParaDuasColunas
+            ? 2
+            : compacto
+            ? 1
+            : (constraints.maxWidth / (220 + spacing)).floor().clamp(1, 6);
+        final largura =
+            (constraints.maxWidth - (spacing * (colunas - 1))) / colunas;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final child in children)
+              SizedBox(width: largura, child: child),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class NatusFiltroPeriodoDashboard extends StatelessWidget {
+  const NatusFiltroPeriodoDashboard({
+    required this.mes,
+    required this.ano,
+    required this.onMesAlterado,
+    required this.onAnoAlterado,
+    super.key,
+  });
+
+  final int mes;
+  final int ano;
+  final ValueChanged<int> onMesAlterado;
+  final ValueChanged<int> onAnoAlterado;
+
+  static const _meses = <String>[
+    'Janeiro',
+    'Fevereiro',
+    'Março',
+    'Abril',
+    'Maio',
+    'Junho',
+    'Julho',
+    'Agosto',
+    'Setembro',
+    'Outubro',
+    'Novembro',
+    'Dezembro',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final anoAtual = DateTime.now().year;
+    final anos = <int>{
+      for (var deslocamento = -4; deslocamento <= 2; deslocamento++)
+        anoAtual + deslocamento,
+      ano,
+    }.toList()..sort();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: NatusApp.offWhite.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: NatusApp.douradoClaro.withValues(alpha: 0.55),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final empilhar = constraints.maxWidth < 420;
+          final larguraMes = empilhar ? constraints.maxWidth : 220.0;
+          final larguraAno = empilhar ? constraints.maxWidth : 150.0;
+
+          return Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: larguraMes,
+                child: DropdownButtonFormField<int>(
+                  key: const Key('dashboard-filtro-mes'),
+                  initialValue: mes,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Mês de referência',
+                    prefixIcon: Icon(Icons.calendar_month_rounded),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: List.generate(
+                    _meses.length,
+                    (indice) => DropdownMenuItem(
+                      value: indice + 1,
+                      child: Text(_meses[indice]),
+                    ),
+                  ),
+                  onChanged: (valor) {
+                    if (valor != null) onMesAlterado(valor);
+                  },
+                ),
+              ),
+              SizedBox(
+                width: larguraAno,
+                child: DropdownButtonFormField<int>(
+                  key: const Key('dashboard-filtro-ano'),
+                  initialValue: ano,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Ano',
+                    prefixIcon: Icon(Icons.date_range_rounded),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: anos
+                      .map(
+                        (item) => DropdownMenuItem(
+                          value: item,
+                          child: Text(item.toString()),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (valor) {
+                    if (valor != null) onAnoAlterado(valor);
+                  },
+                ),
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: empilhar ? constraints.maxWidth : 460,
+                ),
+                child: Text(
+                  'O período afeta novos cadastros, financeiro e indicadores '
+                  'dos módulos clínicos.',
+                  style: TextStyle(
+                    color: NatusApp.textoSuave,
+                    fontSize: 12.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class NatusModuloDashboard extends StatelessWidget {
+  const NatusModuloDashboard({
+    required this.titulo,
+    required this.subtitulo,
+    required this.icone,
+    required this.children,
+    this.inicialmenteAberto = false,
+    super.key,
+  });
+
+  final String titulo;
+  final String subtitulo;
+  final IconData icone;
+  final List<Widget> children;
+  final bool inicialmenteAberto;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: NatusApp.offWhite,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: NatusApp.douradoClaro.withValues(alpha: 0.55),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: NatusApp.vinhoProfundo.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: inicialmenteAberto,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+          childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+          leading: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: NatusApp.marsala.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Icon(icone, color: NatusApp.marsala, size: 21),
+          ),
+          title: Text(
+            titulo,
+            style: TextStyle(
+              color: NatusApp.vinho,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
+          ),
+          subtitle: Text(
+            subtitulo,
+            style: TextStyle(color: NatusApp.textoSuave, fontSize: 12.5),
+          ),
+          children: children,
+        ),
       ),
     );
   }
@@ -1272,7 +1554,7 @@ class NatusStatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        status,
+        NatusTermos.rotuloStatusPaciente(status),
         style: TextStyle(color: cor, fontWeight: FontWeight.w700, fontSize: 12),
       ),
     );

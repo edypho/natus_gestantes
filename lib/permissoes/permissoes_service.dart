@@ -1,7 +1,6 @@
 class PermissoesService {
   static bool podeAcessarFinanceiro(String perfil) {
-    return perfil == 'admin' ||
-        perfil == 'superAdmin';
+    return perfil == 'admin' || perfil == 'superAdmin';
   }
 
   static bool podeEditarGestantes(String perfil) {

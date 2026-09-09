@@ -3,9 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class LogsAdminService {
   final FirebaseFirestore firestore;
 
-  LogsAdminService({
-    required this.firestore,
-  });
+  LogsAdminService({required this.firestore});
 
   Future<void> registrarLog({
     required String acao,

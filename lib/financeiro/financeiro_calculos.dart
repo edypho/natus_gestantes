@@ -445,31 +445,6 @@ String rotuloParcelaFinanceira(Map<String, String> parcela) {
   return 'Parcela';
 }
 
-String textoStatusAsaas(Map<String, String> parcela) {
-  final status = (parcela['asaasStatus'] ?? 'NAO_GERADA').trim();
-
-  switch (status) {
-    case 'PREPARADA':
-      return 'Cobrança Asaas preparada';
-    case 'PROCESSANDO':
-      return 'Gerando cobrança Asaas';
-    case 'GERADA':
-    case 'PENDING':
-      return 'Cobrança Asaas gerada';
-    case 'PAGA':
-    case 'RECEIVED':
-    case 'CONFIRMED':
-      return 'Cobrança Asaas paga';
-    case 'VENCIDA':
-    case 'OVERDUE':
-      return 'Cobrança Asaas vencida';
-    case 'ERRO':
-      return 'Erro na cobrança Asaas';
-    default:
-      return 'Cobrança Asaas não gerada';
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // Quitação antecipada (jul/2026)
 // ═══════════════════════════════════════════════════════════════════

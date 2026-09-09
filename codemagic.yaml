@@ -1,4 +1,4 @@
-# Pipeline de build iOS — Natus Gestantes
+# Pipeline de build iOS — Natus
 # Instruções completas no GUIA_PUBLICACAO_IOS.md
 
 workflows:
@@ -9,17 +9,26 @@ workflows:
     integrations:
       app_store_connect: NatusAppleKey
     environment:
+      groups:
+        - ios_secrets
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.natusgestantes.app
-      vars:
-        APP_STORE_APPLE_ID: 0000000000 # Apple ID numérico do app (App Store Connect > App Information)
-      flutter: 3.41.6
+      flutter: 3.44.8
       xcode: latest
       cocoapods: default
     scripts:
       - name: Dependências
         script: flutter pub get
+      - name: Configurar chave do Google Maps
+        script: |
+          if [ -z "$GOOGLE_MAPS_IOS_API_KEY" ]; then
+            echo "Configure GOOGLE_MAPS_IOS_API_KEY como variável secreta no Codemagic."
+            exit 1
+          fi
+          printf 'GOOGLE_MAPS_IOS_API_KEY=%s\n' "$GOOGLE_MAPS_IOS_API_KEY" > ios/Flutter/Secrets.xcconfig
+      - name: Análise estática
+        script: flutter analyze
       - name: Testes
         script: flutter test
       - name: Configurar assinatura
@@ -31,8 +40,7 @@ workflows:
       - name: Build IPA
         script: |
           flutter build ipa --release \
-            --build-name=1.0.0 \
-            --build-number=$(($(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID") + 1))
+            --build-number="$PROJECT_BUILD_NUMBER"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -47,14 +55,14 @@ workflows:
     max_build_duration: 45
     instance_type: mac_mini_m2
     environment:
-      flutter: 3.41.6
+      flutter: 3.44.8
       xcode: latest
       cocoapods: default
     scripts:
       - name: Dependências
         script: flutter pub get
       - name: Análise estática
-        script: flutter analyze --no-fatal-infos --no-fatal-warnings
+        script: flutter analyze
       - name: Testes
         script: flutter test
       - name: Build sem assinatura

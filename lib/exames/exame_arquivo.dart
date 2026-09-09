@@ -1,3 +1,5 @@
+import '../pacientes/paciente_identidade.dart';
+
 enum OrigemExameArquivo { exames, documentos }
 
 class ExameArquivo {
@@ -25,8 +27,8 @@ class ExameArquivo {
     return ExameArquivo(
       id: id,
       origem: OrigemExameArquivo.exames,
-      idGestante: _primeiroValor(dados, ['idGestante', 'gestanteId']),
-      uidGestante: _primeiroValor(dados, ['uidGestante', 'gestanteUid']),
+      idGestante: pacienteIdDoRegistro(dados),
+      uidGestante: pacienteUidDoRegistro(dados),
       nomeGestante: _primeiroValor(dados, ['nomeGestante', 'gestante']),
       nomeArquivo: _primeiroValor(dados, [
         'nomeArquivo',
@@ -42,8 +44,8 @@ class ExameArquivo {
     return ExameArquivo(
       id: dados['id'] ?? '',
       origem: OrigemExameArquivo.documentos,
-      idGestante: dados['idGestante'] ?? dados['gestanteId'] ?? '',
-      uidGestante: dados['uidGestante'] ?? dados['gestanteUid'] ?? '',
+      idGestante: pacienteIdDoRegistro(dados),
+      uidGestante: pacienteUidDoRegistro(dados),
       nomeGestante: dados['nomeGestante'] ?? dados['gestante'] ?? '',
       nomeArquivo:
           dados['arquivoNome'] ??
@@ -59,34 +61,45 @@ class ExameArquivo {
     return _normalizar(documento['tipo']) == 'exame';
   }
 
-  bool pertenceA(Map<String, String> gestante) {
-    final id = (gestante['id'] ?? '').trim();
+  bool pertenceA(Map<String, String> paciente) {
+    final id = _idDoPaciente(paciente);
     if (idGestante.isNotEmpty && id.isNotEmpty && idGestante == id) {
       return true;
     }
+    if (idGestante.isNotEmpty && id.isNotEmpty) return false;
 
-    final uid = (gestante['uidGestante'] ?? '').trim();
+    final uid = pacienteUidDoRegistro(paciente);
     if (uidGestante.isNotEmpty && uid.isNotEmpty && uidGestante == uid) {
       return true;
     }
+    if (uidGestante.isNotEmpty && uid.isNotEmpty) return false;
 
-    final nome = _normalizar(gestante['nomeGestante']);
+    final nome = _normalizar(paciente['nomeGestante']);
     return nomeGestante.trim().isNotEmpty &&
         nome.isNotEmpty &&
         _normalizar(nomeGestante) == nome;
   }
 
-  String nomeGestanteResolvido(Iterable<Map<String, String>> gestantes) {
-    if (nomeGestante.trim().isNotEmpty) return nomeGestante.trim();
+  Map<String, String>? pacienteCorrespondente(
+    Iterable<Map<String, String>> pacientes,
+  ) {
+    for (final paciente in pacientes) {
+      if (pertenceA(paciente)) return paciente;
+    }
+    return null;
+  }
 
-    for (final gestante in gestantes) {
-      if (pertenceA(gestante)) {
-        final nome = (gestante['nomeGestante'] ?? '').trim();
-        if (nome.isNotEmpty) return nome;
+  String nomeGestanteResolvido(Iterable<Map<String, String>> pacientes) {
+    final paciente = pacienteCorrespondente(pacientes);
+    if (paciente != null) {
+      final nome = (paciente['nomeGestante'] ?? '').trim();
+      if (nome.isNotEmpty) {
+        return nome;
       }
     }
 
-    return 'Gestante não identificada';
+    if (nomeGestante.trim().isNotEmpty) return nomeGestante.trim();
+    return 'Paciente não identificado';
   }
 
   DateTime get dataOrdenacao {
@@ -152,6 +165,85 @@ class ExameArquivo {
         .replaceAll('ú', 'u')
         .replaceAll('ç', 'c');
   }
+
+  static String _idDoPaciente(Map<String, String> paciente) {
+    final idDocumento = (paciente['id'] ?? '').trim();
+    return pacienteIdDoRegistro(paciente, pacienteId: idDocumento);
+  }
+}
+
+class GrupoExamesPaciente {
+  final String chavePaciente;
+  final String nomePaciente;
+  final List<ExameArquivo> exames;
+
+  const GrupoExamesPaciente({
+    required this.chavePaciente,
+    required this.nomePaciente,
+    required this.exames,
+  });
+}
+
+List<GrupoExamesPaciente> agruparExamesPorPaciente(
+  Iterable<ExameArquivo> exames,
+  Iterable<Map<String, String>> pacientes,
+) {
+  final pacientesDisponiveis = pacientes.toList(growable: false);
+  final agrupados = <String, List<ExameArquivo>>{};
+  final nomes = <String, String>{};
+
+  for (final exame in exames) {
+    final paciente = exame.pacienteCorrespondente(pacientesDisponiveis);
+    final chave = paciente == null
+        ? _chavePacienteNaoCadastrado(exame)
+        : _chavePacienteCadastrado(paciente);
+
+    agrupados.putIfAbsent(chave, () => <ExameArquivo>[]).add(exame);
+    nomes.putIfAbsent(
+      chave,
+      () =>
+          exame.nomeGestanteResolvido(paciente == null ? const [] : [paciente]),
+    );
+  }
+
+  final grupos = agrupados.entries.map((entrada) {
+    final examesDoPaciente = entrada.value
+      ..sort((a, b) => b.dataOrdenacao.compareTo(a.dataOrdenacao));
+    return GrupoExamesPaciente(
+      chavePaciente: entrada.key,
+      nomePaciente: nomes[entrada.key] ?? 'Paciente não identificado',
+      exames: examesDoPaciente,
+    );
+  }).toList();
+
+  grupos.sort(
+    (a, b) =>
+        a.nomePaciente.toLowerCase().compareTo(b.nomePaciente.toLowerCase()),
+  );
+  return grupos;
+}
+
+String _chavePacienteCadastrado(Map<String, String> paciente) {
+  final id = ExameArquivo._idDoPaciente(paciente);
+  if (id.isNotEmpty) return 'id:$id';
+
+  final uid = pacienteUidDoRegistro(paciente);
+  if (uid.isNotEmpty) return 'uid:$uid';
+
+  return 'nome:${ExameArquivo._normalizar(paciente['nomeGestante'])}';
+}
+
+String _chavePacienteNaoCadastrado(ExameArquivo exame) {
+  if (exame.idGestante.isNotEmpty) {
+    return 'nao-cadastrado:id:${exame.idGestante}';
+  }
+  if (exame.uidGestante.isNotEmpty) {
+    return 'nao-cadastrado:uid:${exame.uidGestante}';
+  }
+
+  final nome = ExameArquivo._normalizar(exame.nomeGestante);
+  if (nome.isNotEmpty) return 'nao-cadastrado:nome:$nome';
+  return 'nao-cadastrado:exame:${exame.origem.name}:${exame.id}';
 }
 
 List<ExameArquivo> removerExamesDuplicados(Iterable<ExameArquivo> exames) {
