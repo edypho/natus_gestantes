@@ -14,10 +14,12 @@ class ContratoPayloadMapper {
       nomePlano: (paciente['plano'] ?? '').toString(),
       consultorio: (paciente['consultorio'] ?? '').toString(),
     );
-    final valorContratual = template?.valorPadrao ?? valorTotal;
+    final valorContratual = valorTotal.clamp(0, double.infinity).toDouble();
     final entradaContratual = valorEntrada.clamp(0, valorContratual).toDouble();
     final saldoContratual = valorContratual - entradaContratual;
-    final parcelasContratuais = numeroParcelas < 1 ? 1 : numeroParcelas;
+    final parcelasContratuais = saldoContratual == 0
+        ? 0
+        : (numeroParcelas < 1 ? 1 : numeroParcelas);
 
     return {
       'contratoGeracaoAutomatica': template != null,
@@ -35,7 +37,9 @@ class ContratoPayloadMapper {
         'valorEntrada': entradaContratual,
         'valorSaldo': saldoContratual,
         'numeroParcelas': parcelasContratuais,
-        'valorParcela': saldoContratual / parcelasContratuais,
+        'valorParcela': parcelasContratuais == 0
+            ? 0.0
+            : saldoContratual / parcelasContratuais,
       },
     };
   }
@@ -53,10 +57,12 @@ class ContratoPayloadMapper {
       nomePlano: (paciente['plano'] ?? '').toString(),
       consultorio: (paciente['consultorio'] ?? '').toString(),
     );
-    final valorContratual = template?.valorPadrao ?? valorTotal;
+    final valorContratual = valorTotal.clamp(0, double.infinity).toDouble();
     final entradaContratual = valorEntrada.clamp(0, valorContratual).toDouble();
     final saldoContratual = valorContratual - entradaContratual;
-    final parcelasContratuais = numeroParcelas < 1 ? 1 : numeroParcelas;
+    final parcelasContratuais = saldoContratual == 0
+        ? 0
+        : (numeroParcelas < 1 ? 1 : numeroParcelas);
 
     final enderecoPaciente = _montarEnderecoPaciente(paciente);
 
@@ -86,7 +92,9 @@ class ContratoPayloadMapper {
       valorTotal: valorContratual,
       valorEntrada: entradaContratual,
       valorSaldo: saldoContratual,
-      valorParcela: saldoContratual / parcelasContratuais,
+      valorParcela: parcelasContratuais == 0
+          ? 0.0
+          : saldoContratual / parcelasContratuais,
     );
   }
 

@@ -27,7 +27,7 @@ void main() {
     expect(plenitude?.valorPadrao, 5000);
   });
 
-  test('metadados usam valor fixo e recalculam o parcelamento', () {
+  test('metadados preservam desconto sem repor o preço de catálogo', () {
     final metadados = ContratoPayloadMapper.criarMetadadosIniciais(
       paciente: const {'plano': 'Presença', 'consultorio': 'Não'},
       valorTotal: 3500,
@@ -42,8 +42,8 @@ void main() {
 
     expect(metadados['contratoTemplateKey'], 'presenca_consultorio');
     expect(resumo['modalidadeNome'], 'Consultorio');
-    expect(resumo['valorTotal'], 4000);
-    expect(resumo['valorSaldo'], 3000);
-    expect(resumo['valorParcela'], 600);
+    expect(resumo['valorTotal'], 3500);
+    expect(resumo['valorSaldo'], 2500);
+    expect(resumo['valorParcela'], 500);
   });
 }

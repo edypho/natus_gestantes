@@ -2,6 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../shared/formatadores.dart';
 
+/// Total contratado após o desconto, arredondado em centavos.
+double valorLiquidoPlano(Map<String, String> paciente) {
+  final bruto = converterValor(paciente['valorPlano'] ?? '0');
+  final desconto = converterValor(paciente['valorDesconto'] ?? '0');
+  return ((bruto - desconto).clamp(0, double.infinity) * 100).round() / 100;
+}
+
+List<double> parcelasDoPlano(Map<String, String> paciente, int quantidade) {
+  final saldo =
+      valorLiquidoPlano(paciente) - converterValor(paciente['entrada'] ?? '0');
+  return distribuirSaldoEmParcelas(saldo, quantidade);
+}
+
 /// Cálculos financeiros do Natus — funções puras, sem estado.
 ///
 /// Extraídas do main.dart no Lote 2b da refatoração. Recebem as listas e o

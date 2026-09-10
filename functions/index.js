@@ -2,6 +2,7 @@
 /* eslint-disable max-len */
 /* eslint-disable quote-props */
 const {setGlobalOptions} = require("firebase-functions");
+const {calcularFinanceiroContrato} = require("./contrato_financeiro");
 const {
   onDocumentCreated,
   onDocumentUpdated,
@@ -2832,14 +2833,18 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     throw new Error("Paciente com aliases UID divergentes.");
   }
   const uidPaciente = uidsPaciente.size === 1 ? [...uidsPaciente][0] : "";
-  const valorTotal = definicaoPlano.valorTotal || 0;
+  const valorBruto = converterNumeroContrato(
+      dados.valorPlano !== undefined ? dados.valorPlano :
+        (definicaoPlano.valorTotal || 0),
+  );
+  const valorTotal = Math.round(Math.max(0, valorBruto -
+    converterNumeroContrato(dados.valorDesconto || 0)) * 100) / 100;
   const numeroParcelas = Math.max(
       1,
       Number.parseInt(dados.parcelas || "1", 10) || 1,
   );
   const entradaInformada = converterNumeroContrato(
-      dados.contratoResumo && dados.contratoResumo.valorEntrada !== undefined ?
-        dados.contratoResumo.valorEntrada : dados.entrada,
+      dados.entrada,
   );
   const valorEntrada = Math.min(Math.max(entradaInformada, 0), valorTotal);
   const valorSaldo = Math.max(valorTotal - valorEntrada, 0);
@@ -2872,6 +2877,7 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
     valorEntrada,
     valorSaldo,
     valorParcela: valorSaldo / numeroParcelas,
+    ...calcularFinanceiroContrato(valorTotal, entradaInformada, numeroParcelas),
   };
 }
 
@@ -3671,9 +3677,18 @@ async function processarGeracaoContrato({
       1,
       Number.parseInt(payload.numeroParcelas || "1", 10) || 1,
   );
-  const valorTotal = definicaoPlano.valorTotal;
+  // Reemissões e tentativas antigas também precisam usar o acordo salvo,
+  // nunca o preço de catálogo ou um resumo contratual desatualizado.
+  const origemFinanceira = await buscarContratoComTenant(contratoId);
+  if (origemFinanceira.clinicaId !== tenantId) {
+    throw new HttpsError("permission-denied", "Clínica do contrato divergente.");
+  }
+  const financeiroAtual = montarPayloadContratoDaGestante(
+      origemFinanceira.pacienteId, origemFinanceira.paciente,
+  );
+  const valorTotal = financeiroAtual.valorTotal;
   const valorEntrada = Math.min(
-      Math.max(converterNumeroContrato(payload.valorEntrada), 0),
+      Math.max(financeiroAtual.valorEntrada, 0),
       valorTotal,
   );
   const valorSaldo = Math.max(valorTotal - valorEntrada, 0);
@@ -3686,6 +3701,9 @@ async function processarGeracaoContrato({
     valorEntrada,
     valorSaldo,
     valorParcela: valorSaldo / numeroParcelas,
+    ...calcularFinanceiroContrato(
+        valorTotal, financeiroAtual.valorEntrada, financeiroAtual.numeroParcelas,
+    ),
   };
   const pacienteId = payload.pacienteId || "";
   const configuracao = await buscarConfiguracaoZapSign();

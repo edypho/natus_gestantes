@@ -6294,6 +6294,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               },
             ),
             campoInfo('Valor do desconto', formatarMoeda(valorDesconto)),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.payments_outlined),
+              label: const Text('À vista'),
+              onPressed: () => setState(() {
+                entradaController.text = formatarMoeda(valorFinal);
+                parcelas = '1';
+                parcelasPagasController.text = '0';
+              }),
+            ),
             campoDinheiro(entradaController, 'Entrada'),
 
             campo(parcelasPagasController, 'Parcelas já pagas'),
@@ -8777,7 +8786,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               linhaInfo('Entrada', g['entrada']),
               linhaInfo(
                 'Parcelas',
-                '${g['parcelas']}x de ${g['valorParcela']}',
+                fincalc.parcelasDoPlano(g, 1).isEmpty
+                    ? 'À vista'
+                    : '${g['parcelas']}x de ${g['valorParcela']}',
               ),
               linhaInfo('Forma de pagamento', g['formaPagamento']),
               linhaInfo('Consultório', g['consultorio']),
@@ -8797,7 +8808,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               linhaInfo(
                 'Lucro estimado',
                 formatarMoeda(
-                  converterValor(g['valorPlano'] ?? '0') -
+                  fincalc.valorLiquidoPlano(g) -
                       calcularCustoTotalGestante(g['nomeGestante'] ?? ''),
                 ),
               ),
@@ -9285,7 +9296,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               linhaInfo('Entrada', g['entrada']),
               linhaInfo(
                 'Parcelas',
-                '${g['parcelas']}x de ${g['valorParcela']}',
+                fincalc.parcelasDoPlano(g, 1).isEmpty
+                    ? 'À vista'
+                    : '${g['parcelas']}x de ${g['valorParcela']}',
               ),
               linhaInfo('Forma de pagamento', g['formaPagamento']),
               linhaInfo('Consultório', g['consultorio']),
@@ -9302,7 +9315,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               linhaInfo(
                 'Lucro estimado',
                 formatarMoeda(
-                  converterValor(g['valorPlano'] ?? '0') -
+                  fincalc.valorLiquidoPlano(g) -
                       calcularCustoTotalGestante(g['nomeGestante'] ?? ''),
                 ),
               ),
@@ -14301,6 +14314,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     if (valorParcelado < 0) valorParcelado = 0;
 
     double valorParcela = valorParcelado / qtdParcelas;
+    if (entrada < 0 || entrada > valorFinal) {
+      mostrarMensagem('A entrada deve ficar entre zero e o valor final.');
+      return;
+    }
     final pacienteRef = firestore.collection('gestantes').doc();
     final pacienteId = pacienteRef.id;
     final dadosBaseGestante = <String, String>{
@@ -15748,48 +15765,70 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               child: Wrap(
                 spacing: 12,
                 runSpacing: 14,
-                children: campos.map((item) {
-                  final campo = item['campo'] ?? '';
-                  final label = item['label'] ?? campo;
-                  final controller = controllers[campo]!;
-                  final campoFinanceiroCalculado =
-                      secao == 'Valores' &&
-                      (campo == 'valorDesconto' || campo == 'valorParcela');
-                  final campoNumerico =
-                      secao == 'Valores' &&
-                      (campo == 'valorPlano' ||
-                          campo == 'descontoPercentual' ||
-                          campo == 'entrada' ||
-                          campo == 'parcelas');
-                  final mascara = campo == 'cpfGestante' || campo == 'cpfPai'
-                      ? cpfMask
-                      : campo == 'telefoneGestante' || campo == 'telefonePai'
-                      ? telefoneMask
-                      : campo == 'cepGestante'
-                      ? cepMask
-                      : null;
-
-                  return SizedBox(
-                    width: 260,
-                    child: TextField(
-                      controller: controller,
-                      enabled: !campoFinanceiroCalculado,
-                      keyboardType: campoNumerico
-                          ? const TextInputType.numberWithOptions(decimal: true)
-                          : null,
-                      inputFormatters: mascara == null ? null : [mascara],
-                      maxLines: campo == 'observacoesBebe' ? 3 : 1,
-                      onChanged: campo == 'cepGestante'
-                          ? preencherEnderecoPorCep
-                          : null,
-                      decoration: InputDecoration(
-                        labelText: label,
-                        floatingLabelBehavior: FloatingLabelBehavior.always,
-                        border: const OutlineInputBorder(),
-                      ),
+                children: [
+                  if (secao == 'Valores')
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.payments_outlined),
+                      label: const Text('À vista'),
+                      onPressed: () {
+                        final bruto = converterValor(
+                          controllers['valorPlano']!.text,
+                        );
+                        final desconto = converterPercentual(
+                          controllers['descontoPercentual']!.text,
+                        );
+                        controllers['entrada']!.text = formatarMoeda(
+                          bruto * (1 - desconto),
+                        );
+                        controllers['parcelas']!.text = '1';
+                        controllers['valorParcela']!.text = formatarMoeda(0);
+                      },
                     ),
-                  );
-                }).toList(),
+                  ...campos.map((item) {
+                    final campo = item['campo'] ?? '';
+                    final label = item['label'] ?? campo;
+                    final controller = controllers[campo]!;
+                    final campoFinanceiroCalculado =
+                        secao == 'Valores' &&
+                        (campo == 'valorDesconto' || campo == 'valorParcela');
+                    final campoNumerico =
+                        secao == 'Valores' &&
+                        (campo == 'valorPlano' ||
+                            campo == 'descontoPercentual' ||
+                            campo == 'entrada' ||
+                            campo == 'parcelas');
+                    final mascara = campo == 'cpfGestante' || campo == 'cpfPai'
+                        ? cpfMask
+                        : campo == 'telefoneGestante' || campo == 'telefonePai'
+                        ? telefoneMask
+                        : campo == 'cepGestante'
+                        ? cepMask
+                        : null;
+
+                    return SizedBox(
+                      width: 260,
+                      child: TextField(
+                        controller: controller,
+                        enabled: !campoFinanceiroCalculado,
+                        keyboardType: campoNumerico
+                            ? const TextInputType.numberWithOptions(
+                                decimal: true,
+                              )
+                            : null,
+                        inputFormatters: mascara == null ? null : [mascara],
+                        maxLines: campo == 'observacoesBebe' ? 3 : 1,
+                        onChanged: campo == 'cepGestante'
+                            ? preencherEnderecoPorCep
+                            : null,
+                        decoration: InputDecoration(
+                          labelText: label,
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
               ),
             ),
           ),
@@ -17116,16 +17155,12 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final quantidadeParcelas = (int.tryParse(gestante['parcelas'] ?? '1') ?? 1)
         .clamp(1, 24)
         .toInt();
-    final valorParcela = gestante['valorParcela'] ?? 'R\$ 0,00';
     final valorEntrada = gestante['entrada'] ?? 'R\$ 0,00';
     final parcelasPagas = int.tryParse(gestante['parcelasPagas'] ?? '0') ?? 0;
-    final saldoParcelado =
-        converterValor(gestante['valorPlano'] ?? '0') -
-        converterValor(gestante['valorDesconto'] ?? '0') -
-        converterValor(valorEntrada);
-    final valoresParcelas = saldoParcelado > 0
-        ? fincalc.distribuirSaldoEmParcelas(saldoParcelado, quantidadeParcelas)
-        : List<double>.filled(quantidadeParcelas, converterValor(valorParcela));
+    final valoresParcelas = fincalc.parcelasDoPlano(
+      gestante,
+      quantidadeParcelas,
+    );
 
     if (valoresParcelas.every((valor) => valor <= 0) &&
         converterValor(valorEntrada) <= 0) {
@@ -17182,7 +17217,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       lancamentos.add(entradaFinanceira);
     }
 
-    for (int i = 1; i <= quantidadeParcelas; i++) {
+    for (int i = 1; i <= valoresParcelas.length; i++) {
       final novaParcela = baseFinanceira(
         tipo: 'parcela',
         numero: i.toString(),
@@ -17468,7 +17503,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget financeiroGestantePremium(Map<String, String> g) {
     final parcelas = parcelasDaGestanteFicha(g);
-    final totalPlano = converterValor(g['valorPlano'] ?? '0');
+    final totalPlano = fincalc.valorLiquidoPlano(g);
     final totalParcelas = totalParcelasPorStatusGestante(parcelas, (_) => true);
     final totalBase = totalPlano > 0 ? totalPlano : totalParcelas;
     final totalPago = totalParcelasPorStatusGestante(
