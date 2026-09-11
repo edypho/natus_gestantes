@@ -391,6 +391,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final Set<String> _modulosSecundariosCarregados = <String>{};
   final Set<String> _modulosSecundariosCarregando = <String>{};
   bool _agrupandoCarregamentoInicial = false;
+  int _versaoDadosDashboard = 0;
+  _DadosDashboardCalculados? _dadosDashboardCache;
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -816,6 +818,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> _carregarDadosIniciais() async {
+    final cronometro = Stopwatch()..start();
     _agrupandoCarregamentoInicial = true;
     try {
       if (widget.tipoUsuario == 'obstetra') {
@@ -826,16 +829,26 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       await Future.wait<void>([
         carregarGestantesFirestore(),
-        carregarAtendimentosFirestore(),
-        carregarParcelasFirestore(),
-        carregarEnfermeirasFirestore(),
-        carregarPlanosFirestore(),
+        if (usuarioEhAdmin() || widget.escopoTenant.ehPaciente)
+          carregarParcelasFirestore(),
         if (widget.tipoUsuario != 'obstetra') carregarObstetrasFirestore(),
       ]);
+      _modulosSecundariosCarregados.addAll(<String>{
+        if (usuarioEhAdmin() || widget.escopoTenant.ehPaciente) 'Financeiro',
+      });
     } finally {
       _agrupandoCarregamentoInicial = false;
       if (mounted) setState(() {});
+      cronometro.stop();
+      logInfoSeguro(
+        'Carregamento inicial concluído em ${cronometro.elapsedMilliseconds} ms.',
+      );
     }
+  }
+
+  void _invalidarDadosDashboard() {
+    _versaoDadosDashboard++;
+    _dadosDashboardCache = null;
   }
 
   void aoMudarTema() {
@@ -1292,6 +1305,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       _atualizarDados(() {
         obstetras.clear();
         obstetras.addAll(listaFirebase);
+        _invalidarDadosDashboard();
       });
     } catch (e) {
       mostrarMensagem('Erro ao carregar obstetras.');
@@ -3450,8 +3464,29 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
+    final cronometro = Stopwatch()..start();
     try {
       switch (titulo) {
+        case 'Agenda':
+          await carregarEnfermeirasFirestore();
+        case 'Atendimentos':
+          await carregarAtendimentosFirestore();
+        case 'Cadastro':
+          await Future.wait<void>([
+            carregarPlanosFirestore(),
+            carregarEnfermeirasFirestore(),
+            carregarObstetrasFirestore(),
+          ]);
+        case 'Gestantes':
+        case 'Prontuário':
+          await Future.wait<void>([
+            carregarAtendimentosFirestore(),
+            carregarParcelasFirestore(),
+          ]);
+        case 'Financeiro':
+          await carregarParcelasFirestore();
+        case 'Planos da Natus':
+          await carregarPlanosFirestore();
         case 'Contrações':
           await carregarContracoesFirestore();
         case 'Biblioteca':
@@ -3466,6 +3501,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       _modulosSecundariosCarregados.add(titulo);
     } finally {
       _modulosSecundariosCarregando.remove(titulo);
+      cronometro.stop();
+      logInfoSeguro(
+        'Módulo $titulo carregado em ${cronometro.elapsedMilliseconds} ms.',
+      );
     }
   }
 
@@ -14761,6 +14800,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                           p['pacienteId'] == id ||
                           p['idGestante'] == id,
                     );
+                    _invalidarDadosDashboard();
 
                     marcadores.removeWhere((m) => m.markerId.value == id);
                     mapaJaCarregado = false;
@@ -15001,6 +15041,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       _atualizarDados(() {
         gestantes.clear();
         gestantes.addAll(listaFirebase);
+        _invalidarDadosDashboard();
         marcadores.clear();
         mapaJaCarregado = false;
         carregandoMapa = false;
@@ -17351,7 +17392,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     await lote.commit();
 
     if (mounted) {
-      setState(() => parcelasFinanceiras.addAll(lancamentos));
+      setState(() {
+        parcelasFinanceiras.addAll(lancamentos);
+        _invalidarDadosDashboard();
+      });
     }
   }
 
@@ -17384,6 +17428,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       _atualizarDados(() {
         parcelasFinanceiras.clear();
         parcelasFinanceiras.addAll(listaFirebase);
+        _invalidarDadosDashboard();
       });
 
       logInfoSeguro('Parcelas carregadas do Firebase.');
@@ -17908,6 +17953,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         p['quitacaoAntecipada'] = 'true';
         p['descontoQuitacao'] = descontoTexto;
       }
+      _invalidarDadosDashboard();
     });
 
     mostrarMensagem(
@@ -17994,6 +18040,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       setState(() {
         parcela.addAll(dadosAtualizados);
         comprovantesSelecionados.remove(id);
+        _invalidarDadosDashboard();
       });
 
       mostrarMensagem('Parcela baixada com sucesso!');
@@ -18395,25 +18442,54 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  Widget telaDashboard() {
+  _DadosDashboardCalculados _obterDadosDashboard() {
+    final cache = _dadosDashboardCache;
+    if (cache != null &&
+        cache.versao == _versaoDadosDashboard &&
+        cache.mes == mesSelecionado &&
+        cache.ano == anoSelecionado) {
+      return cache;
+    }
+
     final pacientesObstetricia = gestantes
         .where(pacienteTemModuloObstetrico)
         .toList(growable: false);
-    final resumo = DashboardClinicaResumo.calcular(
-      gestantes,
+    final calculados = _DadosDashboardCalculados(
+      versao: _versaoDadosDashboard,
       mes: mesSelecionado,
       ano: anoSelecionado,
+      pacientesObstetricia: pacientesObstetricia,
+      resumo: DashboardClinicaResumo.calcular(
+        gestantes,
+        mes: mesSelecionado,
+        ano: anoSelecionado,
+      ),
+      pacientesPorPlano: contarGestantesAtivasPorPlano(),
+      recebidoMes: calcularValorRecebidoMesAtual(),
+      aReceberMes: calcularValorAReceberReal(),
+      atrasadoMes: calcularValorAtrasadoMesAtual(),
+      parcelasAtrasadas: contarParcelasAtrasadasMesSelecionado(),
+      percentualInadimplencia: calcularPercentualInadimplencia(),
+      pacientesProximosDpp: contarGestantesProximasDpp(pacientesObstetricia),
     );
-    final pacientesPorPlano = contarGestantesAtivasPorPlano();
-    final recebidoMes = calcularValorRecebidoMesAtual();
-    final aReceberMes = calcularValorAReceberReal();
-    final atrasadoMes = calcularValorAtrasadoMesAtual();
+    _dadosDashboardCache = calculados;
+    return calculados;
+  }
+
+  Widget telaDashboard() {
+    final dadosDashboard = _obterDadosDashboard();
+    final pacientesObstetricia = dadosDashboard.pacientesObstetricia;
+    final resumo = dadosDashboard.resumo;
+    final pacientesPorPlano = dadosDashboard.pacientesPorPlano;
+    final recebidoMes = dadosDashboard.recebidoMes;
+    final aReceberMes = dadosDashboard.aReceberMes;
+    final atrasadoMes = dadosDashboard.atrasadoMes;
 
     final alertas = <Widget>[
       if (usuarioEhAdmin())
         cardAlertaDashboard(
           'Parcelas atrasadas',
-          '${contarParcelasAtrasadasMesSelecionado()} parcela(s)',
+          '${dadosDashboard.parcelasAtrasadas} parcela(s)',
           Icons.warning_amber_rounded,
           Colors.red,
           onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
@@ -18447,7 +18523,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       if (resumo.possuiModuloObstetricia)
         cardAlertaDashboard(
           'DPP próxima',
-          '${contarGestantesProximasDpp(pacientesObstetricia)} paciente(s)',
+          '${dadosDashboard.pacientesProximosDpp} paciente(s)',
           Icons.event_available_rounded,
           NatusApp.marsala,
           onTap: () => abrirPacientesDoDashboard(
@@ -18648,8 +18724,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   ),
                   cardFinanceiroResumo(
                     'Inadimplência',
-                    calcularPercentualInadimplencia(),
-                    corInadimplencia(calcularPercentualInadimplencia()),
+                    dadosDashboard.percentualInadimplencia,
+                    corInadimplencia(dadosDashboard.percentualInadimplencia),
                     Icons.percent_rounded,
                     sufixo: '%',
                     onTap: () => abrirFinanceiroDoDashboard('Atrasados'),
@@ -18980,4 +19056,34 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void mostrarMensagem(String texto) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
   }
+}
+
+class _DadosDashboardCalculados {
+  const _DadosDashboardCalculados({
+    required this.versao,
+    required this.mes,
+    required this.ano,
+    required this.pacientesObstetricia,
+    required this.resumo,
+    required this.pacientesPorPlano,
+    required this.recebidoMes,
+    required this.aReceberMes,
+    required this.atrasadoMes,
+    required this.parcelasAtrasadas,
+    required this.percentualInadimplencia,
+    required this.pacientesProximosDpp,
+  });
+
+  final int versao;
+  final int mes;
+  final int ano;
+  final List<Map<String, String>> pacientesObstetricia;
+  final DashboardClinicaResumo resumo;
+  final List<MapEntry<String, int>> pacientesPorPlano;
+  final double recebidoMes;
+  final double aReceberMes;
+  final double atrasadoMes;
+  final int parcelasAtrasadas;
+  final double percentualInadimplencia;
+  final int pacientesProximosDpp;
 }
