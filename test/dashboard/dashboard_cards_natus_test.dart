@@ -162,4 +162,36 @@ void main() {
     expect(ano.top, greaterThan(mes.bottom));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('módulo recolhido só monta conteúdo pesado ao abrir', (
+    tester,
+  ) async {
+    var montagens = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: NatusModuloDashboard(
+            titulo: 'Módulo Obstetrícia',
+            subtitulo: 'Indicadores especializados',
+            icone: Icons.monitor_heart_outlined,
+            conteudoBuilder: (_) {
+              montagens++;
+              return const Text('Conteúdo calculado');
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(montagens, 0);
+    expect(find.text('Conteúdo calculado'), findsNothing);
+
+    await tester.tap(find.text('Módulo Obstetrícia'));
+    await tester.pumpAndSettle();
+
+    expect(montagens, greaterThan(0));
+    expect(find.text('Conteúdo calculado'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

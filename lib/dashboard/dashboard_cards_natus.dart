@@ -712,12 +712,12 @@ class NatusFiltroPeriodoDashboard extends StatelessWidget {
   }
 }
 
-class NatusModuloDashboard extends StatelessWidget {
+class NatusModuloDashboard extends StatefulWidget {
   const NatusModuloDashboard({
     required this.titulo,
     required this.subtitulo,
     required this.icone,
-    required this.children,
+    required this.conteudoBuilder,
     this.inicialmenteAberto = false,
     super.key,
   });
@@ -725,8 +725,15 @@ class NatusModuloDashboard extends StatelessWidget {
   final String titulo;
   final String subtitulo;
   final IconData icone;
-  final List<Widget> children;
+  final WidgetBuilder conteudoBuilder;
   final bool inicialmenteAberto;
+
+  @override
+  State<NatusModuloDashboard> createState() => _NatusModuloDashboardState();
+}
+
+class _NatusModuloDashboardState extends State<NatusModuloDashboard> {
+  late bool _aberto = widget.inicialmenteAberto;
 
   @override
   Widget build(BuildContext context) {
@@ -748,34 +755,46 @@ class NatusModuloDashboard extends StatelessWidget {
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          initiallyExpanded: inicialmenteAberto,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-          childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-          leading: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: NatusApp.marsala.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(13),
+      child: Material(
+        color: Colors.transparent,
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: widget.inicialmenteAberto,
+            onExpansionChanged: (aberto) {
+              if (_aberto == aberto) return;
+              setState(() => _aberto = aberto);
+            },
+            tilePadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 8,
             ),
-            child: Icon(icone, color: NatusApp.marsala, size: 21),
-          ),
-          title: Text(
-            titulo,
-            style: TextStyle(
-              color: NatusApp.vinho,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
+            childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            leading: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: NatusApp.marsala.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(widget.icone, color: NatusApp.marsala, size: 21),
             ),
+            title: Text(
+              widget.titulo,
+              style: TextStyle(
+                color: NatusApp.vinho,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
+            subtitle: Text(
+              widget.subtitulo,
+              style: TextStyle(color: NatusApp.textoSuave, fontSize: 12.5),
+            ),
+            children: _aberto
+                ? <Widget>[widget.conteudoBuilder(context)]
+                : const <Widget>[],
           ),
-          subtitle: Text(
-            subtitulo,
-            style: TextStyle(color: NatusApp.textoSuave, fontSize: 12.5),
-          ),
-          children: children,
         ),
       ),
     );

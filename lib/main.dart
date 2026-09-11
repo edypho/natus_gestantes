@@ -390,6 +390,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final Set<String> _contratosEmProcessamento = <String>{};
   final Set<String> _modulosSecundariosCarregados = <String>{};
   final Set<String> _modulosSecundariosCarregando = <String>{};
+  bool _agrupandoCarregamentoInicial = false;
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -794,21 +795,47 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       telaAtual = 'Área da gestante';
     }
 
-    carregarGestantesFirestore();
-    carregarAtendimentosFirestore();
-    carregarParcelasFirestore();
-    carregarEnfermeirasFirestore();
-    carregarObstetrasFirestore();
+    unawaited(_carregarDadosIniciais());
     carregarTemaUsuario();
     if (widget.escopoTenant.ehPaciente) {
       unawaited(_carregarModuloSecundario('Contrações'));
       unawaited(_carregarModuloSecundario('Documentos'));
       unawaited(_carregarModuloSecundario('Biblioteca'));
     }
-    carregarPlanosFirestore();
     carregarPerfilUsuarioLogado();
     Future.microtask(inicializarPushOperacional);
     Future.microtask(iniciarEscutaNotificacoes);
+  }
+
+  void _atualizarDados(VoidCallback atualizacao) {
+    if (_agrupandoCarregamentoInicial) {
+      atualizacao();
+      return;
+    }
+    if (mounted) setState(atualizacao);
+  }
+
+  Future<void> _carregarDadosIniciais() async {
+    _agrupandoCarregamentoInicial = true;
+    try {
+      if (widget.tipoUsuario == 'obstetra') {
+        // O filtro da carteira depende do vínculo canônico do obstetra.
+        // Carregá-lo antes evita duas consultas concorrentes à mesma coleção.
+        await carregarObstetrasFirestore();
+      }
+
+      await Future.wait<void>([
+        carregarGestantesFirestore(),
+        carregarAtendimentosFirestore(),
+        carregarParcelasFirestore(),
+        carregarEnfermeirasFirestore(),
+        carregarPlanosFirestore(),
+        if (widget.tipoUsuario != 'obstetra') carregarObstetrasFirestore(),
+      ]);
+    } finally {
+      _agrupandoCarregamentoInicial = false;
+      if (mounted) setState(() {});
+    }
   }
 
   void aoMudarTema() {
@@ -1024,7 +1051,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     try {
       final lista = await dados.buscarPlanos(widget.escopoTenant);
 
-      setState(() {
+      _atualizarDados(() {
         planosCadastrados
           ..clear()
           ..addAll(lista);
@@ -1249,7 +1276,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     try {
       final listaFirebase = await dados.buscarEnfermeiras(widget.escopoTenant);
 
-      setState(() {
+      _atualizarDados(() {
         enfermeiras.clear();
         enfermeiras.addAll(listaFirebase);
       });
@@ -1262,7 +1289,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     try {
       final listaFirebase = await dados.buscarObstetras(widget.escopoTenant);
 
-      setState(() {
+      _atualizarDados(() {
         obstetras.clear();
         obstetras.addAll(listaFirebase);
       });
@@ -1790,7 +1817,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     try {
       final listaFirebase = await dados.buscarAtendimentos(widget.escopoTenant);
 
-      setState(() {
+      _atualizarDados(() {
         atendimentos.clear();
         atendimentos.addAll(listaFirebase);
       });
@@ -14971,7 +14998,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         nomeUsuario: nomeFiltroCarteira,
       );
 
-      setState(() {
+      _atualizarDados(() {
         gestantes.clear();
         gestantes.addAll(listaFirebase);
         marcadores.clear();
@@ -17354,7 +17381,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return mapa;
       }).toList();
 
-      setState(() {
+      _atualizarDados(() {
         parcelasFinanceiras.clear();
         parcelasFinanceiras.addAll(listaFirebase);
       });
@@ -18637,8 +18664,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                   '${resumo.pacientesObstetricia} paciente(s) com acompanhamento obstétrico',
               icone: Icons.pregnant_woman_rounded,
               inicialmenteAberto: widget.tipoUsuario == 'obstetra',
-              children: _conteudoModuloObstetriciaDashboard(
-                pacientesObstetricia,
+              conteudoBuilder: (_) => Column(
+                children: _conteudoModuloObstetriciaDashboard(
+                  pacientesObstetricia,
+                ),
               ),
             ),
         ],
