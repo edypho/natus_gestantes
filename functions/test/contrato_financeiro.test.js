@@ -17,3 +17,9 @@ test("saldo fecha em centavos e rejeita entrada excedente", () => {
   assert.throws(() => calcularFinanceiroContrato(3800, 4000, 1));
   assert.throws(() => calcularFinanceiroContrato(NaN, 0, 1));
 });
+
+test("limita parcelamento a 10 parcelas", () => {
+  const financeiro = calcularFinanceiroContrato(1100, 0, 11);
+  assert.equal(financeiro.numeroParcelas, 10);
+  assert.equal(financeiro.valorParcela, 110);
+});

@@ -2,7 +2,10 @@
 /* eslint-disable max-len */
 /* eslint-disable quote-props */
 const {setGlobalOptions} = require("firebase-functions");
-const {calcularFinanceiroContrato} = require("./contrato_financeiro");
+const {
+  LIMITE_MAXIMO_PARCELAS_CONTRATO,
+  calcularFinanceiroContrato,
+} = require("./contrato_financeiro");
 const {
   onDocumentCreated,
   onDocumentUpdated,
@@ -2839,9 +2842,9 @@ function montarPayloadContratoDaGestante(idGestante, dados) {
   );
   const valorTotal = Math.round(Math.max(0, valorBruto -
     converterNumeroContrato(dados.valorDesconto || 0)) * 100) / 100;
-  const numeroParcelas = Math.max(
-      1,
-      Number.parseInt(dados.parcelas || "1", 10) || 1,
+  const numeroParcelas = Math.min(
+      LIMITE_MAXIMO_PARCELAS_CONTRATO,
+      Math.max(1, Number.parseInt(dados.parcelas || "1", 10) || 1),
   );
   const entradaInformada = converterNumeroContrato(
       dados.entrada,
@@ -3673,9 +3676,9 @@ async function processarGeracaoContrato({
     );
   }
 
-  const numeroParcelas = Math.max(
-      1,
-      Number.parseInt(payload.numeroParcelas || "1", 10) || 1,
+  const numeroParcelas = Math.min(
+      LIMITE_MAXIMO_PARCELAS_CONTRATO,
+      Math.max(1, Number.parseInt(payload.numeroParcelas || "1", 10) || 1),
   );
   // Reemissões e tentativas antigas também precisam usar o acordo salvo,
   // nunca o preço de catálogo ou um resumo contratual desatualizado.

@@ -72,6 +72,8 @@ export 'core/usuario_tipos.dart';
 export 'auth/tela_login.dart';
 import 'core/usuario_tipos.dart';
 
+const int limiteMaximoParcelasContrato = fincalc.limiteMaximoParcelasPlano;
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -114,8 +116,40 @@ Future<void> _carregarGoogleMapsWebEmSegundoPlano() async {
   }
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  String? _uidSessao;
+  Future<List<dynamic>>? _dadosSessaoFuture;
+  final Map<String, Future<bool>> _acessosFuture = {};
+
+  Future<List<dynamic>> _dadosSessao(User user) {
+    if (_uidSessao != user.uid || _dadosSessaoFuture == null) {
+      _uidSessao = user.uid;
+      _dadosSessaoFuture = Future.wait<dynamic>([
+        firestore.collection('usuarios').doc(user.uid).get(),
+        user.getIdTokenResult(true),
+      ]);
+      _acessosFuture.clear();
+    }
+    return _dadosSessaoFuture!;
+  }
+
+  Future<bool> _validarAcesso(User user, bool superAdminVerificado) {
+    final chave = '${user.uid}:$superAdminVerificado';
+    return _acessosFuture.putIfAbsent(
+      chave,
+      () => SuperAdminAccessGuard.usuarioPodeAcessar(
+        uid: user.uid,
+        superAdminVerificado: superAdminVerificado,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,10 +161,7 @@ class AuthGate extends StatelessWidget {
           final user = snapshot.data!;
 
           return FutureBuilder<List<dynamic>>(
-            future: Future.wait<dynamic>([
-              firestore.collection('usuarios').doc(user.uid).get(),
-              user.getIdTokenResult(true),
-            ]),
+            future: _dadosSessao(user),
             builder: (context, snapshotUser) {
               if (snapshotUser.connectionState == ConnectionState.waiting) {
                 return const Scaffold(
@@ -183,10 +214,7 @@ class AuthGate extends StatelessWidget {
               }
 
               return FutureBuilder<bool>(
-                future: SuperAdminAccessGuard.usuarioPodeAcessar(
-                  uid: user.uid,
-                  superAdminVerificado: contextoSaaS.superAdmin,
-                ),
+                future: _validarAcesso(user, contextoSaaS.superAdmin),
                 builder: (context, snapshotAcesso) {
                   if (snapshotAcesso.connectionState ==
                       ConnectionState.waiting) {
@@ -360,6 +388,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final CepService cepService = CepService();
   final SessaoIdempotencia _sessaoEmissaoContrato = SessaoIdempotencia();
   final Set<String> _contratosEmProcessamento = <String>{};
+  final Set<String> _modulosSecundariosCarregados = <String>{};
+  final Set<String> _modulosSecundariosCarregando = <String>{};
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -766,14 +796,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     carregarGestantesFirestore();
     carregarAtendimentosFirestore();
-    carregarMateriaisFirestore();
-    carregarDocumentosFirestore();
     carregarParcelasFirestore();
     carregarEnfermeirasFirestore();
     carregarObstetrasFirestore();
     carregarTemaUsuario();
-    carregarContracoesFirestore();
-    carregarBibliotecaFirestore();
+    if (widget.escopoTenant.ehPaciente) {
+      unawaited(_carregarModuloSecundario('Contrações'));
+      unawaited(_carregarModuloSecundario('Documentos'));
+      unawaited(_carregarModuloSecundario('Biblioteca'));
+    }
     carregarPlanosFirestore();
     carregarPerfilUsuarioLogado();
     Future.microtask(inicializarPushOperacional);
@@ -3386,6 +3417,31 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
+  Future<void> _carregarModuloSecundario(String titulo) async {
+    if (_modulosSecundariosCarregados.contains(titulo) ||
+        !_modulosSecundariosCarregando.add(titulo)) {
+      return;
+    }
+
+    try {
+      switch (titulo) {
+        case 'Contrações':
+          await carregarContracoesFirestore();
+        case 'Biblioteca':
+          await carregarBibliotecaFirestore();
+        case 'Documentos':
+          await carregarDocumentosFirestore();
+        case 'Almoxarifado':
+          await carregarMateriaisFirestore();
+        default:
+          return;
+      }
+      _modulosSecundariosCarregados.add(titulo);
+    } finally {
+      _modulosSecundariosCarregando.remove(titulo);
+    }
+  }
+
   Widget itemMenu(IconData icone, String titulo) {
     final ativo = telaAtual == titulo;
 
@@ -3397,6 +3453,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           borderRadius: BorderRadius.circular(18),
           onTap: () {
             final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
+            unawaited(_carregarModuloSecundario(titulo));
 
             if (isMobile) {
               Navigator.pop(context);
@@ -3471,6 +3528,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       return;
     }
 
+    unawaited(_carregarModuloSecundario(titulo));
     setState(() {
       telaAtual = titulo;
       gestanteSelecionada = null;
@@ -4134,10 +4192,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
     final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-    final gestante = gestantes.firstWhere(
-      (g) => g['uidGestante'] == uidLogado,
-      orElse: () => {},
-    );
+    final gestante = widget.escopoTenant.ehPaciente
+        ? gestantes.firstWhere(
+            (g) => g['id'] == widget.escopoTenant.pacienteId,
+            orElse: () => {},
+          )
+        : gestantes.firstWhere(
+            (g) => g['uidGestante'] == uidLogado,
+            orElse: () => {},
+          );
 
     final idGestante = gestante['id'];
 
@@ -4439,7 +4502,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> selecionarArquivoExame(Map<String, String> gestante) async {
-    final idGestante = (gestante['id'] ?? '').trim();
+    final idGestante = widget.escopoTenant.ehPaciente
+        ? widget.escopoTenant.pacienteId.trim()
+        : (gestante['id'] ?? '').trim();
     final nomeGestante = (gestante['nomeGestante'] ?? '').trim();
     final uidGestante = widget.escopoTenant.ehPaciente
         ? widget.escopoTenant.uidUsuario
@@ -11378,9 +11443,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     Map<String, String> gestanteSelecionada = <String, String>{};
 
     if (widget.tipoUsuario == 'gestante') {
-      final uidLogado = FirebaseAuth.instance.currentUser?.uid ?? '';
       gestanteSelecionada = gestantes.firstWhere(
-        (g) => g['uidGestante'] == uidLogado,
+        (g) => g['id'] == widget.escopoTenant.pacienteId,
         orElse: () => {},
       );
       gestanteSelecionadaNome = gestanteSelecionada['nomeGestante'] ?? '';
@@ -15950,8 +16014,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
     if (quantidadeParcelas == null ||
         quantidadeParcelas < 1 ||
-        quantidadeParcelas > 120) {
-      mostrarMensagem('Informe uma quantidade entre 1 e 120 parcelas.');
+        quantidadeParcelas > limiteMaximoParcelasContrato) {
+      mostrarMensagem(
+        'Informe uma quantidade entre 1 e $limiteMaximoParcelasContrato parcelas.',
+      );
       return false;
     }
 
@@ -17153,7 +17219,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     final quantidadeParcelas = (int.tryParse(gestante['parcelas'] ?? '1') ?? 1)
-        .clamp(1, 24)
+        .clamp(1, limiteMaximoParcelasContrato)
         .toInt();
     final valorEntrada = gestante['entrada'] ?? 'R\$ 0,00';
     final parcelasPagas = int.tryParse(gestante['parcelasPagas'] ?? '0') ?? 0;

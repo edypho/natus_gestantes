@@ -1,5 +1,7 @@
 "use strict";
 
+const LIMITE_MAXIMO_PARCELAS_CONTRATO = 10;
+
 /**
  * Calcula valores contratuais sem repor descontos como dívida.
  * @param {number} total Total líquido negociado.
@@ -15,7 +17,10 @@ function calcularFinanceiroContrato(total, entrada, quantidade) {
   const totalCentavos = Math.round(total * 100);
   const entradaCentavos = Math.round(entrada * 100);
   const saldo = (totalCentavos - entradaCentavos) / 100;
-  const parcelas = saldo === 0 ? 0 : Math.max(1, Math.trunc(quantidade) || 1);
+  const parcelas = saldo === 0 ? 0 : Math.min(
+      LIMITE_MAXIMO_PARCELAS_CONTRATO,
+      Math.max(1, Math.trunc(quantidade) || 1),
+  );
   return {
     valorTotal: totalCentavos / 100,
     valorEntrada: entradaCentavos / 100,
@@ -25,4 +30,7 @@ function calcularFinanceiroContrato(total, entrada, quantidade) {
   };
 }
 
-module.exports = {calcularFinanceiroContrato};
+module.exports = {
+  LIMITE_MAXIMO_PARCELAS_CONTRATO,
+  calcularFinanceiroContrato,
+};

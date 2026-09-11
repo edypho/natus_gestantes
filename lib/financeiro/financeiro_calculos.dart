@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../shared/formatadores.dart';
 
+const int limiteMaximoParcelasPlano = 10;
+
 /// Total contratado após o desconto, arredondado em centavos.
 double valorLiquidoPlano(Map<String, String> paciente) {
   final bruto = converterValor(paciente['valorPlano'] ?? '0');
@@ -12,7 +14,10 @@ double valorLiquidoPlano(Map<String, String> paciente) {
 List<double> parcelasDoPlano(Map<String, String> paciente, int quantidade) {
   final saldo =
       valorLiquidoPlano(paciente) - converterValor(paciente['entrada'] ?? '0');
-  return distribuirSaldoEmParcelas(saldo, quantidade);
+  return distribuirSaldoEmParcelas(
+    saldo,
+    quantidade.clamp(1, limiteMaximoParcelasPlano).toInt(),
+  );
 }
 
 /// Cálculos financeiros do Natus — funções puras, sem estado.

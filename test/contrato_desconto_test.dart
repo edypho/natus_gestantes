@@ -53,4 +53,18 @@ void main() {
       isEmpty,
     );
   });
+
+  test('parcelamento é limitado a 10 parcelas', () {
+    final parcelas = parcelasDoPlano({
+      'valorPlano': 'R\$ 1.100,00',
+      'valorDesconto': 'R\$ 0,00',
+      'entrada': 'R\$ 0,00',
+    }, 11);
+
+    expect(parcelas, hasLength(10));
+    expect(
+      parcelas.map((v) => (v * 100).round()).reduce((a, b) => a + b),
+      110000,
+    );
+  });
 }
