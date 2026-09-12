@@ -8672,6 +8672,30 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       mostrarMensagem('Solicitando redefinição de senha...');
 
+      final uidsVinculados = <String>{
+        dados['uidPaciente']?.toString().trim() ?? '',
+        dados['pacienteUid']?.toString().trim() ?? '',
+        dados['uidGestante']?.toString().trim() ?? '',
+      }..remove('');
+
+      if (uidsVinculados.isEmpty) {
+        final criarAcesso = FirebaseFunctions.instanceFor(
+          region: 'us-central1',
+        ).httpsCallable('criarUsuarioClinica');
+        final criacao = await criarAcesso.call(<String, dynamic>{
+          'nome': nome.trim(),
+          'email': email.trim().toLowerCase(),
+          'tipo': 'gestante',
+          'idVinculo': idGestante,
+          'operacaoId': 'recuperar_acesso_$idGestante',
+        });
+        final resultadoCriacao = Map<String, dynamic>.from(criacao.data as Map);
+        if (resultadoCriacao['sucesso'] != true) {
+          mostrarMensagem('Não foi possível criar o acesso do paciente.');
+          return;
+        }
+      }
+
       final callable = FirebaseFunctions.instanceFor(
         region: 'us-central1',
       ).httpsCallable('solicitarRedefinicaoSenhaPaciente');

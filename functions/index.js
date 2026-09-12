@@ -841,15 +841,20 @@ async function solicitarRedefinicaoSenhaPacienteCore(
       contexto,
       entrada || {},
   );
-  await exigirLimiteUso({
-    action: "password-reset-request",
-    subjects: [
-      `actor:${contexto.uid}`,
-      `patient:${paciente.clinicaId}:${paciente.id}`,
-    ],
-    limit: 3,
-    windowSeconds: 15 * 60,
-  });
+  await Promise.all([
+    exigirLimiteUso({
+      action: "password-reset-request-actor",
+      subjects: [`actor:${contexto.uid}`],
+      limit: 20,
+      windowSeconds: 15 * 60,
+    }),
+    exigirLimiteUso({
+      action: "password-reset-request-patient",
+      subjects: [`patient:${paciente.clinicaId}:${paciente.id}`],
+      limit: 3,
+      windowSeconds: 15 * 60,
+    }),
+  ]);
   const usuarioAuth = await buscarUsuarioAuthDaPaciente(
       contexto,
       paciente,
