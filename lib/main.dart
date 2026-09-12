@@ -14520,6 +14520,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final gestanteFirestore = <String, dynamic>{
       ...dadosBaseGestante,
       ...metadadosContrato,
+      // O app conclui o acesso depois do lote financeiro. Isso evita que o
+      // gatilho de criação dispute a atualização automática do contrato.
+      'acessoGerenciadoPeloApp': true,
     };
 
     setState(() => salvandoPaciente = true);
@@ -14537,6 +14540,41 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       await lote.commit();
       if (!mounted) return;
 
+      final emailPaciente = emailGestante.text.trim().toLowerCase();
+      var acessoCriado = false;
+      var conviteEnviado = false;
+
+      if (emailPaciente.isNotEmpty) {
+        try {
+          final callable = FirebaseFunctions.instanceFor(
+            region: 'us-central1',
+          ).httpsCallable('criarUsuarioClinica');
+          final resposta = await callable.call({
+            'nome': nomeGestante.text.trim(),
+            'email': emailPaciente,
+            'tipo': 'gestante',
+            'idVinculo': pacienteId,
+            'operacaoId': 'cadastro_paciente_$pacienteId',
+          });
+          final resultado = Map<String, dynamic>.from(resposta.data as Map);
+          acessoCriado = resultado['sucesso'] == true;
+
+          if (!acessoCriado) {
+            throw StateError('O servidor não confirmou a criação do acesso.');
+          }
+
+          await FirebaseAuth.instance.sendPasswordResetEmail(
+            email: emailPaciente,
+          );
+          conviteEnviado = true;
+        } catch (e) {
+          logErroSeguro(
+            'Paciente salvo, mas o acesso inicial ficou pendente.',
+            e,
+          );
+        }
+      }
+
       setState(limparCampos);
       await Future.wait([
         carregarGestantesFirestore(),
@@ -14545,7 +14583,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
       if (mounted) {
         mostrarMensagem(
-          'Paciente salvo com financeiro vinculado com segurança.',
+          emailPaciente.isEmpty
+              ? 'Paciente salvo. Informe um e-mail para criar o acesso.'
+              : conviteEnviado
+              ? 'Paciente salvo. O link para definir a senha foi enviado.'
+              : acessoCriado
+              ? 'Paciente salvo e acesso criado, mas o envio do e-mail ficou pendente.'
+              : 'Paciente salvo, mas a criação do acesso ficou pendente.',
         );
       }
     } catch (e) {

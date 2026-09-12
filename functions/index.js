@@ -50,6 +50,9 @@ const {
   reverterUsuarioAuth,
 } = require("./durable_operation_journal");
 const {
+  executarComRetentativaDeVinculo,
+} = require("./access_link_retry");
+const {
   applyRestrictedCors,
 } = require("./security/http_cors");
 const {
@@ -1755,6 +1758,18 @@ function conflitoConcorrenteFirestore(error) {
     "already-exists",
     "failed-precondition",
   ].includes(String(error && error.code || "").toLowerCase());
+}
+
+async function vincularUidAPacienteComRetentativa(parametros) {
+  return executarComRetentativaDeVinculo(
+      () => vincularUidAPaciente(parametros),
+      {
+        aoRetentar: (tentativa) => console.warn(
+            "Vinculo de acesso sofreu escrita concorrente; nova tentativa.",
+            {tentativa},
+        ),
+      },
+  );
 }
 
 async function confirmarBatchGuardado(batch) {
@@ -4056,6 +4071,11 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
       );
       const origem = dados.origem || "";
 
+      if (dados.acessoGerenciadoPeloApp === true) {
+        console.log("Acesso do paciente será criado pelo fluxo do aplicativo.");
+        return;
+      }
+
       if (origem === "importacao_xls") {
         console.log("Gestante importada de histórico. Usuário não criado.");
         return;
@@ -4143,7 +4163,7 @@ exports.criarUsuarioGestanteAoCadastrar = onDocumentCreated(
       }
 
       try {
-        await vincularUidAPaciente({
+        await vincularUidAPacienteComRetentativa({
           contexto: {
             uid: "sistema:criarUsuarioGestanteAoCadastrar",
             perfil: "admin",
