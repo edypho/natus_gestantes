@@ -13,7 +13,11 @@ import '../super_admin/super_admin_shell.dart';
 import 'tela_login.dart';
 
 typedef TelaClinicaBuilder =
-    Widget Function(ContextoSaaS contexto, TenantAccessScope escopoTenant);
+    Widget Function(
+      ContextoSaaS contexto,
+      TenantAccessScope escopoTenant,
+      Map<String, dynamic> dadosUsuario,
+    );
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.telaClinicaBuilder});
@@ -135,7 +139,11 @@ class _AuthGateState extends State<AuthGate> {
                         nomeUsuario: contextoSaaS.nomeUsuario,
                         emailUsuario: contextoSaaS.emailUsuario,
                       )
-                    : widget.telaClinicaBuilder(contextoSaaS, escopoTenant);
+                    : widget.telaClinicaBuilder(
+                        contextoSaaS,
+                        escopoTenant,
+                        Map<String, dynamic>.unmodifiable(dados),
+                      );
 
                 if (PrimeiroLoginSaaSGuard.deveTrocarSenha(dados)) {
                   return PrimeiroLoginSaaSGate(

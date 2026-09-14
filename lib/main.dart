@@ -122,12 +122,14 @@ Future<void> _carregarGoogleMapsWebEmSegundoPlano() async {
 Widget _construirTelaClinica(
   ContextoSaaS contexto,
   TenantAccessScope escopoTenant,
+  Map<String, dynamic> dadosUsuario,
 ) {
   return TelaPrincipal(
     tipoUsuario: contexto.perfil,
     nomeUsuario: contexto.nomeUsuario,
     contextoSaaS: contexto,
     escopoTenant: escopoTenant,
+    dadosUsuarioInicial: dadosUsuario,
   );
 }
 
@@ -136,6 +138,7 @@ class TelaPrincipal extends StatefulWidget {
   final String nomeUsuario;
   final ContextoSaaS contextoSaaS;
   final TenantAccessScope escopoTenant;
+  final Map<String, dynamic> dadosUsuarioInicial;
 
   const TelaPrincipal({
     super.key,
@@ -143,6 +146,7 @@ class TelaPrincipal extends StatefulWidget {
     this.nomeUsuario = '',
     required this.contextoSaaS,
     required this.escopoTenant,
+    required this.dadosUsuarioInicial,
   });
 
   @override
@@ -568,13 +572,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     unawaited(_carregarDadosIniciais());
-    carregarTemaUsuario();
+    carregarTemaUsuario(widget.dadosUsuarioInicial);
     if (widget.escopoTenant.ehPaciente) {
       unawaited(_carregarModuloSecundario('Contrações'));
       unawaited(_carregarModuloSecundario('Documentos'));
       unawaited(_carregarModuloSecundario('Biblioteca'));
     }
-    carregarPerfilUsuarioLogado();
+    carregarPerfilUsuarioLogado(widget.dadosUsuarioInicial);
     Future.microtask(inicializarPushOperacional);
     Future.microtask(iniciarEscutaNotificacoes);
   }
@@ -1085,20 +1089,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<void> carregarPerfilUsuarioLogado() async {
+  Future<void> carregarPerfilUsuarioLogado(
+    Map<String, dynamic> dadosUsuario,
+  ) async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     if (uid.isEmpty) return;
 
     try {
-      final docUsuario = await firestore.collection('usuarios').doc(uid).get();
-      String foto = '';
-      String email = '';
-
-      if (docUsuario.exists) {
-        final dadosUsuario = docUsuario.data() ?? {};
-        foto = (dadosUsuario['fotoUrl'] ?? '').toString().trim();
-        email = (dadosUsuario['email'] ?? '').toString().trim();
-      }
+      var foto = (dadosUsuario['fotoUrl'] ?? '').toString().trim();
+      final email = (dadosUsuario['email'] ?? '').toString().trim();
 
       if (foto.isEmpty) {
         foto = await buscarFotoPerfilVinculada(uid);
@@ -13554,13 +13553,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
   }
 
-  Future<void> carregarTemaUsuario() async {
+  void carregarTemaUsuario(Map<String, dynamic> dadosUsuario) {
     try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) return;
-
-      final doc = await firestore.collection('usuarios').doc(uid).get();
-      final tema = (doc.data() ?? const {})['tema']?.toString() ?? '';
+      final tema = dadosUsuario['tema']?.toString() ?? '';
 
       if (tema.isNotEmpty) {
         NatusTema.aplicarPorChave(tema);
