@@ -258,6 +258,7 @@ test(
             idGestante: "patient-a",
             nomeGestante: "Paciente A",
             emailGestante: "patient-a@example.test",
+            acessoGerenciadoPeloApp: true,
           })),
           db.doc("gestantes/race-patient").set(tenantData("clinic-a", {
             pacienteId: "race-patient",
@@ -484,6 +485,10 @@ test(
         const usuariosAuthMesmoEmail = (await auth.listUsers()).users
             .filter((usuario) => usuario.email === payloadNovoUsuario.email);
         assert.equal(usuariosAuthMesmoEmail.length, 1);
+
+        const pacienteAntesDoLogin = await db.doc("gestantes/patient-a").get();
+        assert.equal(pacienteAntesDoLogin.data().uidGestante || "", "");
+        assert.equal(pacienteAntesDoLogin.data().uidPaciente || "", "");
 
         const loginPaciente = await backend.criarUsuarioClinica.run(
             callableRequest("admin-a", {}, {

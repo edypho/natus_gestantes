@@ -99,10 +99,13 @@ test("callable regional e HTTP legado compartilham o mesmo nucleo", () => {
       path.join(functionsRoot, "index.js"),
       "utf8",
   );
-  const flutter = fs.readFileSync(
-      path.join(projectRoot, "lib", "main.dart"),
-      "utf8",
-  );
+  const flutterAccessService = [
+    fs.readFileSync(path.join(projectRoot, "lib", "main.dart"), "utf8"),
+    fs.readFileSync(
+        path.join(projectRoot, "lib", "auth", "paciente_access_service.dart"),
+        "utf8",
+    ),
+  ].join("\n");
 
   assert.match(
       backend,
@@ -120,7 +123,7 @@ test("callable regional e HTTP legado compartilham o mesmo nucleo", () => {
       3,
   );
   assert.match(
-      flutter,
+      flutterAccessService,
       new RegExp(
           "FirebaseFunctions\\.instanceFor\\([\\s\\S]*?" +
           "region:\\s*'us-central1'[\\s\\S]*?\\.httpsCallable" +
@@ -128,7 +131,7 @@ test("callable regional e HTTP legado compartilham o mesmo nucleo", () => {
       ),
   );
   assert.doesNotMatch(
-      flutter,
+      flutterAccessService,
       /reenviarlinktrocasenhagestante-[a-z0-9-]+\.a\.run\.app/i,
   );
 });

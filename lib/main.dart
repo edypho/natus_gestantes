@@ -44,6 +44,7 @@ import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
 import 'auth/acesso_paciente_mensagem.dart';
 import 'auth/envio_acesso_guard.dart';
+import 'auth/paciente_access_service.dart';
 import 'auth/autenticacao_mensagens.dart';
 import 'features/contratos/contratos.dart';
 import 'navigation/menu_inferior_coracao.dart';
@@ -8651,99 +8652,23 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     if (mounted) setState(() {});
 
     try {
-      final doc = await firestore.collection('gestantes').doc(idGestante).get();
-
-      if (!doc.exists) {
-        mostrarMensagem('Paciente não encontrado no Firebase.');
-        return;
-      }
-
-      final dados = doc.data() ?? {};
-
-      if (!widget.escopoTenant.pertenceAoTenant(dados)) {
-        mostrarMensagem('Cadastro fora da clínica autenticada.');
-        return;
-      }
-
-      final telefone = dados['telefoneGestante']?.toString() ?? '';
-      final nome = dados['nomeGestante']?.toString() ?? '';
-      final email = dados['emailGestante']?.toString() ?? '';
-
-      if (email.trim().isEmpty) {
-        mostrarMensagem('E-mail do paciente não informado.');
-        return;
-      }
-
-      if (FirebaseAuth.instance.currentUser == null) {
-        mostrarMensagem('Usuário não autenticado. Faça login novamente.');
-        return;
-      }
-
       mostrarMensagem('Preparando o acesso do paciente...');
+      final resultado = await PacienteAccessService(
+        firestore: firestore,
+        auth: FirebaseAuth.instance,
+        functions: FirebaseFunctions.instanceFor(region: 'us-central1'),
+        escopoTenant: widget.escopoTenant,
+      ).enviar(idGestante);
 
-      final uidsVinculados = <String>{
-        dados['uidPaciente']?.toString().trim() ?? '',
-        dados['pacienteUid']?.toString().trim() ?? '',
-        dados['uidGestante']?.toString().trim() ?? '',
-      }..remove('');
-
-      if (uidsVinculados.isEmpty) {
-        final criarAcesso = FirebaseFunctions.instanceFor(
-          region: 'us-central1',
-        ).httpsCallable('criarUsuarioClinica');
-        final criacao = await criarAcesso.call(<String, dynamic>{
-          'nome': nome.trim(),
-          'email': email.trim().toLowerCase(),
-          'tipo': 'gestante',
-          'idVinculo': idGestante,
-          'operacaoId': 'recuperar_acesso_$idGestante',
-        });
-        final resultadoCriacao = Map<String, dynamic>.from(criacao.data as Map);
-        if (resultadoCriacao['sucesso'] != true) {
-          mostrarMensagem('Não foi possível criar o acesso do paciente.');
-          return;
-        }
-      }
-
-      final callable = FirebaseFunctions.instanceFor(
-        region: 'us-central1',
-      ).httpsCallable('solicitarRedefinicaoSenhaPaciente');
-      final resposta = await callable.call(<String, dynamic>{
-        'pacienteId': idGestante,
-      });
-      final dadosResposta = Map<String, dynamic>.from(resposta.data as Map);
-
-      if (dadosResposta['sucesso'] != true) {
-        mostrarMensagem(
-          dadosResposta['mensagem']?.toString() ??
-              'Não foi possível solicitar a redefinição de senha.',
-        );
-        return;
-      }
-
-      final emailValidado =
-          dadosResposta['emailPaciente']?.toString().trim().toLowerCase() ?? '';
-      if (emailValidado.isEmpty) {
-        mostrarMensagem('O cadastro não possui um e-mail válido.');
-        return;
-      }
-
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: emailValidado);
-
-      final nomeValidado =
-          dadosResposta['nomePaciente']?.toString().trim() ?? nome;
-      final telefoneValidado =
-          dadosResposta['telefonePaciente']?.toString().trim() ?? telefone;
-
-      if (telefoneValidado.isEmpty) {
+      if (resultado.telefone.isEmpty) {
         mostrarMensagem('E-mail de redefinição enviado com sucesso.');
         return;
       }
 
       final url = uriWhatsAppRedefinicaoSenhaPaciente(
-        telefone: telefoneValidado,
-        nome: nomeValidado,
-        email: emailValidado,
+        telefone: resultado.telefone,
+        nome: resultado.nome,
+        email: resultado.email,
       );
 
       if (!uriExternaPermitida(url, hostsHttpsPermitidos: const {'wa.me'})) {
@@ -8760,6 +8685,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ? 'E-mail enviado. O WhatsApp foi aberto para avisar o paciente.'
             : 'E-mail enviado, mas não foi possível abrir o WhatsApp.',
       );
+    } on PacienteAccessFailure catch (e) {
+      mostrarMensagem(e.message);
     } on FirebaseFunctionsException catch (e) {
       mostrarMensagem(
         mensagemErroFunctionsSeguro(
