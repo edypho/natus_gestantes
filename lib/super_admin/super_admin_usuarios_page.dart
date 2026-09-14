@@ -13,14 +13,15 @@ class SuperAdminUsuariosPage extends StatelessWidget {
     final repo = SuperAdminRepository();
 
     return SuperAdminPageScaffold(
-      titulo: 'Usuários/clientes SaaS',
-      subtitulo: 'Gestão de usuários SaaS, admins e contas vinculadas.',
+      titulo: 'Usuários da plataforma',
+      subtitulo: 'Gestão de administradores e contas vinculadas às clínicas.',
+      icone: Icons.people_alt_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Listagem e acompanhamento dos usuários SaaS cadastrados.',
-            style: TextStyle(fontWeight: FontWeight.w600),
+            'Usuários cadastrados',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
           ),
           const SizedBox(height: 20),
           SuperAdminFirestoreList(
@@ -28,14 +29,23 @@ class SuperAdminUsuariosPage extends StatelessWidget {
             emptyText: 'Nenhum usuário SaaS cadastrado ainda.',
             itemBuilder: (context, doc) {
               final data = doc.data();
-              final status = data['status']?.toString() ?? 'ativo';
+              final status = (data['status'] ?? 'ativo')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
               final nome = data['nome']?.toString() ?? 'Usuário sem nome';
               final excluidoLogicamente = data['excluidoLogicamente'] == true;
+              final clinica =
+                  data['clinicaNome']?.toString().trim().isNotEmpty == true
+                  ? data['clinicaNome'].toString()
+                  : data['nomeClinica']?.toString().trim().isNotEmpty == true
+                  ? data['nomeClinica'].toString()
+                  : 'Clínica vinculada';
 
               return superAdminListTile(
                 titulo: nome,
                 subtitulo:
-                    '${data['email'] ?? '-'} • Tipo: ${data['tipo'] ?? '-'} • Clínica: ${data['clinicaId'] ?? '-'}',
+                    '${data['email'] ?? 'E-mail não informado'} • Perfil: ${data['tipo'] ?? 'Não informado'} • $clinica',
                 icone: Icons.people,
                 trailing: Wrap(
                   spacing: 8,

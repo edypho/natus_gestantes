@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../core/natus_especialidades.dart';
 import '../shared/natus_app.dart';
 import '../dashboard/dashboard_cards_natus.dart';
 
-/// Card de gestante na listagem — layout guiado por
-/// design_referencia_visual.png: avatar com iniciais, nome + badge de
-/// status, linha de IG • DPP, dados do bebê e (com permissão) do plano.
+/// Card de paciente na listagem. Dados obstétricos aparecem somente quando o
+/// cadastro pertence a essa especialidade.
 class NatusCardGestanteLista extends StatelessWidget {
   final Map<String, String> gestante;
   final String igAtual;
@@ -44,6 +44,19 @@ class NatusCardGestanteLista extends StatelessWidget {
     final dpp = gestante['dpp'] ?? '-';
     final nomeBebe = gestante['nomeBebe'] ?? '-';
     final sexo = gestante['sexo'] ?? '-';
+    final especialidade =
+        (gestante['especialidadeAcompanhamento'] ??
+                gestante['tipoCadastroPaciente'] ??
+                '')
+            .trim();
+    final ehObstetricia =
+        NatusEspecialidades.ehObstetricia(especialidade) ||
+        (gestante['dpp'] ?? '').trim().isNotEmpty ||
+        statusNormalizado == 'Gestante' ||
+        statusNormalizado == 'Puérpera';
+    final especialidadeVisivel = especialidade.isEmpty
+        ? (ehObstetricia ? 'Obstetrícia' : 'Clínica geral')
+        : especialidade;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -109,21 +122,32 @@ class NatusCardGestanteLista extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'IG: $igAtual  •  DPP: $dpp',
+                        especialidadeVisivel,
                         style: TextStyle(
                           fontSize: 12.5,
                           color: NatusApp.textoSuave,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '👶 $nomeBebe • $sexo',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: NatusApp.textoSuave,
+                      if (ehObstetricia) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'IG: $igAtual  •  DPP: $dpp',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: NatusApp.textoSuave,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '👶 $nomeBebe • $sexo',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: NatusApp.textoSuave,
+                          ),
+                        ),
+                      ],
                       if (mostrarFinanceiro) ...[
                         const SizedBox(height: 6),
                         Text(
@@ -135,7 +159,7 @@ class NatusCardGestanteLista extends StatelessWidget {
                           ),
                         ),
                       ],
-                      NatusAlertaDpp(gestante),
+                      if (ehObstetricia) NatusAlertaDpp(gestante),
                     ],
                   ),
                 ),

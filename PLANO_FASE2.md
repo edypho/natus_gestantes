@@ -47,7 +47,7 @@ main.dart: 14.561 → 14.325 linhas.
 10 widgets (`NatusCardKpi`, `NatusCardResumo`, `NatusAlertaDpp`,
 `NatusBlocoDashboard`, `NatusCardFinanceiroResumo`, etc.) extraídos para
 `lib/dashboard/dashboard_cards_natus.dart` como `StatelessWidget`, visual
-preservado. 3 helpers puros (`rotuloParcelaFinanceira`, `textoStatusAsaas`,
+preservado. 2 helpers puros (`rotuloParcelaFinanceira` e
 `converterValorDinamico`) movidos para o módulo financeiro. **Higiene:
 273 usos do deprecado `withOpacity` migrados para `withValues` em 128
 arquivos** — deve derrubar a maior parte dos issues do analyze.

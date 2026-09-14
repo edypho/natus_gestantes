@@ -25,6 +25,5 @@ String capitalizarPrimeira(String texto) {
     return texto;
   }
 
-  return texto[0].toUpperCase() +
-      texto.substring(1);
+  return texto[0].toUpperCase() + texto.substring(1);
 }

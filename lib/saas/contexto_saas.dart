@@ -1,3 +1,5 @@
+import '../pacientes/paciente_identidade.dart';
+
 class ContextoSaaS {
   final String uidUsuario;
   final String nomeUsuario;
@@ -56,27 +58,16 @@ class ContextoSaaS {
         : perfilTipo.isNotEmpty
         ? perfilTipo
         : perfilTipoUsuario;
-    final pacienteIdCanonico = texto(dados['pacienteId']);
-    final gestanteId = texto(dados['gestanteId']);
-    final idGestante = texto(dados['idGestante']);
-    final idsPaciente = <String>{pacienteIdCanonico, gestanteId, idGestante}
-      ..remove('');
-    final uidsPaciente = <String>{
-      texto(dados['uidPaciente']),
-      texto(dados['pacienteUid']),
-      texto(dados['uidGestante']),
-      texto(dados['gestanteUid']),
-    }..remove('');
     final uidAutenticado = uidUsuario.trim();
-    final vinculoPacienteConsistente =
-        idsPaciente.length <= 1 &&
-        uidsPaciente.length <= 1 &&
-        (uidsPaciente.isEmpty || uidsPaciente.single == uidAutenticado);
-    final pacienteId = pacienteIdCanonico.isNotEmpty
-        ? pacienteIdCanonico
-        : gestanteId.isNotEmpty
-        ? gestanteId
-        : idGestante;
+    var vinculoPacienteConsistente = identidadePacienteConsistente(dados);
+    var pacienteId = '';
+    var pacienteUid = '';
+    if (vinculoPacienteConsistente) {
+      pacienteId = pacienteIdDoRegistro(dados);
+      pacienteUid = pacienteUidDoRegistro(dados);
+      vinculoPacienteConsistente =
+          pacienteUid.isEmpty || pacienteUid == uidAutenticado;
+    }
 
     return ContextoSaaS(
       uidUsuario: uidUsuario.trim(),

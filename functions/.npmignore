@@ -1,0 +1,11 @@
+node_modules/
+test/
+scripts/
+migration/
+audit-reports/
+.env
+.env.*
+!.env.example
+.runtimeconfig.json
+*.log
+*.local

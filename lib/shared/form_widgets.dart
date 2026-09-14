@@ -59,7 +59,9 @@ Widget dropdown(
       .toSet()
       .toList();
 
-  final valorTratado = itensTratados.contains(valor.trim()) ? valor.trim() : null;
+  final valorTratado = itensTratados.contains(valor.trim())
+      ? valor.trim()
+      : null;
 
   return SizedBox(
     width: 230,
@@ -91,7 +93,9 @@ Widget dropdownPopup(
       .toSet()
       .toList();
 
-  final valorTratado = opcoesTratadas.contains(valor.trim()) ? valor.trim() : null;
+  final valorTratado = opcoesTratadas.contains(valor.trim())
+      ? valor.trim()
+      : null;
 
   return Container(
     width: 260,
@@ -124,7 +128,9 @@ Widget dropdownGrande(
       .toSet()
       .toList();
 
-  final valorTratado = itensTratados.contains(valor.trim()) ? valor.trim() : null;
+  final valorTratado = itensTratados.contains(valor.trim())
+      ? valor.trim()
+      : null;
 
   return SizedBox(
     width: 360,

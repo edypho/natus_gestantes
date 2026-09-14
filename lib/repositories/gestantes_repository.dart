@@ -4,9 +4,7 @@ import '../models/gestante_model.dart';
 import 'base_repository.dart';
 
 class GestantesRepository extends BaseRepository {
-  const GestantesRepository({
-    required super.firestore,
-  });
+  const GestantesRepository({required super.firestore});
 
   CollectionReference<Map<String, dynamic>> get colecao {
     return firestore.collection('gestantes');

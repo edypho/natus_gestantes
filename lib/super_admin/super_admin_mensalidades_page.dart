@@ -13,14 +13,31 @@ class SuperAdminMensalidadesPage extends StatelessWidget {
     final repo = SuperAdminRepository();
 
     return SuperAdminPageScaffold(
-      titulo: 'Mensalidades atrasadas SaaS',
-      subtitulo: 'Acompanhamento de assinaturas vencidas e risco de bloqueio.',
+      titulo: 'Mensalidades em atraso',
+      subtitulo: 'Pendências financeiras que precisam de acompanhamento.',
+      icone: Icons.warning_amber_rounded,
       child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: repo.streamMensalidadesAtrasadas(),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const SuperAdminStateMessage(
+              mensagem: 'Não foi possível carregar as mensalidades.',
+              icone: Icons.cloud_off_rounded,
+              erro: true,
+            );
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
           final docs = snapshot.data?.docs ?? [];
           if (docs.isEmpty) {
-            return const Text('Nenhuma mensalidade atrasada no momento.');
+            return const SuperAdminStateMessage(
+              mensagem: 'Nenhuma mensalidade está em atraso no momento.',
+              icone: Icons.check_circle_outline_rounded,
+            );
           }
 
           return Column(

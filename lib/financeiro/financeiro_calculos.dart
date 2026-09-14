@@ -2,6 +2,24 @@ import 'package:flutter/material.dart';
 
 import '../shared/formatadores.dart';
 
+const int limiteMaximoParcelasPlano = 10;
+
+/// Total contratado após o desconto, arredondado em centavos.
+double valorLiquidoPlano(Map<String, String> paciente) {
+  final bruto = converterValor(paciente['valorPlano'] ?? '0');
+  final desconto = converterValor(paciente['valorDesconto'] ?? '0');
+  return ((bruto - desconto).clamp(0, double.infinity) * 100).round() / 100;
+}
+
+List<double> parcelasDoPlano(Map<String, String> paciente, int quantidade) {
+  final saldo =
+      valorLiquidoPlano(paciente) - converterValor(paciente['entrada'] ?? '0');
+  return distribuirSaldoEmParcelas(
+    saldo,
+    quantidade.clamp(1, limiteMaximoParcelasPlano).toInt(),
+  );
+}
+
 /// Cálculos financeiros do Natus — funções puras, sem estado.
 ///
 /// Extraídas do main.dart no Lote 2b da refatoração. Recebem as listas e o
@@ -443,31 +461,6 @@ String rotuloParcelaFinanceira(Map<String, String> parcela) {
   if (numero.isNotEmpty) return '$numeroª Parcela';
 
   return 'Parcela';
-}
-
-String textoStatusAsaas(Map<String, String> parcela) {
-  final status = (parcela['asaasStatus'] ?? 'NAO_GERADA').trim();
-
-  switch (status) {
-    case 'PREPARADA':
-      return 'Cobrança Asaas preparada';
-    case 'PROCESSANDO':
-      return 'Gerando cobrança Asaas';
-    case 'GERADA':
-    case 'PENDING':
-      return 'Cobrança Asaas gerada';
-    case 'PAGA':
-    case 'RECEIVED':
-    case 'CONFIRMED':
-      return 'Cobrança Asaas paga';
-    case 'VENCIDA':
-    case 'OVERDUE':
-      return 'Cobrança Asaas vencida';
-    case 'ERRO':
-      return 'Erro na cobrança Asaas';
-    default:
-      return 'Cobrança Asaas não gerada';
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════

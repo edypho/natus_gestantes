@@ -20,9 +20,7 @@ Widget authCampoLogin({
       },
       decoration: InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       ),
     ),
   );
@@ -38,16 +36,9 @@ Widget authBotaoPrincipal({
     child: ElevatedButton(
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
-      child: Text(
-        texto,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-        ),
-      ),
+      child: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold)),
     ),
   );
 }

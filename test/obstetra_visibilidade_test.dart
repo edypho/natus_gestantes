@@ -5,8 +5,10 @@ void main() {
   group('normalizarNomeProfissional', () {
     test('remove pronomes de tratamento e normaliza espaços', () {
       expect(normalizarNomeProfissional('Dr. Lucas  Almeida'), 'lucas almeida');
-      expect(normalizarNomeProfissional('DRA. Fernanda Costa'),
-          'fernanda costa');
+      expect(
+        normalizarNomeProfissional('DRA. Fernanda Costa'),
+        'fernanda costa',
+      );
       expect(normalizarNomeProfissional('  doutor João '), 'joão');
       expect(normalizarNomeProfissional('Lucas Almeida'), 'lucas almeida');
     });
@@ -47,9 +49,11 @@ void main() {
     test('admin e enfermeira veem tudo', () {
       for (final tipo in ['admin', 'enfermeira', 'superAdmin']) {
         expect(
-          filtrarGestantesPorPerfil(gestantes,
-                  tipoUsuario: tipo, nomeUsuario: 'Lucas Almeida')
-              .length,
+          filtrarGestantesPorPerfil(
+            gestantes,
+            tipoUsuario: tipo,
+            nomeUsuario: 'Lucas Almeida',
+          ).length,
           3,
         );
       }
@@ -57,9 +61,11 @@ void main() {
 
     test('obstetra sem nome não vê ninguém (fecha por segurança)', () {
       expect(
-        filtrarGestantesPorPerfil(gestantes,
-                tipoUsuario: 'obstetra', nomeUsuario: '')
-            .length,
+        filtrarGestantesPorPerfil(
+          gestantes,
+          tipoUsuario: 'obstetra',
+          nomeUsuario: '',
+        ).length,
         0,
       );
     });

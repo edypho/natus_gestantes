@@ -25,10 +25,7 @@ class RaminhoNatus extends StatelessWidget {
 class FundoTelaNatus extends StatelessWidget {
   final Widget child;
 
-  const FundoTelaNatus({
-    super.key,
-    required this.child,
-  });
+  const FundoTelaNatus({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -37,10 +34,7 @@ class FundoTelaNatus extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFFFFFBFC),
-            Color(0xFFF8EEF1),
-          ],
+          colors: [Color(0xFFFFFBFC), Color(0xFFF8EEF1)],
         ),
       ),
       child: child,

@@ -1,14 +1,7 @@
 import 'package:flutter/material.dart';
 
-void mostrarSnackNatus(
-  BuildContext context,
-  String mensagem,
-) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(mensagem),
-    ),
-  );
+void mostrarSnackNatus(BuildContext context, String mensagem) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensagem)));
 }
 
 Future<bool> confirmarAcaoNatus({

@@ -1,3 +1,5 @@
+import '../pacientes/paciente_identidade.dart';
+
 class AtendimentoModel {
   final String id;
   final String gestanteId;
@@ -18,7 +20,7 @@ class AtendimentoModel {
   factory AtendimentoModel.fromMap(Map<String, dynamic> map) {
     return AtendimentoModel(
       id: map['id']?.toString() ?? '',
-      gestanteId: map['gestanteId']?.toString() ?? '',
+      gestanteId: pacienteIdDoRegistro(map),
       nomeGestante: map['nomeGestante']?.toString() ?? '',
       tipoAtendimento: map['tipoAtendimento']?.toString() ?? '',
       adminDonoId: map['adminDonoId']?.toString() ?? '',
@@ -27,13 +29,12 @@ class AtendimentoModel {
   }
 
   Map<String, dynamic> toMap() {
-    return {
+    return identidadePacienteCanonica({
       'id': id,
-      'gestanteId': gestanteId,
       'nomeGestante': nomeGestante,
       'tipoAtendimento': tipoAtendimento,
       'adminDonoId': adminDonoId,
       'criadoPorUid': criadoPorUid,
-    };
+    }, pacienteId: gestanteId);
   }
 }

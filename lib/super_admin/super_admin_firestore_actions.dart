@@ -3,9 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class SuperAdminFirestoreActions {
   final FirebaseFirestore firestore;
 
-  SuperAdminFirestoreActions({
-    required this.firestore,
-  });
+  SuperAdminFirestoreActions({required this.firestore});
 
   Future<void> criarClinicaBase({
     required String nome,

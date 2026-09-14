@@ -1,6 +1,7 @@
 import '../decorativos/decorativos_natus.dart';
 import 'package:flutter/material.dart';
 
+import '../core/natus_breakpoints.dart';
 import '../shared/natus_app.dart';
 import '../shared/formatadores.dart';
 
@@ -11,7 +12,7 @@ Widget dashboardCardAlerta(
   IconData icone,
   Color cor,
 ) {
-  final isMobile = MediaQuery.of(context).size.width < 700;
+  final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
   return Container(
     padding: const EdgeInsets.all(14),
@@ -68,7 +69,7 @@ Widget dashboardCardFinanceiroResumo(
       ? '${valor.toStringAsFixed(1)}%'
       : formatarMoeda(valor);
 
-  final isMobile = MediaQuery.of(context).size.width < 700;
+  final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
   return Container(
     constraints: const BoxConstraints(minHeight: 118),
@@ -121,7 +122,7 @@ Widget dashboardCardContagemResumo(
   Color cor,
   IconData icone,
 ) {
-  final isMobile = MediaQuery.of(context).size.width < 700;
+  final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
   return Container(
     constraints: const BoxConstraints(minHeight: 118),
@@ -171,7 +172,7 @@ Widget dashboardCardResumo(
   Color? cor,
 }) {
   final corFinal = cor ?? NatusApp.vinho;
-  final isMobile = MediaQuery.of(context).size.width < 700;
+  final isMobile = NatusBreakpoints.usarLayoutCompacto(context);
 
   return Container(
     width: 220,
@@ -184,7 +185,10 @@ Widget dashboardCardResumo(
         colors: [NatusApp.offWhite, NatusApp.creme],
       ),
       borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.86), width: 1.1),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.86),
+        width: 1.1,
+      ),
       boxShadow: [
         BoxShadow(
           color: NatusApp.vinho.withValues(alpha: 0.075),
@@ -247,7 +251,10 @@ Widget dashboardBloco(
     decoration: BoxDecoration(
       color: const Color(0xFFFFFCF8).withValues(alpha: 0.96),
       borderRadius: BorderRadius.circular(28),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.84), width: 1.1),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.84),
+        width: 1.1,
+      ),
       boxShadow: [
         BoxShadow(
           color: NatusApp.vinho.withValues(alpha: 0.085),
@@ -275,12 +282,7 @@ Widget dashboardBloco(
   );
 }
 
-
-Widget blocoDashboardOrganico(
-  String titulo,
-  String valor,
-  IconData icone,
-) {
+Widget blocoDashboardOrganico(String titulo, String valor, IconData icone) {
   return CardOrganicoNatus(
     child: Row(
       children: [
@@ -290,11 +292,7 @@ Widget blocoDashboardOrganico(
             color: const Color(0xFFF7EEF1),
             borderRadius: BorderRadius.circular(18),
           ),
-          child: Icon(
-            icone,
-            color: const Color(0xFF7B3A44),
-            size: 28,
-          ),
+          child: Icon(icone, color: const Color(0xFF7B3A44), size: 28),
         ),
         const SizedBox(width: 14),
         Expanded(

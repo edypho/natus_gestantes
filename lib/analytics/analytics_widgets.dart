@@ -10,9 +10,7 @@ Widget analyticsCard({
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: Colors.black.withValues(alpha: 0.05),
-      ),
+      border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.04),
@@ -29,12 +27,7 @@ Widget analyticsCard({
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                titulo,
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                ),
-              ),
+              Text(titulo, style: TextStyle(color: Colors.grey.shade700)),
               const SizedBox(height: 6),
               Text(
                 valor,

@@ -8,9 +8,9 @@ Future<bool?> confirmarExclusaoGestanteDialog({
     context: context,
     builder: (context) {
       return AlertDialog(
-        title: const Text('Excluir gestante'),
+        title: const Text('Excluir paciente'),
         content: Text(
-          'Tem certeza que deseja excluir ${nomeGestante.trim().isEmpty ? 'esta gestante' : nomeGestante}? Esta ação não pode ser desfeita.',
+          'Tem certeza que deseja excluir ${nomeGestante.trim().isEmpty ? 'este paciente' : nomeGestante}? Esta ação não pode ser desfeita.',
         ),
         actions: [
           TextButton(

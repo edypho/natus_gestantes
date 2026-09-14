@@ -81,17 +81,19 @@ class SuperAdminRepository {
     required String emailAdmin,
     required String plano,
     required double valorAssinatura,
+    required String operacaoId,
   }) async {
     final emailNormalizado = emailAdmin.trim().toLowerCase();
-    final callable = FirebaseFunctions.instance.httpsCallable(
-      'criarClinicaComAdminSaaS',
-    );
+    final callable = FirebaseFunctions.instanceFor(
+      region: 'us-central1',
+    ).httpsCallable('criarClinicaComAdminSaaS');
     final resposta = await callable.call({
       'nomeClinica': nomeClinica.trim(),
       'nomeAdmin': nomeAdmin.trim(),
       'emailAdmin': emailNormalizado,
       'plano': plano.trim(),
       'valorAssinatura': valorAssinatura,
+      'operacaoId': operacaoId,
     });
     final resultado = Map<String, dynamic>.from(resposta.data as Map);
     if (resultado['sucesso'] != true) {

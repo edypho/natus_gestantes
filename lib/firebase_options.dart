@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCSmVKa0rB1obPeNa-7SKaGDaZzI-WY_j4',
-    appId: '1:1078564037217:android:2d0bb7dc5b96e0c16f4020',
+    appId: '1:1078564037217:android:a8730fbd791bfb686f4020',
     messagingSenderId: '1078564037217',
     projectId: 'natus-gestantes',
     storageBucket: 'natus-gestantes.firebasestorage.app',

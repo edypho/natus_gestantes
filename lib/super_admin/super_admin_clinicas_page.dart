@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'super_admin_access_widgets.dart';
+import 'super_admin_crud_dialogs.dart';
 import 'super_admin_layout.dart';
 import 'super_admin_lists.dart';
 import 'super_admin_repository.dart';
@@ -13,14 +14,23 @@ class SuperAdminClinicasPage extends StatelessWidget {
     final repo = SuperAdminRepository();
 
     return SuperAdminPageScaffold(
-      titulo: 'Clínicas cadastradas SaaS',
-      subtitulo: 'Controle de clínicas/clientes que usam a plataforma Natus.',
+      titulo: 'Clínicas',
+      subtitulo: 'Controle comercial e situação de acesso de cada clínica.',
+      icone: Icons.apartment_rounded,
+      actions: [
+        FilledButton.icon(
+          onPressed: () =>
+              superAdminCriarClinicaComAdminDialog(context: context),
+          icon: const Icon(Icons.add_business_rounded),
+          label: const Text('Nova clínica'),
+        ),
+      ],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Listagem e acompanhamento das clínicas SaaS cadastradas.',
-            style: TextStyle(fontWeight: FontWeight.w600),
+            'Clínicas cadastradas',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
           ),
           const SizedBox(height: 20),
           SuperAdminFirestoreList(
@@ -28,13 +38,16 @@ class SuperAdminClinicasPage extends StatelessWidget {
             emptyText: 'Nenhuma clínica SaaS cadastrada ainda.',
             itemBuilder: (context, doc) {
               final data = doc.data();
-              final status = data['status']?.toString() ?? 'teste';
+              final status = (data['status'] ?? 'teste')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
               final nome = data['nome']?.toString() ?? 'Clínica sem nome';
 
               return superAdminListTile(
                 titulo: nome,
                 subtitulo:
-                    'Plano: ${data['plano'] ?? '-'} • Admin: ${data['emailAdmin'] ?? '-'} • ID: ${doc.id}',
+                    'Plano: ${data['plano'] ?? 'Não informado'} • Administrador: ${data['emailAdmin'] ?? 'Não informado'}',
                 icone: Icons.apartment,
                 trailing: Wrap(
                   spacing: 8,

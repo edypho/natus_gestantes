@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 
-Widget prontuarioSessao({
-  required String titulo,
-  required Widget child,
-}) {
+Widget prontuarioSessao({required String titulo, required Widget child}) {
   return Container(
     width: double.infinity,
     margin: const EdgeInsets.only(bottom: 16),
@@ -11,9 +8,7 @@ Widget prontuarioSessao({
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: Colors.black.withValues(alpha: 0.05),
-      ),
+      border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.04),
@@ -27,10 +22,7 @@ Widget prontuarioSessao({
       children: [
         Text(
           titulo,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
         child,
@@ -39,10 +31,7 @@ Widget prontuarioSessao({
   );
 }
 
-Widget prontuarioInfo({
-  required String label,
-  required String valor,
-}) {
+Widget prontuarioInfo({required String label, required String valor}) {
   return Padding(
     padding: const EdgeInsets.only(bottom: 8),
     child: Row(
@@ -51,14 +40,10 @@ Widget prontuarioInfo({
           width: 140,
           child: Text(
             label,
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
-        Expanded(
-          child: Text(valor),
-        ),
+        Expanded(child: Text(valor)),
       ],
     ),
   );

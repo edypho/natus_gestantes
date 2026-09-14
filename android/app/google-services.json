@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:1078564037217:android:a8730fbd791bfb686f4020",
+        "android_client_info": {
+          "package_name": "br.enf.natus.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSmVKa0rB1obPeNa-7SKaGDaZzI-WY_j4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:1078564037217:android:2d0bb7dc5b96e0c16f4020",
         "android_client_info": {
           "package_name": "com.example.natus_gestantes"

@@ -18,6 +18,10 @@ String statusGestanteNormalizado(Map<String, String> g) {
     return 'Histórico';
   }
 
+  if (status == 'ativa' || status == 'ativo' || status == 'paciente') {
+    return 'Ativa';
+  }
+
   return 'Gestante';
 }
 
@@ -29,7 +33,7 @@ bool gestanteEstaAtiva(Map<String, String> g) {
     return false;
   }
 
-  return status == 'Gestante' || status == 'Puérpera';
+  return status == 'Ativa' || status == 'Gestante' || status == 'Puérpera';
 }
 
 bool gestanteApareceNaBusca(Map<String, String> g, String busca) {
@@ -48,6 +52,8 @@ bool gestanteApareceNaBusca(Map<String, String> g, String busca) {
     g['hospitalGestante'],
     g['obstetraGestante'],
     g['convenioGestante'],
+    g['especialidadeAcompanhamento'],
+    g['tipoCadastroPaciente'],
     g['nomeBebe'],
     g['cpfGestante'],
   ];
@@ -57,9 +63,7 @@ bool gestanteApareceNaBusca(Map<String, String> g, String busca) {
   });
 }
 
-List<Map<String, String>> gestantesAtivas(
-  List<Map<String, String>> gestantes,
-) {
+List<Map<String, String>> gestantesAtivas(List<Map<String, String>> gestantes) {
   return gestantes.where(gestanteEstaAtiva).toList();
 }
 
@@ -126,10 +130,7 @@ DateTime? converterDataDashboard(String? valor) {
   return null;
 }
 
-String primeiraDataPreenchida(
-  Map<String, String> dados,
-  List<String> campos,
-) {
+String primeiraDataPreenchida(Map<String, String> dados, List<String> campos) {
   for (final campo in campos) {
     final valor = (dados[campo] ?? '').trim();
     if (valor.isNotEmpty) return valor;
@@ -160,10 +161,7 @@ String normalizarNomeProfissional(String nome) {
 /// Uma gestante pertence à carteira do obstetra quando o campo
 /// `obstetraGestante` do cadastro corresponde ao nome dele
 /// (comparação normalizada).
-bool gestantePertenceAoObstetra(
-  Map<String, String> g,
-  String nomeObstetra,
-) {
+bool gestantePertenceAoObstetra(Map<String, String> g, String nomeObstetra) {
   final nome = normalizarNomeProfissional(nomeObstetra);
   if (nome.isEmpty) return false;
 

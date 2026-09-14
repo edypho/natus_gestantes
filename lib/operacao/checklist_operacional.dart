@@ -3,7 +3,7 @@ class ChecklistOperacionalNatus {
     'Login superAdmin',
     'Login admin',
     'Dashboard carregando',
-    'Cadastro de gestante',
+    'Cadastro de paciente',
     'Parcelas geradas',
     'Financeiro filtrando',
     'Exames abrindo',
@@ -27,10 +27,6 @@ class ChecklistOperacionalNatus {
     required bool financeiroOk,
     required bool examesOk,
   }) {
-    return loginOk &&
-        dashboardOk &&
-        gestantesOk &&
-        financeiroOk &&
-        examesOk;
+    return loginOk && dashboardOk && gestantesOk && financeiroOk && examesOk;
   }
 }

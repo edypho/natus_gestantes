@@ -162,24 +162,6 @@
       ]
     },
     {
-      "collectionGroup": "notas_fiscais",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "clinicaId", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "criadoEm", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "notas_fiscais",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "criadoEm", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "gestantes",
       "queryScope": "COLLECTION",
       "fields": [
@@ -485,14 +467,6 @@
     },
     {
       "collectionGroup": "usuarios",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "adminDonoId", "order": "ASCENDING" },
-        { "fieldPath": "clinicaId", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "notas_fiscais",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "adminDonoId", "order": "ASCENDING" },

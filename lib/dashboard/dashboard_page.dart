@@ -23,17 +23,11 @@ class DashboardPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          DashboardKPIs(
-            children: kpis,
-          ),
+          DashboardKPIs(children: kpis),
           const SizedBox(height: 18),
-          DashboardCards(
-            children: cards,
-          ),
+          DashboardCards(children: cards),
           const SizedBox(height: 18),
-          DashboardCharts(
-            children: charts,
-          ),
+          DashboardCharts(children: charts),
         ],
       ),
     );

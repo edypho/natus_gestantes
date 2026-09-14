@@ -27,9 +27,8 @@ Widget usuariosTela({
 
       final usuarios = snapshot.data!.docs.where((doc) {
         final dados = doc.data() as Map<String, dynamic>;
-        final tipo = dados['tipo']?.toString() ??
-            dados['tipoUsuario']?.toString() ??
-            '';
+        final tipo =
+            dados['tipo']?.toString() ?? dados['tipoUsuario']?.toString() ?? '';
         return tipo != 'superAdmin';
       }).toList();
 
@@ -162,11 +161,6 @@ Widget usuariosTela({
   );
 }
 
-
-Widget usuariosCardOrganicoNatus({
-  required Widget child,
-}) {
-  return CardOrganicoNatus(
-    child: child,
-  );
+Widget usuariosCardOrganicoNatus({required Widget child}) {
+  return CardOrganicoNatus(child: child);
 }

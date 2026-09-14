@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
+import '../core/sessao_idempotencia.dart';
+import '../seguranca/log_seguro.dart';
 import 'super_admin_repository.dart';
 
 Future<void> superAdminCriarClinicaComAdminDialog({
@@ -11,6 +15,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
   final nomeAdminController = TextEditingController();
   final emailAdminController = TextEditingController();
   final valorController = TextEditingController(text: '597');
+  final sessaoCriacaoClinica = SessaoIdempotencia();
 
   String planoSelecionado = 'Clínica Start';
   var salvando = false;
@@ -21,7 +26,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
       return StatefulBuilder(
         builder: (context, setStateDialog) {
           return AlertDialog(
-            title: const Text('Criar clínica SaaS + admin'),
+            title: const Text('Criar clínica + administrador'),
             content: SingleChildScrollView(
               child: SizedBox(
                 width: 460,
@@ -55,7 +60,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                     DropdownButtonFormField<String>(
                       initialValue: planoSelecionado,
                       decoration: const InputDecoration(
-                        labelText: 'Plano SaaS',
+                        labelText: 'Plano comercial',
                         border: OutlineInputBorder(),
                       ),
                       items: const [
@@ -147,19 +152,31 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                         setStateDialog(() => salvando = true);
                         late final bool conviteEnviado;
                         try {
+                          final operacaoId = sessaoCriacaoClinica
+                              .idParaAssinatura(
+                                jsonEncode([
+                                  nomeClinica,
+                                  nomeAdmin,
+                                  emailAdmin.toLowerCase(),
+                                  planoSelecionado,
+                                  valor,
+                                ]),
+                              );
                           conviteEnviado = await repo.criarClinicaComAdmin(
                             nomeClinica: nomeClinica,
                             nomeAdmin: nomeAdmin,
                             emailAdmin: emailAdmin,
                             plano: planoSelecionado,
                             valorAssinatura: valor,
+                            operacaoId: operacaoId,
                           );
                         } catch (e) {
+                          logErroSeguro('Erro ao criar clinica.', e);
                           if (context.mounted) {
                             setStateDialog(() => salvando = false);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Erro ao criar clínica: $e'),
+                              const SnackBar(
+                                content: Text('Erro ao criar clínica.'),
                               ),
                             );
                           }
@@ -191,7 +208,7 @@ Future<void> superAdminCriarClinicaComAdminDialog({
                           );
                         }
                       },
-                child: const Text('Criar clínica + admin'),
+                child: const Text('Criar clínica + administrador'),
               ),
             ],
           );

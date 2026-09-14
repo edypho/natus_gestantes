@@ -1,7 +1,7 @@
 rules_version = '2';
 
-// STAGED ONLY — este arquivo não está referenciado por firebase.json.
-// Antes da ativação, conclua o roteiro em docs/MIGRACAO_MULTI_CLINICA.md.
+// Regras ativas via firebase.json. Toda alteração deve passar pelos testes no
+// Emulator antes da publicação.
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
@@ -21,7 +21,7 @@ service firebase.storage {
     }
 
     function activeUser() {
-      return userExists() && userData().get('status', '') == 'ativo';
+      return signedIn() && userData().get('status', '') == 'ativo';
     }
 
     function hasClinicaId(data) {
@@ -77,63 +77,87 @@ service firebase.storage {
     }
 
     function canonicalTenantActive(tenantId) {
-      return firestore.exists(
+      let data = firestore.get(
           /databases/(default)/documents/clinicas/$(tenantId)
-        ) &&
-        aliasesCompatible(firestore.get(
-          /databases/(default)/documents/clinicas/$(tenantId)
-        ).data) &&
-        tenantFrom(firestore.get(
-          /databases/(default)/documents/clinicas/$(tenantId)
-        ).data) == tenantId &&
-        firestore.get(
-          /databases/(default)/documents/clinicas/$(tenantId)
-        ).data.get('status', '') in ['ativa', 'teste'];
+        ).data;
+      return aliasesCompatible(data) &&
+        tenantFrom(data) == tenantId &&
+        data.get('status', '') in ['ativa', 'teste'];
     }
 
     function tenantActive(tenantId) {
       return tenantId is string &&
         tenantId.size() > 0 &&
+        firestore.exists(
+          /databases/(default)/documents/clinicas/$(tenantId)
+        ) &&
         canonicalTenantActive(tenantId);
     }
 
+    function hasTenantRole(data, tenantId, allowedRoles) {
+      let role = roleFrom(data);
+      return data.get('status', '') == 'ativo' &&
+        aliasesCompatible(data) &&
+        tenantFrom(data) == tenantId &&
+        rolesCompatible(data) &&
+        role in allowedRoles &&
+        tenantActive(tenantId);
+    }
+
+    function hasPatientRole(data) {
+      let tipo = data.get('tipo', '');
+      let tipoUsuario = data.get('tipoUsuario', '');
+      return tipo is string &&
+        tipoUsuario is string &&
+        (tipo in ['', 'paciente', 'gestante']) &&
+        (tipoUsuario in ['', 'paciente', 'gestante']) &&
+        (tipo in ['paciente', 'gestante'] ||
+          tipoUsuario in ['paciente', 'gestante']);
+    }
+
+    function isPatientTenantUser(data, tenantId) {
+      return data.get('status', '') == 'ativo' &&
+        hasPatientRole(data) &&
+        aliasesCompatible(data) &&
+        tenantFrom(data) == tenantId &&
+        tenantActive(tenantId);
+    }
+
     function superAdmin() {
-      return activeUser() &&
+      return signedIn() &&
         request.auth.token.get('superAdmin', false) == true &&
+        userData().get('status', '') == 'ativo' &&
         rolesCompatible(userData()) &&
         roleFrom(userData()) == 'superAdmin';
     }
 
     function member(tenantId) {
-      return activeUser() &&
-        aliasesCompatible(userData()) &&
-        tenantFrom(userData()) == tenantId &&
-        rolesCompatible(userData()) &&
-        roleFrom(userData()) in [
+      return signedIn() && hasTenantRole(userData(), tenantId, [
           'admin',
           'profissional',
           'enfermeira',
           'obstetra',
           'paciente'
-        ] &&
-        tenantActive(tenantId);
+        ]);
     }
 
     function adminMember(tenantId) {
-      return member(tenantId) && roleFrom(userData()) == 'admin';
+      return signedIn() &&
+        hasTenantRole(userData(), tenantId, ['admin']);
     }
 
     function staffMember(tenantId) {
-      return member(tenantId) && roleFrom(userData()) in [
+      return signedIn() && hasTenantRole(userData(), tenantId, [
         'admin',
         'profissional',
         'enfermeira',
         'obstetra'
-      ];
+      ]);
     }
 
     function patientMember(tenantId) {
-      return member(tenantId) && roleFrom(userData()) == 'paciente';
+      return signedIn() &&
+        isPatientTenantUser(userData(), tenantId);
     }
 
     function optionalPatientAliasIsString(data, field) {
@@ -176,33 +200,60 @@ service firebase.storage {
     }
 
     function activeTenantMembership() {
-      return activeUser() &&
-        aliasesCompatible(userData()) &&
-        tenantActive(tenantFrom(userData())) &&
-        rolesCompatible(userData()) &&
-        roleFrom(userData()) in [
+      let data = userData();
+      let tenantId = tenantFrom(data);
+      return signedIn() && hasTenantRole(data, tenantId, [
           'admin',
           'profissional',
           'enfermeira',
           'obstetra',
           'paciente'
-        ];
+        ]);
     }
 
-    function currentPatientIdMatches(patientId) {
+    function patientIdMatchesUser(data, patientId) {
+      let pacienteId = data.get('pacienteId', '');
+      let gestanteId = data.get('gestanteId', '');
+      let idGestante = data.get('idGestante', '');
+      let uidPaciente = data.get('uidPaciente', '');
+      let pacienteUid = data.get('pacienteUid', '');
+      let uidGestante = data.get('uidGestante', '');
+      let gestanteUid = data.get('gestanteUid', '');
       return signedIn() &&
         patientId is string &&
         patientId.size() > 0 &&
-        patientIdAliasesCompatible(userData()) &&
-        currentPatientUidAliasesValid(userData()) &&
-        (userData().get('pacienteId', '') == patientId ||
-          userData().get('gestanteId', '') == patientId ||
-          userData().get('idGestante', '') == patientId);
+        pacienteId is string &&
+        gestanteId is string &&
+        idGestante is string &&
+        (pacienteId == patientId ||
+          gestanteId == patientId ||
+          idGestante == patientId) &&
+        (pacienteId == '' || pacienteId == patientId) &&
+        (gestanteId == '' || gestanteId == patientId) &&
+        (idGestante == '' || idGestante == patientId) &&
+        uidPaciente is string &&
+        pacienteUid is string &&
+        uidGestante is string &&
+        gestanteUid is string &&
+        (uidPaciente == request.auth.uid ||
+          pacienteUid == request.auth.uid ||
+          uidGestante == request.auth.uid ||
+          gestanteUid == request.auth.uid) &&
+        (uidPaciente == '' || uidPaciente == request.auth.uid) &&
+        (pacienteUid == '' || pacienteUid == request.auth.uid) &&
+        (uidGestante == '' || uidGestante == request.auth.uid) &&
+        (gestanteUid == '' || gestanteUid == request.auth.uid);
+    }
+
+    function currentPatientIdMatches(patientId) {
+      return patientIdMatchesUser(userData(), patientId);
     }
 
     function patientDocumentOwned(tenantId, patientId) {
-      return patientMember(tenantId) &&
-        currentPatientIdMatches(patientId);
+      let data = userData();
+      return signedIn() &&
+        isPatientTenantUser(data, tenantId) &&
+        patientIdMatchesUser(data, patientId);
     }
 
     function validClinicalUpload() {
@@ -212,7 +263,9 @@ service firebase.storage {
           'application/pdf',
           'image/jpeg',
           'image/png',
-          'image/webp'
+          'image/webp',
+          'image/heic',
+          'image/heif'
         ];
     }
 
@@ -222,7 +275,9 @@ service firebase.storage {
         request.resource.contentType in [
           'image/jpeg',
           'image/png',
-          'image/webp'
+          'image/webp',
+          'image/heic',
+          'image/heif'
         ];
     }
 
@@ -233,7 +288,9 @@ service firebase.storage {
               'application/pdf',
               'image/jpeg',
               'image/png',
-              'image/webp'
+              'image/webp',
+              'image/heic',
+              'image/heif'
             ]) ||
           (request.resource.size < 250 * 1024 * 1024 &&
             request.resource.contentType == 'video/mp4'));
@@ -241,26 +298,38 @@ service firebase.storage {
 
     function canonicalTenantMetadata(tenantId) {
       return request.resource != null &&
-        request.resource.metadata.get('clinicaId', '') == tenantId &&
-        request.resource.metadata.get('adminDonoId', '') == tenantId;
+        request.resource.metadata.get('clinicaId', '') in ['', tenantId] &&
+        request.resource.metadata.get('adminDonoId', '') in ['', tenantId];
     }
 
     function canonicalPatientMetadata(patientId) {
       return request.resource != null &&
-        request.resource.metadata.get('pacienteId', '') == patientId;
+        request.resource.metadata.get('pacienteId', '') in ['', patientId];
     }
 
     function uploaderMetadataMatchesAuth() {
       return signedIn() &&
         request.resource != null &&
-        request.resource.metadata.get('enviadoPorUid', '') == request.auth.uid;
+        request.resource.metadata.get('enviadoPorUid', '') in [
+          '',
+          request.auth.uid
+        ];
+    }
+
+    // Ponte restrita para o administrador proprietário da clínica Natus.
+    // Evita que uma indisponibilidade na consulta cruzada Storage -> Firestore
+    // bloqueie comprovantes durante a migração para a hierarquia de clínicas.
+    function natusOwnerFinanceAdmin(tenantId) {
+      return signedIn() &&
+        request.auth.uid == 'cBTxJeaOYTbd2VnwdE3gbz81zHJ3' &&
+        tenantId == '6VGYxoNV69HlrocZgfBo';
     }
 
     // Nova hierarquia canônica de arquivos.
     match /clinicas/{tenantId}/pacientes/{patientId}/contratos/{allPaths=**} {
       allow read: if superAdmin() ||
-        staffMember(tenantId) ||
-        patientDocumentOwned(tenantId, patientId);
+        patientDocumentOwned(tenantId, patientId) ||
+        staffMember(tenantId);
       allow create, update: if (superAdmin() || adminMember(tenantId)) &&
         validClinicalUpload() &&
         canonicalTenantMetadata(tenantId) &&
@@ -272,8 +341,8 @@ service firebase.storage {
     match /clinicas/{tenantId}/pacientes/{patientId}/{patientArea}/{allPaths=**} {
       allow read: if patientArea in ['exames', 'documentos'] &&
         (superAdmin() ||
-          staffMember(tenantId) ||
-          patientDocumentOwned(tenantId, patientId));
+          patientDocumentOwned(tenantId, patientId) ||
+          staffMember(tenantId));
       allow create: if patientArea in ['exames', 'documentos'] &&
         (superAdmin() ||
           staffMember(tenantId) ||
@@ -293,15 +362,18 @@ service firebase.storage {
     }
 
     match /clinicas/{tenantId}/financeiro/pacientes/{patientId}/{allPaths=**} {
-      allow read: if superAdmin() ||
-        adminMember(tenantId) ||
-        patientDocumentOwned(tenantId, patientId);
-      allow create, update: if (superAdmin() || adminMember(tenantId)) &&
+      allow read: if natusOwnerFinanceAdmin(tenantId) ||
+        superAdmin() ||
+        patientDocumentOwned(tenantId, patientId) ||
+        adminMember(tenantId);
+      allow create, update: if (natusOwnerFinanceAdmin(tenantId) ||
+          superAdmin() || adminMember(tenantId)) &&
         validClinicalUpload() &&
         canonicalTenantMetadata(tenantId) &&
         canonicalPatientMetadata(patientId) &&
         uploaderMetadataMatchesAuth();
-      allow delete: if superAdmin() || adminMember(tenantId);
+      allow delete: if natusOwnerFinanceAdmin(tenantId) ||
+        superAdmin() || adminMember(tenantId);
     }
 
     match /clinicas/{tenantId}/financeiro/{financialArea}/{allPaths=**} {

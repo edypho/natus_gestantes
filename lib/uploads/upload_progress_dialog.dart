@@ -185,9 +185,9 @@ class _UploadProgressDialogState extends State<UploadProgressDialog>
       case UploadProgressStatus.preparing:
         return 'Preparando envio...';
       case UploadProgressStatus.uploading:
-        return '${(progress * 100).round()}% concluido';
+        return '${(progress * 100).round()}% concluído';
       case UploadProgressStatus.success:
-        return 'Upload concluido com sucesso';
+        return 'Upload concluído com sucesso';
       case UploadProgressStatus.error:
         return 'Ocorreu um erro no envio';
     }

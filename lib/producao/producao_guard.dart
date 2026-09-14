@@ -25,11 +25,7 @@ class ProducaoGuard {
     return mapa != null;
   }
 
-  static bool loginSeguro({
-    required String email,
-    required String senha,
-  }) {
-    return email.trim().isNotEmpty &&
-        senha.trim().isNotEmpty;
+  static bool loginSeguro({required String email, required String senha}) {
+    return email.trim().isNotEmpty && senha.trim().isNotEmpty;
   }
 }

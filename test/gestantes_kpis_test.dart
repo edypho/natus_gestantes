@@ -21,6 +21,7 @@ void main() {
         statusGestanteNormalizado({'statusGestante': 'histórico'}),
         'Histórico',
       );
+      expect(statusGestanteNormalizado({'statusGestante': 'ativa'}), 'Ativa');
     });
 
     test('ausente ou desconhecido vira Gestante', () {
@@ -33,7 +34,8 @@ void main() {
   });
 
   group('gestanteEstaAtiva', () {
-    test('gestante e puérpera são ativas', () {
+    test('paciente, gestante e puérpera são ativas', () {
+      expect(gestanteEstaAtiva({'statusGestante': 'Ativa'}), isTrue);
       expect(gestanteEstaAtiva({'statusGestante': 'Gestante'}), isTrue);
       expect(gestanteEstaAtiva({'statusGestante': 'Puérpera'}), isTrue);
     });

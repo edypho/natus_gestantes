@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../pacientes/paciente_identidade.dart';
 import '../../../saas/tenant_access_scope.dart';
 import '../../../services/tenant_firestore_service.dart';
 import '../models/contrato_registro.dart';
@@ -44,15 +45,12 @@ class ContratosRepository {
     }
 
     if (_escopo.ehPaciente) {
-      final uidPaciente = (dados['pacienteUid'] ?? dados['uidGestante'] ?? '')
-          .toString()
-          .trim();
-      final pacienteId = (dados['pacienteId'] ?? dados['idGestante'] ?? '')
-          .toString()
-          .trim();
-      if (uidPaciente != _escopo.uidUsuario ||
-          pacienteId != _escopo.pacienteId) {
-        throw const TenantScopeException('Contrato de outra paciente.');
+      if (!registroPertenceAoPaciente(
+        dados,
+        pacienteId: _escopo.pacienteId,
+        pacienteUid: _escopo.uidUsuario,
+      )) {
+        throw const TenantScopeException('Contrato de outro paciente.');
       }
     }
   }
@@ -66,22 +64,28 @@ class ContratosRepository {
     final agora = DateTime.now().toIso8601String();
     final pacienteUid = _escopo.ehPaciente
         ? _escopo.uidUsuario
-        : (payload['pacienteUid'] ?? payload['uidGestante'] ?? '')
-              .toString()
-              .trim();
+        : pacienteUidDoRegistro(payload);
+    final payloadCanonico = identidadePacienteCanonica(
+      payload,
+      pacienteId: pacienteId,
+      pacienteUid: pacienteUid,
+    );
     final doc = await _collection.add(
-      _tenant.prepararCriacao({
-        'pacienteId': pacienteId,
-        'pacienteUid': pacienteUid,
-        'uidGestante': pacienteUid,
-        'templateKey': templateKey,
-        'status': 'pendente',
-        'zapsignDocumentId': '',
-        'zapsignSignerUrl': '',
-        'payload': payload,
-        'criadoEm': agora,
-        'atualizadoEm': agora,
-      }),
+      _tenant.prepararCriacao(
+        identidadePacienteCanonica(
+          {
+            'templateKey': templateKey,
+            'status': 'pendente',
+            'zapsignDocumentId': '',
+            'zapsignSignerUrl': '',
+            'payload': payloadCanonico,
+            'criadoEm': agora,
+            'atualizadoEm': agora,
+          },
+          pacienteId: pacienteId,
+          pacienteUid: pacienteUid,
+        ),
+      ),
     );
 
     return doc.id;

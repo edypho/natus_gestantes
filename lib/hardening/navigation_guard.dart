@@ -18,7 +18,6 @@ class NavigationGuard {
   }
 
   static bool menuValido(List<dynamic>? menus) {
-    return menus != null &&
-        menus.isNotEmpty;
+    return menus != null && menus.isNotEmpty;
   }
 }
