@@ -47,6 +47,8 @@ import 'features/contratos/contratos.dart';
 import 'navigation/menu_inferior_coracao.dart';
 import 'notificacoes/notificacoes_central_page.dart';
 import 'pacientes/paciente_identidade.dart';
+import 'pacientes/paciente_lista_filtro.dart';
+import 'pacientes/paciente_lista_paginacao.dart';
 import 'prontuario/atendimento_prontuario_apresentacao.dart';
 import 'prontuario/prontuario_identidade.dart';
 import 'shared/gestacao_helpers.dart' as gestacao;
@@ -157,6 +159,10 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   bool _agrupandoCarregamentoInicial = false;
   int _versaoDadosDashboard = 0;
   DashboardDadosCalculados? _dadosDashboardCache;
+  Timer? _buscaPacientesDebounce;
+  int _limitePacientesVisiveis = quantidadeInicialPacientes;
+  String _chaveListaPacientesCache = '';
+  List<Map<String, String>> _listaPacientesCache = const [];
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -613,6 +619,8 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void _invalidarDadosDashboard() {
     _versaoDadosDashboard++;
     _dadosDashboardCache = null;
+    _chaveListaPacientesCache = '';
+    _listaPacientesCache = const [];
   }
 
   void aoMudarTema() {
@@ -622,6 +630,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   @override
   void dispose() {
     notificacoesSubscription?.cancel();
+    _buscaPacientesDebounce?.cancel();
     NatusTema.atual.removeListener(aoMudarTema);
     buscaBibliotecaController.dispose();
     super.dispose();
@@ -4744,6 +4753,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       filtroStatusGestante = 'Todas';
       filtroPlanoGestante = 'Todos';
       buscaGestantesController.clear();
+      _limitePacientesVisiveis = quantidadeInicialPacientes;
       gestanteSelecionada = null;
       telaAtual = 'Gestantes';
     });
@@ -4752,6 +4762,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void limparFiltroDashboardPacientes() {
     setState(() {
       filtroDashboardPacientes = null;
+      _limitePacientesVisiveis = quantidadeInicialPacientes;
     });
   }
 
@@ -4761,6 +4772,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       filtroStatusGestante = 'Ativas';
       filtroPlanoGestante = planoSelecionado;
       buscaGestantesController.clear();
+      _limitePacientesVisiveis = quantidadeInicialPacientes;
       gestanteSelecionada = null;
       telaAtual = 'Gestantes';
     });
@@ -6392,6 +6404,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             onChanged: (value) {
               setState(() {
                 filtroPlanoGestante = value ?? 'Todos';
+                _limitePacientesVisiveis = quantidadeInicialPacientes;
               });
             },
           ),
@@ -6401,7 +6414,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           TextField(
             controller: buscaGestantesController,
             onChanged: (_) {
-              setState(() {});
+              _buscaPacientesDebounce?.cancel();
+              _buscaPacientesDebounce = Timer(
+                const Duration(milliseconds: 250),
+                () {
+                  if (!mounted) return;
+                  setState(() {
+                    _limitePacientesVisiveis = quantidadeInicialPacientes;
+                  });
+                },
+              );
             },
             decoration: InputDecoration(
               labelText: 'Buscar paciente',
@@ -6416,6 +6438,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
                       onPressed: () {
                         setState(() {
                           buscaGestantesController.clear();
+                          _limitePacientesVisiveis = quantidadeInicialPacientes;
                         });
                       },
                     ),
@@ -9940,6 +9963,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         setState(() {
           filtroStatusGestante = status;
           filtroDashboardPacientes = null;
+          _limitePacientesVisiveis = quantidadeInicialPacientes;
         });
       },
       child: AnimatedContainer(
@@ -14413,91 +14437,83 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     }
 
     final busca = buscaGestantesController.text.trim();
-    final listaOrdenada = [...gestantes];
-
-    listaOrdenada.sort((a, b) {
-      final statusA = statusGestanteNormalizado(a);
-      final statusB = statusGestanteNormalizado(b);
-
-      int prioridade(String status) {
-        if (status == 'Gestante') return 1;
-        if (status == 'Puérpera') return 2;
-        if (status == 'Histórico') return 3;
-        if (status == 'Encerrada') return 4;
-        return 5;
-      }
-
-      final prioridadeA = prioridade(statusA);
-      final prioridadeB = prioridade(statusB);
-
-      if (prioridadeA != prioridadeB) {
-        return prioridadeA.compareTo(prioridadeB);
-      }
-
-      // Se ambos forem gestantes, ordena por DPP
-      if (statusA == 'Gestante') {
-        final diasA = diasParaDpp(a['dpp'] ?? '');
-        final diasB = diasParaDpp(b['dpp'] ?? '');
-
-        return diasA.compareTo(diasB);
-      }
-
-      return (a['nomeGestante'] ?? '').compareTo(b['nomeGestante'] ?? '');
-    });
-
-    final listaFiltrada = listaOrdenada.where((g) {
-      final status = statusGestanteNormalizado(g);
-
-      if (filtroStatusGestante == 'Ativas') {
-        if (!gestanteEstaAtiva(g)) {
-          return false;
-        }
-      } else if (filtroStatusGestante != 'Todas') {
-        if (status != filtroStatusGestante) {
-          return false;
-        }
-      }
-
-      if (filtroDashboardPacientes != null &&
-          !filtroDashboardPacientes!.corresponde(g)) {
-        return false;
-      }
-
-      if (filtroPlanoGestante != 'Todos') {
-        final plano = (g['plano'] ?? '').trim();
-        if (plano != filtroPlanoGestante) {
-          return false;
-        }
-      }
-
-      return gestanteApareceNaBusca(g, busca);
-    }).toList();
+    final filtroDashboard = filtroDashboardPacientes;
+    final chaveCache = <Object?>[
+      _versaoDadosDashboard,
+      filtroStatusGestante,
+      filtroPlanoGestante,
+      busca.toLowerCase(),
+      filtroDashboard?.tipo,
+      filtroDashboard?.titulo,
+      filtroDashboard?.valor,
+      filtroDashboard?.mes,
+      filtroDashboard?.ano,
+    ].join('|');
+    if (_chaveListaPacientesCache != chaveCache) {
+      _listaPacientesCache = ordenarEFiltrarPacientes(
+        pacientes: gestantes,
+        statusSelecionado: filtroStatusGestante,
+        planoSelecionado: filtroPlanoGestante,
+        busca: busca,
+        filtroDashboard: filtroDashboard,
+      );
+      _chaveListaPacientesCache = chaveCache;
+    }
+    final listaFiltrada = _listaPacientesCache;
 
     if (listaFiltrada.isEmpty) {
       return const Text('Nenhum paciente encontrado com esse filtro.');
     }
 
-    return Column(
-      children: listaFiltrada.map((g) {
-        final igAtual = calcularIdadeGestacional(g['dpp'] ?? '');
-        final usuarioEnfermeira = tipoEhProfissionalClinica(widget.tipoUsuario);
-        final podeVerDadosFinanceiros = !usuarioEnfermeira;
+    final listaVisivel = pacientesVisiveis(
+      listaFiltrada,
+      _limitePacientesVisiveis,
+    );
+    final possuiMais = listaVisivel.length < listaFiltrada.length;
 
-        return NatusCardGestanteLista(
-          gestante: g,
-          igAtual: igAtual,
-          statusNormalizado: statusGestanteNormalizado(g),
-          mostrarFinanceiro: podeVerDadosFinanceiros,
-          onAbrir: () {
-            setState(() {
-              gestanteSelecionada = g;
-            });
-          },
-          onExcluir: usuarioEhAdmin()
-              ? () => confirmarExcluirGestante(g)
-              : null,
-        );
-      }).toList(),
+    return Column(
+      children: [
+        ...listaVisivel.map((g) {
+          final igAtual = calcularIdadeGestacional(g['dpp'] ?? '');
+          final usuarioEnfermeira = tipoEhProfissionalClinica(
+            widget.tipoUsuario,
+          );
+          final podeVerDadosFinanceiros = !usuarioEnfermeira;
+
+          return NatusCardGestanteLista(
+            gestante: g,
+            igAtual: igAtual,
+            statusNormalizado: statusGestanteNormalizado(g),
+            mostrarFinanceiro: podeVerDadosFinanceiros,
+            onAbrir: () {
+              setState(() {
+                gestanteSelecionada = g;
+              });
+            },
+            onExcluir: usuarioEhAdmin()
+                ? () => confirmarExcluirGestante(g)
+                : null,
+          );
+        }),
+        if (possuiMais)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _limitePacientesVisiveis = proximoLimitePacientes(
+                    _limitePacientesVisiveis,
+                    listaFiltrada.length,
+                  );
+                });
+              },
+              icon: const Icon(Icons.expand_more_rounded),
+              label: Text(
+                'Mostrar mais (${listaFiltrada.length - listaVisivel.length})',
+              ),
+            ),
+          ),
+      ],
     );
   }
 
