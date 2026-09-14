@@ -32,6 +32,7 @@ import 'gestantes/maternidades_regras.dart' as mregras;
 import 'kpis/kpis_calculos.dart' as kpis;
 import 'dashboard/dashboard_cards_natus.dart';
 import 'dashboard/dashboard_clinica_resumo.dart';
+import 'dashboard/dashboard_dados_calculados.dart';
 import 'dashboard/dashboard_destino_filtros.dart';
 import 'dados/natus_data_source.dart' as dados;
 import 'exames/exame_arquivo.dart';
@@ -155,7 +156,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final Set<String> _modulosSecundariosCarregando = <String>{};
   bool _agrupandoCarregamentoInicial = false;
   int _versaoDadosDashboard = 0;
-  _DadosDashboardCalculados? _dadosDashboardCache;
+  DashboardDadosCalculados? _dadosDashboardCache;
   bool alertaPushAberto = false;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   notificacoesSubscription;
@@ -18238,7 +18239,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     );
   }
 
-  _DadosDashboardCalculados _obterDadosDashboard() {
+  DashboardDadosCalculados _obterDadosDashboard() {
     final cache = _dadosDashboardCache;
     if (cache != null &&
         cache.versao == _versaoDadosDashboard &&
@@ -18250,7 +18251,16 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     final pacientesObstetricia = gestantes
         .where(pacienteTemModuloObstetrico)
         .toList(growable: false);
-    final calculados = _DadosDashboardCalculados(
+    final crescimentoNascimentos = calcularCrescimentoNascimentos(
+      pacientesObstetricia,
+    );
+    final maternidades =
+        mregras
+            .contarPacientesPorMaternidade(pacientesObstetricia)
+            .entries
+            .toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+    final calculados = DashboardDadosCalculados(
       versao: _versaoDadosDashboard,
       mes: mesSelecionado,
       ano: anoSelecionado,
@@ -18267,6 +18277,34 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       parcelasAtrasadas: contarParcelasAtrasadasMesSelecionado(),
       percentualInadimplencia: calcularPercentualInadimplencia(),
       pacientesProximosDpp: contarGestantesProximasDpp(pacientesObstetricia),
+      amamentacao: contarAmamentacao(pacientesObstetricia),
+      crescimentoNascimentos: crescimentoNascimentos,
+      nascimentosPorMes: {
+        for (final ano in crescimentoNascimentos.anosDisponiveis)
+          ano: contarBebesPorMes(ano.toString(), pacientesObstetricia),
+      },
+      viaNascimento: contarViaNascimento(pacientesObstetricia),
+      riscoGestacional: contarRiscoGestacional(pacientesObstetricia),
+      diabetesGestacional: contarDiabetesGestacional(pacientesObstetricia),
+      maternidades: maternidades,
+      gestantesNoPeriodo: contarGestantesPorStatusNoPeriodoDpp(
+        'Gestante',
+        pacientesObstetricia,
+      ),
+      puerperasNoPeriodo: contarGestantesPorStatusNoPeriodoDpp(
+        'Puérpera',
+        pacientesObstetricia,
+      ),
+      encerradosNoPeriodo: contarEncerradasOuHistoricoNoPeriodoDpp(
+        pacientesObstetricia,
+      ),
+      nascimentosNoPeriodo: contarBebesNoPeriodoSelecionado(
+        pacientesObstetricia,
+      ),
+      nascimentosNoAno: contarBebesPorAno(
+        anoSelecionado.toString(),
+        pacientesObstetricia,
+      ),
     );
     _dadosDashboardCache = calculados;
     return calculados;
@@ -18274,7 +18312,6 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
   Widget telaDashboard() {
     final dadosDashboard = _obterDadosDashboard();
-    final pacientesObstetricia = dadosDashboard.pacientesObstetricia;
     final resumo = dadosDashboard.resumo;
     final pacientesPorPlano = dadosDashboard.pacientesPorPlano;
     final recebidoMes = dadosDashboard.recebidoMes;
@@ -18537,9 +18574,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               icone: Icons.pregnant_woman_rounded,
               inicialmenteAberto: widget.tipoUsuario == 'obstetra',
               conteudoBuilder: (_) => Column(
-                children: _conteudoModuloObstetriciaDashboard(
-                  pacientesObstetricia,
-                ),
+                children: _conteudoModuloObstetriciaDashboard(dadosDashboard),
               ),
             ),
         ],
@@ -18548,21 +18583,13 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   List<Widget> _conteudoModuloObstetriciaDashboard(
-    List<Map<String, String>> pacientesObstetricia,
+    DashboardDadosCalculados dadosDashboard,
   ) {
-    final amamentacaoDados = contarAmamentacao(pacientesObstetricia);
-    final crescimentoNascimentos = calcularCrescimentoNascimentos(
-      pacientesObstetricia,
-    );
-    final viaNascimentoDados = contarViaNascimento(pacientesObstetricia);
-    final riscoDados = contarRiscoGestacional(pacientesObstetricia);
-    final dgDados = contarDiabetesGestacional(pacientesObstetricia);
-    final maternidades =
-        mregras
-            .contarPacientesPorMaternidade(pacientesObstetricia)
-            .entries
-            .toList()
-          ..sort((a, b) => b.value.compareTo(a.value));
+    final pacientesObstetricia = dadosDashboard.pacientesObstetricia;
+    final crescimentoNascimentos = dadosDashboard.crescimentoNascimentos;
+    final viaNascimentoDados = dadosDashboard.viaNascimento;
+    final riscoDados = dadosDashboard.riscoGestacional;
+    final dgDados = dadosDashboard.diabetesGestacional;
 
     return [
       blocoDashboard('Status do acompanhamento obstétrico', [
@@ -18570,10 +18597,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           children: [
             cardContagemResumo(
               'DPP no período',
-              contarGestantesPorStatusNoPeriodoDpp(
-                'Gestante',
-                pacientesObstetricia,
-              ),
+              dadosDashboard.gestantesNoPeriodo,
               NatusApp.marsala,
               Icons.event_rounded,
               onTap: () => abrirPacientesDoDashboard(
@@ -18588,10 +18612,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             cardContagemResumo(
               'Pós-parto no período',
-              contarGestantesPorStatusNoPeriodoDpp(
-                'Puérpera',
-                pacientesObstetricia,
-              ),
+              dadosDashboard.puerperasNoPeriodo,
               Colors.orange,
               Icons.child_friendly_rounded,
               onTap: () => abrirPacientesDoDashboard(
@@ -18607,7 +18628,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             cardContagemResumo(
               'Encerrados no período',
-              contarEncerradasOuHistoricoNoPeriodoDpp(pacientesObstetricia),
+              dadosDashboard.encerradosNoPeriodo,
               Colors.green,
               Icons.task_alt_rounded,
               onTap: () => abrirPacientesDoDashboard(
@@ -18705,7 +18726,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
           children: [
             cardContagemResumo(
               'Nascimentos no período',
-              contarBebesNoPeriodoSelecionado(pacientesObstetricia),
+              dadosDashboard.nascimentosNoPeriodo,
               Colors.purple,
               Icons.baby_changing_station_rounded,
               onTap: () => abrirPacientesDoDashboard(
@@ -18720,10 +18741,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             ),
             cardContagemResumo(
               'Nascimentos em $anoSelecionado',
-              contarBebesPorAno(
-                anoSelecionado.toString(),
-                pacientesObstetricia,
-              ),
+              dadosDashboard.nascimentosNoAno,
               NatusApp.vinho,
               Icons.child_care_rounded,
               onTap: () => abrirPacientesDoDashboard(
@@ -18748,14 +18766,11 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         const SizedBox(height: 22),
         NatusGraficoLinhaCrescimento(
           anos: crescimentoNascimentos.anosDisponiveis,
-          dadosPorAno: {
-            for (final ano in crescimentoNascimentos.anosDisponiveis)
-              ano: contarBebesPorMes(ano.toString(), pacientesObstetricia),
-          },
+          dadosPorAno: dadosDashboard.nascimentosPorMes,
         ),
       ]),
       blocoDashboard('Amamentação', [
-        NatusGraficoAmamentacao(amamentacaoDados),
+        NatusGraficoAmamentacao(dadosDashboard.amamentacao),
       ]),
       blocoDashboard('Partos e cesáreas', [
         NatusCardsResumoLayout(
@@ -18834,7 +18849,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         ]),
       blocoDashboard('Top 5 maternidades mais atendidas', [
         podiumTop5(
-          dados: maternidades.take(5).toList(),
+          dados: dadosDashboard.maternidades.take(5).toList(),
           icone: Icons.local_hospital_outlined,
           cor: NatusApp.marsalaSuave,
           onSelecionar: (nome) => abrirPacientesDoDashboard(
@@ -18852,34 +18867,4 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   void mostrarMensagem(String texto) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
   }
-}
-
-class _DadosDashboardCalculados {
-  const _DadosDashboardCalculados({
-    required this.versao,
-    required this.mes,
-    required this.ano,
-    required this.pacientesObstetricia,
-    required this.resumo,
-    required this.pacientesPorPlano,
-    required this.recebidoMes,
-    required this.aReceberMes,
-    required this.atrasadoMes,
-    required this.parcelasAtrasadas,
-    required this.percentualInadimplencia,
-    required this.pacientesProximosDpp,
-  });
-
-  final int versao;
-  final int mes;
-  final int ano;
-  final List<Map<String, String>> pacientesObstetricia;
-  final DashboardClinicaResumo resumo;
-  final List<MapEntry<String, int>> pacientesPorPlano;
-  final double recebidoMes;
-  final double aReceberMes;
-  final double atrasadoMes;
-  final int parcelasAtrasadas;
-  final double percentualInadimplencia;
-  final int pacientesProximosDpp;
 }
