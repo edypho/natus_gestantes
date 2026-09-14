@@ -43,6 +43,7 @@ import 'gestantes/card_gestante_lista.dart';
 import 'financeiro/parcela_item.dart';
 import 'auth/tela_login.dart';
 import 'auth/acesso_paciente_mensagem.dart';
+import 'auth/envio_acesso_guard.dart';
 import 'auth/autenticacao_mensagens.dart';
 import 'features/contratos/contratos.dart';
 import 'navigation/menu_inferior_coracao.dart';
@@ -2755,6 +2756,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   final novoEmailController = TextEditingController();
   final novaSenhaController = TextEditingController();
   final _sessaoCriacaoUsuario = SessaoIdempotencia();
+  final _envioAcessoGuard = EnvioAcessoGuard();
 
   String novoTipoUsuario = 'gestante';
   String? gestanteSelecionadaLogin;
@@ -8634,14 +8636,21 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
   }
 
   Future<void> enviarAcessoGestante(Map<String, String> g) async {
+    final idGestante = g['id'] ?? '';
+
+    if (idGestante.isEmpty) {
+      mostrarMensagem('ID do paciente não encontrado.');
+      return;
+    }
+
+    if (!_envioAcessoGuard.iniciar(idGestante)) {
+      mostrarMensagem('O acesso deste paciente já está sendo preparado.');
+      return;
+    }
+
+    if (mounted) setState(() {});
+
     try {
-      final idGestante = g['id'] ?? '';
-
-      if (idGestante.isEmpty) {
-        mostrarMensagem('ID do paciente não encontrado.');
-        return;
-      }
-
       final doc = await firestore.collection('gestantes').doc(idGestante).get();
 
       if (!doc.exists) {
@@ -8670,7 +8679,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
-      mostrarMensagem('Solicitando redefinição de senha...');
+      mostrarMensagem('Preparando o acesso do paciente...');
 
       final uidsVinculados = <String>{
         dados['uidPaciente']?.toString().trim() ?? '',
@@ -8742,7 +8751,15 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         return;
       }
 
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      final canalAberto = await launchUrl(
+        url,
+        mode: LaunchMode.externalApplication,
+      );
+      mostrarMensagem(
+        canalAberto
+            ? 'E-mail enviado. O WhatsApp foi aberto para avisar o paciente.'
+            : 'E-mail enviado, mas não foi possível abrir o WhatsApp.',
+      );
     } on FirebaseFunctionsException catch (e) {
       mostrarMensagem(
         mensagemErroFunctionsSeguro(
@@ -8756,6 +8773,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     } catch (e) {
       logErroSeguro('Erro ao solicitar redefinicao de senha.', e);
       mostrarMensagem('Erro ao solicitar redefinição de senha.');
+    } finally {
+      _envioAcessoGuard.concluir(idGestante);
+      if (mounted) setState(() {});
     }
   }
 
@@ -8857,11 +8877,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
 
           if (usuarioEhAdmin() || widget.escopoTenant.ehPaciente)
             ElevatedButton.icon(
-              onPressed: () {
-                enviarAcessoGestante(g);
-              },
-              icon: const Icon(Icons.lock_reset),
-              label: const Text('Reenviar acesso do paciente'),
+              onPressed: _envioAcessoGuard.emAndamento(g['id'] ?? '')
+                  ? null
+                  : () => enviarAcessoGestante(g),
+              icon: _envioAcessoGuard.emAndamento(g['id'] ?? '')
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.lock_reset),
+              label: Text(
+                _envioAcessoGuard.emAndamento(g['id'] ?? '')
+                    ? 'Preparando acesso...'
+                    : 'Reenviar acesso do paciente',
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: NatusApp.vinho,
                 foregroundColor: (NatusApp.escuro
@@ -9141,9 +9170,20 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               ),
               if (usuarioEhAdmin() || widget.escopoTenant.ehPaciente)
                 ElevatedButton.icon(
-                  onPressed: () => enviarAcessoGestante(g),
-                  icon: const Icon(Icons.lock_reset),
-                  label: const Text('Reenviar acesso'),
+                  onPressed: _envioAcessoGuard.emAndamento(g['id'] ?? '')
+                      ? null
+                      : () => enviarAcessoGestante(g),
+                  icon: _envioAcessoGuard.emAndamento(g['id'] ?? '')
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.lock_reset),
+                  label: Text(
+                    _envioAcessoGuard.emAndamento(g['id'] ?? '')
+                        ? 'Preparando acesso...'
+                        : 'Reenviar acesso',
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NatusApp.rose,
                     foregroundColor: NatusApp.vinho,
